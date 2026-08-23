@@ -223,6 +223,22 @@ function Get-PpMcpCodexConfigPath {
     return Join-Path $env:USERPROFILE '.codex\config.toml'
 }
 
+function Test-PpMcpCodexRegistration {
+    if (-not (Get-Command codex -ErrorAction SilentlyContinue)) { return $false }
+    $previousErrorActionPreference = $ErrorActionPreference
+    $nativePreference = Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue
+    $previousNativePreference = if ($nativePreference) { $nativePreference.Value } else { $null }
+    try {
+        $ErrorActionPreference = 'SilentlyContinue'
+        if ($nativePreference) { $PSNativeCommandUseErrorActionPreference = $false }
+        $null = & codex mcp get $script:PpMcpRegistration 2>$null
+        return $LASTEXITCODE -eq 0
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+        if ($nativePreference) { $PSNativeCommandUseErrorActionPreference = $previousNativePreference }
+    }
+}
+
 function Set-PpMcpCodexRegistration {
     param(
         [Parameter(Mandatory = $true)][string]$Launcher,
@@ -235,8 +251,7 @@ function Set-PpMcpCodexRegistration {
     $hadConfig = $false
     if ($configPath -and (Test-Path -LiteralPath $configPath -PathType Leaf)) { Copy-Item -LiteralPath $configPath -Destination $backup -Force; $hadConfig = $true }
     try {
-        $null = & codex mcp get $script:PpMcpRegistration 2>$null
-        if ($LASTEXITCODE -eq 0) { Invoke-PpMcpCommand -FilePath 'codex' -Arguments @('mcp', 'remove', $script:PpMcpRegistration) -FailureMessage 'Could not replace the existing Premiere MCP registration' }
+        if (Test-PpMcpCodexRegistration) { Invoke-PpMcpCommand -FilePath 'codex' -Arguments @('mcp', 'remove', $script:PpMcpRegistration) -FailureMessage 'Could not replace the existing Premiere MCP registration' }
         Invoke-PpMcpCommand -FilePath 'codex' -Arguments @('mcp', 'add', '--env', "PREMIERE_MCP_INSTALL_ROOT=$InstallRoot", $script:PpMcpRegistration, '--', $Launcher, '--launch-mcp', $Bundle) -FailureMessage 'Codex MCP registration failed'
     } catch {
         if ($configPath) {

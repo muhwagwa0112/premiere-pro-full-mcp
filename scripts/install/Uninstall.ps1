@@ -23,8 +23,7 @@ foreach ($name in $targets.Keys) {
     if (Test-Path -LiteralPath $target) { New-Item -ItemType Directory -Path $archiveRoot -Force | Out-Null; Move-Item -LiteralPath $target -Destination (Join-Path $archiveRoot $name) }
 }
 if (-not $KeepCodexRegistration -and (Get-Command codex -ErrorAction SilentlyContinue)) {
-    $null = & codex mcp get $script:PpMcpRegistration 2>$null
-    if ($LASTEXITCODE -eq 0) { Invoke-PpMcpCommand -FilePath 'codex' -Arguments @('mcp', 'remove', $script:PpMcpRegistration) -FailureMessage 'Codex MCP removal failed' }
+    if (Test-PpMcpCodexRegistration) { Invoke-PpMcpCommand -FilePath 'codex' -Arguments @('mcp', 'remove', $script:PpMcpRegistration) -FailureMessage 'Codex MCP removal failed' }
 }
 if ($RemoveUserData) {
     foreach ($name in @('cep', 'operations', 'approvals', 'workspace')) {
