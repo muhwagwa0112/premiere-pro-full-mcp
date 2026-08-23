@@ -102,6 +102,7 @@ await copyPath("bundle");
 await copyPath("generated");
 await copyPath("uxp-plugin");
 await copyPath("cep-plugin");
+await copyPath("THIRD-PARTY-LICENSES");
 await cp(nativePublishRoot, join(stageRoot, "native", "win-x64"), { recursive: true });
 
 for (const sourceDirectory of ["src", "scripts", "windows-ui-agent/tests"]) {

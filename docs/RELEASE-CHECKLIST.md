@@ -4,7 +4,7 @@
 
 - [ ] The owner selects a project license and adds `LICENSE`; do not infer a license from dependencies.
 - [ ] The owner supplies the public Git remote and enables GitHub Security Advisories or another private reporting channel.
-- [ ] Review `THIRD-PARTY-NOTICES.md` and `SBOM.spdx.json` after `npm run compliance:generate`.
+- [ ] Review `THIRD-PARTY-NOTICES.md`, `THIRD-PARTY-LICENSES/`, and `SBOM.spdx.json` after `npm run compliance:generate`.
 - [ ] Run `npm ci`, `npm run inventory:adobe`, `npm run check`, `npm run test:coverage`, and the native .NET tests.
 - [ ] With the isolated Premiere fixture open and UXP loaded, run `npm run validate:uxp-full -- --ledger <outside-repository-path>`.
 - [ ] Run MCP and security smoke tests and confirm no secret or absolute user path is present in tracked files or the release stage.

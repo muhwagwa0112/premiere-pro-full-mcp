@@ -30,4 +30,4 @@ jobs:
       - name: Verify generated compliance files are current
         shell: pwsh
         run: |
-          git diff --exit-code -- THIRD-PARTY-NOTICES.md SBOM.spdx.json
+          git diff --exit-code -- THIRD-PARTY-NOTICES.md THIRD-PARTY-LICENSES SBOM.spdx.json
