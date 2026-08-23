@@ -33,7 +33,7 @@ The release build refuses a dirty worktree, mismatched private/public key, wrong
 - `%LOCALAPPDATA%\PremiereMCP\runtime\node` — release-bundled, signed-ledger-verified Node.js runtime
 - `%LOCALAPPDATA%\PremiereMCP\app\runtime-bootstrap.json` — current-user ACL-protected pairing file selected once by the installed CCX
 - `%LOCALAPPDATA%\PremiereMCP\app\tools` — Doctor, Update, Uninstall, public release key, and CCX
-- `%APPDATA%\Adobe\CEP\extensions\com.codex.premiere-pro-full-mcp.cep` — CEP/QE compatibility bridge
+- `%APPDATA%\Adobe\CEP\extensions\com.codex.premiere-pro-full-mcp.cep` — Adobe ZXP-signed CEP/QE compatibility bridge; installer does not enable CEP developer mode
 
 Existing active targets are moved to timestamped backups before activation. Failure restores the previous targets and Codex configuration. Runtime bootstrap/session data is generated only after installation and is never shipped.
 

@@ -30,7 +30,7 @@ Requirements: Windows 10/11 x64, Premiere Pro 26.3 or later, Creative Cloud Desk
    powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\PremiereMCP\app\tools\Doctor.ps1" -CheckLive
    ```
 
-The executables and PowerShell scripts are not Authenticode-signed. Windows may show SmartScreen warnings. The release uses a separate RSA-signed update manifest, exact asset size/SHA-256 bindings, and an in-package SHA-256 manifest. The initial download still depends on GitHub HTTPS and the published checksum; do not bypass a warning if the checksum or source is unexpected.
+The executables and PowerShell scripts are not Authenticode-signed. Windows may show SmartScreen warnings. The release uses a separate RSA-signed update manifest, exact asset size/SHA-256 bindings, and an in-package SHA-256 manifest. The bundled CEP compatibility bridge carries an Adobe ZXP package signature, so installation does not enable CEP developer mode. The initial download still depends on GitHub HTTPS and the published checksum; do not bypass a warning if the checksum or source is unexpected.
 
 ### Update and uninstall
 
@@ -93,6 +93,8 @@ Release builds require a clean Git worktree and the dedicated private signing ke
    ```
 
 설치기는 패키지 전 파일의 해시를 검증하고 현재 사용자 영역만 변경하며, 기존 설치와 Codex 설정을 실패 시 복원합니다. CCX 설치를 나중에 하려면 `-SkipCcxLaunch`, Codex 등록을 생략하려면 `-SkipCodexRegistration`을 사용합니다.
+
+CEP 호환 브리지는 Adobe ZXP 방식으로 별도 서명되어 있으며, 설치기는 CEP 개발자 모드를 활성화하지 않습니다. EXE와 PowerShell 스크립트에는 Authenticode 서명이 없으므로 게시된 SHA-256과 RSA 릴리스 서명을 확인해야 합니다.
 
 ### 보안 및 지원 범위
 

@@ -27,6 +27,9 @@ Release updates are authenticated by a Premiere-specific RSA public key committe
 The matching private key is held only under `%LOCALAPPDATA%\PremiereMCP` with a current-user-only ACL;
 it is not shared with the Photoshop project or uploaded to GitHub Actions. The signed manifest binds
 the repository, tag, version, commit, asset names, sizes, SHA-256 values, platform, and architecture.
+The CEP compatibility bridge is separately signed as an Adobe ZXP extension. Its signing certificate
+and password remain in the same current-user-only local key store; only public signature metadata is
+packaged. The installer never enables Adobe CEP developer mode.
 The Windows executable and PowerShell scripts are not Authenticode-signed in v0.2.0.
 
 All processes running as the current Windows user, plus the integrity of the repository used to build

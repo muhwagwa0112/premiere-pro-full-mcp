@@ -53,7 +53,7 @@ try {
     $top = @(Get-ChildItem -LiteralPath $expanded -Force)
     if ($top.Count -ne 1 -or -not $top[0].PSIsContainer -or $top[0].Name -ne "premiere-pro-full-mcp-$version") { throw 'Release archive top-level layout is invalid.' }
     $bundle = $top[0].FullName
-    foreach ($required in @('Install.ps1', 'Doctor.ps1', 'Update.ps1', 'Uninstall.ps1', 'Common.ps1', 'release-signing-public.xml', 'MANIFEST.sha256', 'MANIFEST.sha256.sig', 'release-manifest.json', 'LICENSE', 'SBOM.spdx.json', 'THIRD-PARTY-NOTICES.md', 'payload\native\win-x64\PremiereMcp.WindowsUiAgent.exe', 'payload\bundle\premiere-mcp.bundle.mjs', 'payload\runtime\node\node.exe', 'payload\integrity\runtime-integrity.json', 'payload\integrity\runtime-integrity.json.sig', 'payload\uxp-plugin\manifest.json', 'payload\cep-plugin\CSXS\manifest.xml')) {
+    foreach ($required in @('Install.ps1', 'Doctor.ps1', 'Update.ps1', 'Uninstall.ps1', 'Common.ps1', 'release-signing-public.xml', 'MANIFEST.sha256', 'MANIFEST.sha256.sig', 'release-manifest.json', 'LICENSE', 'SBOM.spdx.json', 'THIRD-PARTY-NOTICES.md', 'payload\native\win-x64\PremiereMcp.WindowsUiAgent.exe', 'payload\bundle\premiere-mcp.bundle.mjs', 'payload\runtime\node\node.exe', 'payload\integrity\runtime-integrity.json', 'payload\integrity\runtime-integrity.json.sig', 'payload\uxp-plugin\manifest.json', 'payload\cep-plugin\CSXS\manifest.xml', 'payload\cep-plugin\META-INF\signatures.xml', 'payload\cep-plugin\mimetype')) {
         if (-not (Test-Path -LiteralPath (Join-Path $bundle $required))) { throw "Release payload is missing: $required" }
     }
     $bundledCcx = Join-Path $bundle "premiere-pro-full-mcp-v$version.ccx"

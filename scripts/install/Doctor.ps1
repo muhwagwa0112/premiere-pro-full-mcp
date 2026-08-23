@@ -31,7 +31,11 @@ else {
     }
     Add-Check 'signed-runtime-integrity' $runtimeVerified 'RSA-signed bundled Node.js and MCP bundle hashes'
 }
-Add-Check 'cep-extension' ([bool](Test-Path -LiteralPath (Join-Path $resolvedCepRoot 'CSXS\manifest.xml') -PathType Leaf)) $resolvedCepRoot
+$cepManifestPresent = Test-Path -LiteralPath (Join-Path $resolvedCepRoot 'CSXS\manifest.xml') -PathType Leaf
+$cepSignaturePresent = (Test-Path -LiteralPath (Join-Path $resolvedCepRoot 'META-INF\signatures.xml') -PathType Leaf) -and
+                       (Test-Path -LiteralPath (Join-Path $resolvedCepRoot 'mimetype') -PathType Leaf)
+Add-Check 'cep-extension' ([bool]$cepManifestPresent) $resolvedCepRoot
+Add-Check 'cep-package-signature' ([bool]$cepSignaturePresent) 'Adobe ZXP signature metadata is installed; Premiere validates it before loading CEP.'
 if ($SkipPremiereCheck) { Add-Check 'premiere-pro' $true 'Skipped for isolated package verification.' $false }
 else {
     $premierePaths = @(@(
