@@ -15,11 +15,17 @@ interface AuthMessage {
   apiFingerprint: string;
 }
 
+interface FileSnapshot {
+  size: number;
+  mtimeMs: number;
+}
+
 interface PendingRequest {
   resolve: (response: BridgeResponse) => void;
   reject: (error: Error) => void;
   timer: NodeJS.Timeout;
   request: BridgeRequest;
+  outputBaseline: FileSnapshot | null;
 }
 
 function constantTimeEqual(left: string, right: string): boolean {
@@ -28,14 +34,27 @@ function constantTimeEqual(left: string, right: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-async function waitForNonEmptyFile(path: string, timeoutMs = 5_000): Promise<number | null> {
+async function fileSnapshot(path: string): Promise<FileSnapshot | null> {
+  try {
+    const file = await stat(path);
+    return file.isFile() ? { size: file.size, mtimeMs: file.mtimeMs } : null;
+  } catch {
+    return null;
+  }
+}
+
+async function waitForChangedStableFile(path: string, baseline: FileSnapshot | null, timeoutMs = 5_000, stableObservations = 1): Promise<number | null> {
   const deadline = Date.now() + timeoutMs;
+  let previous: FileSnapshot | null = null;
+  let stableCount = 0;
   do {
-    try {
-      const file = await stat(path);
-      if (file.isFile() && file.size > 0) return file.size;
-    } catch {}
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    const current = await fileSnapshot(path);
+    const changed = current && current.size > 0 && (!baseline || current.size !== baseline.size || current.mtimeMs !== baseline.mtimeMs);
+    if (changed && previous && current.size === previous.size && current.mtimeMs === previous.mtimeMs) stableCount += 1;
+    else stableCount = changed ? 1 : 0;
+    if (changed && stableCount >= stableObservations) return current.size;
+    previous = changed ? current : null;
+    await new Promise((resolve) => setTimeout(resolve, stableObservations > 1 ? 500 : 100));
   } while (Date.now() < deadline);
   return null;
 }
@@ -48,6 +67,7 @@ export class UxpWebSocketAdapter implements BackendAdapter {
   #server: WebSocketServer | null = null;
   #socket: WebSocket | null = null;
   #hostVersion: string | null = null;
+  #sequenceExportInFlight: string | null = null;
   #capabilities = new Set<string>();
   #apiFingerprint: string | null = null;
   readonly #unauthenticated = new Set<WebSocket>();
@@ -87,21 +107,36 @@ export class UxpWebSocketAdapter implements BackendAdapter {
     const availability = await this.availability();
     if (!availability.available || !this.#socket) return this.failure(request.requestId, "UXP_UNAVAILABLE", availability.reason ?? "UXP unavailable", true);
     if (!this.#capabilities.has(request.operation)) return this.failure(request.requestId, "UXP_CAPABILITY_UNAVAILABLE", `Connected host did not advertise ${request.operation}`, false);
-    return new Promise<BridgeResponse>((resolve, reject) => {
-      const timeoutMs = request.operation === "export.sequence" ? 30 * 60_000 : 30_000;
-      const timer = setTimeout(() => {
-        this.#pending.delete(request.requestId);
-        resolve(this.failure(request.requestId, "UXP_TIMEOUT", "Premiere UXP command timed out; it was not retried", true));
-      }, timeoutMs);
-      this.#pending.set(request.requestId, { resolve, reject, timer, request });
-      try {
-        this.#socket?.send(JSON.stringify({ type: "command", ...request }));
-      } catch (error) {
-        clearTimeout(timer);
-        this.#pending.delete(request.requestId);
-        reject(error as Error);
-      }
-    });
+    if (request.operation === "export.sequence" && this.#sequenceExportInFlight) {
+      return this.failure(request.requestId, "UXP_SEQUENCE_EXPORT_BUSY", "Another sequence export is still being verified", false);
+    }
+    const outputPath = (request.operation === "export.frame" || request.operation === "export.sequence") && typeof request.args.outputPath === "string"
+      ? request.args.outputPath
+      : null;
+    const outputBaseline = outputPath ? await fileSnapshot(outputPath) : null;
+    if (request.operation === "export.sequence" && request.args.overwrite !== true && outputBaseline) {
+      return this.failure(request.requestId, "UXP_EXPORT_OUTPUT_EXISTS", "Sequence export refused to overwrite an existing output file", false);
+    }
+    if (request.operation === "export.sequence") this.#sequenceExportInFlight = request.requestId;
+    try {
+      return await new Promise<BridgeResponse>((resolve, reject) => {
+        const timeoutMs = request.operation === "export.sequence" ? 30 * 60_000 : 30_000;
+        const timer = setTimeout(() => {
+          this.#pending.delete(request.requestId);
+          resolve(this.failure(request.requestId, "UXP_TIMEOUT", "Premiere UXP command timed out; it was not retried", true));
+        }, timeoutMs);
+        this.#pending.set(request.requestId, { resolve, reject, timer, request, outputBaseline });
+        try {
+          this.#socket?.send(JSON.stringify({ type: "command", ...request }));
+        } catch (error) {
+          clearTimeout(timer);
+          this.#pending.delete(request.requestId);
+          reject(error as Error);
+        }
+      });
+    } finally {
+      if (this.#sequenceExportInFlight === request.requestId) this.#sequenceExportInFlight = null;
+    }
   }
 
   async close(): Promise<void> {
@@ -186,10 +221,11 @@ export class UxpWebSocketAdapter implements BackendAdapter {
         if (typeof outputPath !== "string") {
           resolved = this.failure(response.requestId, "UXP_EXPORT_PATH_INVALID", "Export output path is unavailable for postcondition verification", false);
         } else {
-          const bytes = await waitForNonEmptyFile(outputPath, pending.request.operation === "export.sequence" ? 60_000 : 5_000);
+          const isSequence = pending.request.operation === "export.sequence";
+          const bytes = await waitForChangedStableFile(outputPath, pending.outputBaseline, isSequence ? 30 * 60_000 : 5_000, isSequence ? 20 : 1);
           resolved = bytes === null
-            ? this.failure(response.requestId, "UXP_EXPORT_FILE_NOT_VERIFIED", "Premiere confirmed export but no non-empty output file was observed", false)
-            : { ...resolved, createdFiles: [{ name: outputPath, verified: true }], verification: { outcome: "verified", method: `Premiere export response and non-empty file readback (${bytes} bytes)` } };
+            ? this.failure(response.requestId, "UXP_EXPORT_FILE_NOT_VERIFIED", "Premiere accepted export but no changed stable output file was observed", isSequence)
+            : { ...resolved, createdFiles: [{ name: outputPath, verified: true }], verification: { outcome: "verified", method: `Authenticated Premiere export dispatch and changed stable file readback (${bytes} bytes)` } };
         }
       }
       pending.resolve(resolved);

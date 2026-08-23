@@ -508,9 +508,13 @@ async function execute(operation, args, expectedRevision) {
     }
     const encoder = ppro.EncoderManager.getManager();
     if (!encoder || typeof encoder.exportSequence !== "function") throw Object.assign(new Error("Premiere EncoderManager is unavailable"), { code: "UXP_ENCODER_UNAVAILABLE" });
-    const exported = await encoder.exportSequence(context.sequence, ppro.Constants.ExportType.IMMEDIATELY, outputPath, presetPath, true);
-    if (!exported) throw Object.assign(new Error("Premiere did not confirm sequence export"), { code: "UXP_SEQUENCE_EXPORT_NOT_CONFIRMED" });
-    return { beforeRevision, afterRevision: beforeRevision, verification: { outcome: "committed_unverified", method: "EncoderManager.exportSequence returned true; server verifies the output file" }, createdFiles: [{ name: outputPath, verified: false }], result: { exported: true, outputPath } };
+    const exportPromise = encoder.exportSequence(context.sequence, ppro.Constants.ExportType.IMMEDIATELY, outputPath, presetPath, true);
+    if (exportPromise === false) throw Object.assign(new Error("Premiere did not accept sequence export"), { code: "UXP_SEQUENCE_EXPORT_NOT_ACCEPTED" });
+    // Premiere 26.3.2 can finish writing a valid file while this host Promise
+    // remains pending. Do not block the authenticated bridge on that Promise;
+    // the Node side proves a new, stable output file before reporting success.
+    Promise.resolve(exportPromise).catch(() => {});
+    return { beforeRevision, afterRevision: beforeRevision, verification: { outcome: "committed_unverified", method: "EncoderManager.exportSequence dispatch accepted; server verifies a changed stable output file" }, createdFiles: [{ name: outputPath, verified: false }], result: { initiated: true, outputPath } };
   }
   throw Object.assign(new Error(`Unsupported UXP operation: ${operation}`), { code: "UXP_OPERATION_UNSUPPORTED" });
 }

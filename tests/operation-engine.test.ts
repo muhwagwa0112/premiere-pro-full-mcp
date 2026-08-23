@@ -107,6 +107,27 @@ describe("operation routing", () => {
     await expect(stat(join(approvalDirectory, `approved-${preview.approvalId}.json`))).resolves.toBeDefined();
   });
 
+  it("rejects a non-overwrite sequence export before confirmation or dispatch when the output exists", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ppmcp-existing-export-"));
+    const outputPath = join(root, "existing.mp4");
+    const presetPath = join(root, "preset.epr");
+    await writeFile(outputPath, "existing", "utf8");
+    await writeFile(presetPath, "preset", "utf8");
+    const uxp = new FakeAdapter("uxp", true, success);
+    const ledgerDirectory = await mkdtemp(join(tmpdir(), "ppmcp-ledger-"));
+    const approvalDirectory = await mkdtemp(join(tmpdir(), "ppmcp-approval-"));
+    const engine = new OperationEngine([uxp], {
+      ledger: new OperationLedger(ledgerDirectory),
+      confirmations: new ConfirmationService(approvalDirectory, testApprovalAuthenticator),
+      pathPolicy: new PathPolicy([root]),
+    });
+    const result = await engine.execute({ actionId: "export.sequence", args: { outputPath, presetPath, overwrite: false } });
+    expect(result.status).toBe("failed");
+    expect(result.error?.code).toBe("REQUEST_REJECTED");
+    expect(result.error?.message).toContain("refused to overwrite");
+    expect(uxp.calls).toHaveLength(0);
+  });
+
   it("persists only privacy-safe ledger fields", async () => {
     const cep = new FakeAdapter("cep", true, success);
     const { engine, directory, approvalDirectory } = await engineWith([cep]);

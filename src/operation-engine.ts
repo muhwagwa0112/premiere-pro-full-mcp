@@ -3,7 +3,7 @@ import { actionRequestSchema, riskNeedsConfirmation, type ActionRequest, type Au
 import { getAction, listActions, validateActionArgs } from "./catalog.js";
 import { ConfirmationService } from "./security/confirmation.js";
 import { OperationLedger } from "./ledger.js";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { PathPolicy } from "./security/path-policy.js";
 import { pathArgumentsForEntry, validateAdobeRuntimeCall } from "./adobe-api-catalog.js";
 
@@ -26,6 +26,17 @@ function enabledAuthorities(): Set<Authority> {
   const configured = process.env.PREMIERE_MCP_AUTHORITIES ?? "inspect,edit,filesystem,experimental,cloud";
   const allowed: Authority[] = ["inspect", "edit", "filesystem", "experimental", "cloud"];
   return new Set(configured.split(",").map((item) => item.trim()).filter((item): item is Authority => allowed.includes(item as Authority)));
+}
+
+async function assertOutputPolicy(actionId: string, args: Record<string, unknown>): Promise<void> {
+  if (actionId !== "export.sequence" || args.overwrite === true || typeof args.outputPath !== "string") return;
+  try {
+    const existing = await stat(args.outputPath);
+    if (existing.isFile() || existing.isDirectory()) throw new Error("Sequence export refused to overwrite an existing output path");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
 }
 
 export class OperationEngine {
@@ -102,6 +113,7 @@ export class OperationEngine {
       request = { ...request, args: validateActionArgs(action, request.args), operationId };
       const adobeEntry = await validateAdobeRuntimeCall(action.id, request.args);
       await this.#pathPolicy.assert(action, pathArgumentsForEntry(adobeEntry, request.args));
+      await assertOutputPolicy(action.id, request.args);
       if (action.authority !== "filesystem" && Array.isArray(request.args.paths) && request.args.paths.length > 0) {
         await this.#pathPolicy.assert({ ...action, authority: "filesystem" }, { paths: request.args.paths });
       }

@@ -28,7 +28,9 @@ const transport = new StdioClientTransport({
   stderr: "pipe",
   env: {
     ...process.env,
-    PREMIERE_MCP_UXP_PORT: process.env.PREMIERE_MCP_VALIDATION_UXP_PORT || "17779",
+    // The installed panel is paired to the release bootstrap on 17777. Tests that
+    // need isolation can still override this port explicitly.
+    PREMIERE_MCP_UXP_PORT: process.env.PREMIERE_MCP_VALIDATION_UXP_PORT || "17777",
     PREMIERE_MCP_UI_PIPE: process.env.PREMIERE_MCP_VALIDATION_UI_PIPE || `PremiereMcpUi.Validation.${process.pid}`,
   },
 });
@@ -53,8 +55,8 @@ async function preview(label, actionId, args) {
 async function apply(label) {
   const saved = JSON.parse(await readFile(statePath(label), "utf8"));
   const request = { ...saved.request, approvalId: saved.approvalId };
-  if (["export.frame", "project.save", "uxp.transaction.execute"].includes(saved.request.actionId)) {
-    const deadline = Date.now() + 40_000;
+  if (["export.frame", "export.sequence", "project.save", "uxp.transaction.execute"].includes(saved.request.actionId)) {
+    const deadline = Date.now() + (saved.request.actionId === "export.sequence" ? 120_000 : 40_000);
     let available = false;
     while (Date.now() < deadline) {
       const capabilities = data(await client.callTool({ name: "premiere_capabilities", arguments: {} }, undefined, { timeout: 10_000 }));
