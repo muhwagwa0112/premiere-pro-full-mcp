@@ -106,7 +106,7 @@ public sealed class McpLauncherTests
         Assert.False(inherited.ContainsKey("NODE_PATH"));
         Assert.False(inherited.ContainsKey("PREMIERE_MCP_SECRET_HELPER"));
         Assert.Equal(Path.GetFullPath(trustedLocalAppData), inherited["LOCALAPPDATA"]);
-        Assert.Equal(Path.Combine(Path.GetFullPath(trustedLocalAppData), "PremiereMCP", "cep"), inherited["PREMIERE_MCP_CEP_DIR"]);
+        Assert.Equal(Path.Combine(Path.GetFullPath(trustedLocalAppData), "PremiereMCP", "cep-public-v1"), inherited["PREMIERE_MCP_CEP_DIR"]);
     }
 
     [Fact]

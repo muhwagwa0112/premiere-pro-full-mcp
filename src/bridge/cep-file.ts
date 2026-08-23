@@ -14,7 +14,7 @@ const heartbeatMaxAgeMs = 60_000;
 
 function defaultBridgeDirectory(): string {
   const localAppData = process.env.LOCALAPPDATA;
-  return join(localAppData && localAppData.length > 0 ? localAppData : join(homedir(), "AppData", "Local"), "PremiereMCP", "cep");
+  return join(localAppData && localAppData.length > 0 ? localAppData : join(homedir(), "AppData", "Local"), "PremiereMCP", "cep-public-v1");
 }
 
 function delay(ms: number): Promise<void> {

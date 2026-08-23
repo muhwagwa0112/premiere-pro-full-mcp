@@ -12,7 +12,10 @@
   }
   var profileRoot = extensionRoot.slice(0, extensionRoot.length - installedSuffix.length);
   var localAppData = path.join(profileRoot, "AppData", "Local");
-  var directory = path.join(localAppData, "PremiereMCP", "cep");
+  // Keep the public bridge namespace isolated from pre-release/internal CEP
+  // builds that may still be installed on a developer workstation. Sharing a
+  // command directory would let a legacy process win the leader lease.
+  var directory = path.join(localAppData, "PremiereMCP", "cep-public-v1");
   var helper = path.join(localAppData, "PremiereMCP", "bin", "PremiereMcp.WindowsUiAgent.exe");
   var busy = false;
   var MAX_BYTES = 1024 * 1024;

@@ -51,7 +51,7 @@ elseif ($metadata -and (Get-Command codex -ErrorAction SilentlyContinue)) {
 if ($CheckLive -and $metadata) {
     $bootstrap = Join-Path $resolvedInstallRoot 'app\runtime-bootstrap.json'
     Add-Check 'uxp-bootstrap' ([bool](Test-Path -LiteralPath $bootstrap -PathType Leaf)) $bootstrap
-    $cepHeartbeat = Join-Path $resolvedInstallRoot 'cep\heartbeat.json'
+    $cepHeartbeat = Join-Path $resolvedInstallRoot 'cep-public-v1\heartbeat.json'
     $cepFresh = (Test-Path -LiteralPath $cepHeartbeat -PathType Leaf) -and (((Get-Date) - (Get-Item -LiteralPath $cepHeartbeat).LastWriteTime).TotalSeconds -lt 30)
     Add-Check 'cep-heartbeat' $cepFresh ($(if ($cepFresh) { $cepHeartbeat } else { 'No fresh CEP heartbeat was found.' }))
 }

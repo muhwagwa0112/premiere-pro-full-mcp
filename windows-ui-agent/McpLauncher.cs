@@ -27,7 +27,7 @@ internal static class McpLauncher
         start.ArgumentList.Add(Path.GetFullPath(entrypoint));
         var localApplicationData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         var premiereRoot = Path.Combine(localApplicationData, "PremiereMCP");
-        foreach (var directory in new[] { premiereRoot, Path.Combine(premiereRoot, "approvals"), Path.Combine(premiereRoot, "cep"), Path.Combine(premiereRoot, "workspace"), Path.Combine(premiereRoot, "secrets") })
+        foreach (var directory in new[] { premiereRoot, Path.Combine(premiereRoot, "approvals"), Path.Combine(premiereRoot, "cep-public-v1"), Path.Combine(premiereRoot, "workspace"), Path.Combine(premiereRoot, "secrets") })
             SecretStore.EnsureCurrentUserDirectory(directory);
         HardenChildEnvironment(start.Environment, localApplicationData);
 
@@ -63,7 +63,7 @@ internal static class McpLauncher
         environment.Remove("NODE_PATH");
         environment.Remove("PREMIERE_MCP_SECRET_HELPER");
         environment["LOCALAPPDATA"] = trustedLocalAppData;
-        environment["PREMIERE_MCP_CEP_DIR"] = Path.Combine(trustedLocalAppData, "PremiereMCP", "cep");
+        environment["PREMIERE_MCP_CEP_DIR"] = Path.Combine(trustedLocalAppData, "PremiereMCP", "cep-public-v1");
     }
 }
 
