@@ -18,6 +18,7 @@
   var directory = path.join(localAppData, "PremiereMCP", "cep-public-v1");
   var helper = path.join(localAppData, "PremiereMCP", "bin", "PremiereMcp.WindowsUiAgent.exe");
   var busy = false;
+  var hostEvalBusy = false;
   var MAX_BYTES = 1024 * 1024;
   var usedNonces = {};
   var sessionId = base64url(crypto.randomBytes(18));
@@ -153,17 +154,26 @@
 
   function heartbeat() {
     if (!renewLeadership()) return;
-    cs.evalScript("(function(){" + hostLoaderPrefix + "return PPMCP.heartbeat();}())", function (raw) {
-      try {
-        var host = {};
-        try { host = JSON.parse(raw); } catch (_) {}
-        var unsigned = { timestamp: Date.now(), hostVersion: host.hostVersion || "unknown", capabilities: host.capabilities || ["typed"], nonce: base64url(crypto.randomBytes(18)), sessionId: sessionId };
-        unsigned.signature = sign(unsigned);
-        atomicWrite(path.join(directory, "heartbeat.json"), unsigned);
-      } catch (_) {
-        // A transient broker or filesystem failure must not terminate the timer.
-      }
-    });
+    if (busy || hostEvalBusy) return;
+    hostEvalBusy = true;
+    try {
+      var heartbeatScript = "(function(){if(typeof PPMCP!==\"object\"||typeof PPMCP.heartbeat!==\"function\"){" + hostLoaderPrefix + "}return PPMCP.heartbeat();}())";
+      cs.evalScript(heartbeatScript, function (raw) {
+        try {
+          var host = {};
+          try { host = JSON.parse(raw); } catch (_) {}
+          var unsigned = { timestamp: Date.now(), hostVersion: host.hostVersion || "unknown", capabilities: host.capabilities || ["typed"], nonce: base64url(crypto.randomBytes(18)), sessionId: sessionId };
+          unsigned.signature = sign(unsigned);
+          atomicWrite(path.join(directory, "heartbeat.json"), unsigned);
+        } catch (_) {
+          // A transient broker or filesystem failure must not terminate the timer.
+        } finally {
+          hostEvalBusy = false;
+        }
+      });
+    } catch (_) {
+      hostEvalBusy = false;
+    }
   }
 
   function nextCommand() {
@@ -185,11 +195,12 @@
 
   function poll() {
     if (!renewLeadership()) return;
-    if (busy) return;
+    if (busy || hostEvalBusy) return;
     var filename;
     try { filename = nextCommand(); } catch (_) { return; }
     if (!filename) return;
     busy = true;
+    hostEvalBusy = true;
     var commandPath = path.join(directory, filename);
     var responsePath = path.join(directory, filename.replace("command-", "response-"));
     var request;
@@ -208,7 +219,7 @@
       }
       var hostRequest = { protocolVersion: 1, requestId: request.requestId, operation: request.operation, args: hostArgs };
       if (request.expectedRevision) hostRequest.expectedRevision = request.expectedRevision;
-      var script = "(function(){" + hostLoaderPrefix + "return PPMCP.dispatch(" + JSON.stringify(JSON.stringify(hostRequest)) + ");}())";
+      var script = "(function(){if(typeof PPMCP!==\"object\"||typeof PPMCP.dispatch!==\"function\"){" + hostLoaderPrefix + "}return PPMCP.dispatch(" + JSON.stringify(JSON.stringify(hostRequest)) + ");}())";
       cs.evalScript(script, function (raw) {
         var response;
         try { response = JSON.parse(raw); } catch (_) { response = failure(request.requestId, "CEP_RESULT_PARSE_ERROR", "Host returned invalid JSON"); }
@@ -220,12 +231,13 @@
             issuedCapabilityCount++;
           });
         }
-        try { atomicWrite(responsePath, signedResponse(response, request.nonce)); } finally { try { fs.unlinkSync(commandPath); } catch (_) {} busy = false; }
+        try { atomicWrite(responsePath, signedResponse(response, request.nonce)); } finally { try { fs.unlinkSync(commandPath); } catch (_) {} busy = false; hostEvalBusy = false; }
       });
     } catch (error) {
       atomicWrite(responsePath, signedResponse(failure(request && request.requestId, "CEP_BRIDGE_REJECTED", String(error.message || error)), nonce));
       try { fs.unlinkSync(commandPath); } catch (_) {}
       busy = false;
+      hostEvalBusy = false;
     }
   }
 
