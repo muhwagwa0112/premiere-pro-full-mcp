@@ -108,7 +108,23 @@ $zipPath = Join-Path $OutputDirectory "premiere-pro-full-mcp-v$version-windows.z
 $sbomPath = Join-Path $OutputDirectory "premiere-pro-full-mcp-v$version.spdx.json"
 $noticesPath = Join-Path $OutputDirectory "premiere-pro-full-mcp-v$version-third-party-notices.txt"
 foreach ($path in @($zipPath, "$zipPath.sha256", "$zipPath.manifest.json", "$zipPath.manifest.json.sig", $sbomPath, "$sbomPath.sha256", $noticesPath, "$noticesPath.sha256")) { if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force } }
-Compress-Archive -LiteralPath $bundleRoot -DestinationPath $zipPath -CompressionLevel Optimal
+Add-Type -AssemblyName System.IO.Compression
+$zipStream = [System.IO.File]::Open($zipPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+$zipArchive = New-Object System.IO.Compression.ZipArchive($zipStream, [System.IO.Compression.ZipArchiveMode]::Create, $false)
+try {
+    $archiveRoot = [System.IO.Path]::GetFileName($bundleRoot)
+    foreach ($file in @(Get-ChildItem -LiteralPath $bundleRoot -File -Recurse -Force | Sort-Object FullName)) {
+        $relative = $file.FullName.Substring($bundleRoot.Length + 1).Replace('\', '/')
+        $entry = $zipArchive.CreateEntry("$archiveRoot/$relative", [System.IO.Compression.CompressionLevel]::Optimal)
+        $entry.LastWriteTime = [System.DateTimeOffset]$epoch
+        $entry.ExternalAttributes = 0
+        $entryStream = $entry.Open()
+        $sourceStream = [System.IO.File]::OpenRead($file.FullName)
+        try { $sourceStream.CopyTo($entryStream) }
+        finally { $sourceStream.Dispose(); $entryStream.Dispose() }
+    }
+}
+finally { $zipArchive.Dispose(); $zipStream.Dispose() }
 Copy-Item -LiteralPath (Join-Path $bundleRoot 'SBOM.spdx.json') -Destination $sbomPath -Force
 Copy-Item -LiteralPath (Join-Path $repoRoot 'THIRD-PARTY-NOTICES.md') -Destination $noticesPath -Force
 $assets = [ordered]@{
