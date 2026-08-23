@@ -42,8 +42,9 @@ No real user project or media was used.
 - MCP smoke: 13 tools, 761 Adobe UXP members, 139 local plug-ins.
 - Security smoke: broker signing succeeded; MCP self-approval remained blocked; preload variables were
   scrubbed.
-- Two MCP smokes and two security smokes also passed concurrently after each smoke was isolated onto a
-  process-specific UXP port and UI pipe; this prevents false failures when validation jobs overlap.
+- MCP and security smokes use process-specific UI pipes. The security smoke waits for the live UXP
+  backend on port 17777 by default so its self-approval rejection assertion cannot pass or fail before
+  a real backend is selectable; the port can be overridden for an explicitly reconfigured panel.
 - A fresh `codex exec` process called the installed registration and reported target 26.3.2, 761 UXP
   declarations, backend `uxp`, host 26.3.2, and `uxp_available=true` with the panel loaded.
 - A foreground UI catalog completed within its hard deadline and returned three controls with

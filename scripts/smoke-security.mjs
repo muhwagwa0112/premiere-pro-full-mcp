@@ -12,8 +12,7 @@ const launcher = process.env.PREMIERE_MCP_SECRET_HELPER || join(localAppData, "P
 const bundle = process.env.PREMIERE_MCP_BUNDLE || join(localAppData, "PremiereMCP", "bundle", "premiere-mcp.bundle.mjs");
 const client = new Client({ name: "premiere-mcp-security-smoke", version: "1.0.0" });
 const childEnv = Object.fromEntries(Object.entries(process.env).filter((entry) => entry[1] !== undefined));
-childEnv.PREMIERE_MCP_UXP_PORT = process.env.PREMIERE_MCP_SECURITY_SMOKE_UXP_PORT
-  || String(40_000 + (process.pid % 20_000));
+childEnv.PREMIERE_MCP_UXP_PORT = process.env.PREMIERE_MCP_SECURITY_SMOKE_UXP_PORT || "17777";
 childEnv.PREMIERE_MCP_UI_PIPE = `PremiereMcpUi.SecuritySmoke.${process.pid}`;
 childEnv.NODE_OPTIONS = "--require C:\\definitely-not-present\\attacker-preload.cjs";
 childEnv.NODE_PATH = "C:\\definitely-not-present\\attacker-modules";
@@ -22,20 +21,19 @@ childEnv.LOCALAPPDATA = "C:\\definitely-not-present\\attacker-local-app-data";
 const transport = new StdioClientTransport({ command: launcher, args: ["--launch-mcp", bundle], cwd: root, env: childEnv, stderr: "pipe" });
 let approvalId;
 
-async function waitForUxpWhenRequested() {
-  if (!process.env.PREMIERE_MCP_SECURITY_SMOKE_UXP_PORT) return;
+async function waitForLiveUxp() {
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     const capabilities = await client.callTool({ name: "premiere_capabilities", arguments: {} });
     if (capabilities.structuredContent?.backends?.uxp?.available) return;
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 1_000));
   }
-  throw new Error("Requested live UXP backend did not become available for the security smoke");
+  throw new Error("Live UXP backend did not become available for the security smoke");
 }
 
 try {
   await client.connect(transport);
-  await waitForUxpWhenRequested();
+  await waitForLiveUxp();
   const listed = await client.listTools();
   assert.equal(
     listed.tools.some((tool) => /approv|confirm/i.test(tool.name)),
