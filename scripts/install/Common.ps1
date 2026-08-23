@@ -32,8 +32,16 @@ function Invoke-PpMcpCommand {
 function Get-PpMcpSha256 {
     param([Parameter(Mandatory = $true)][string]$Path)
     $resolved = [System.IO.Path]::GetFullPath($Path)
-    if (-not (Test-Path -LiteralPath $resolved -PathType Leaf)) { throw "File not found: $resolved" }
-    return (Get-FileHash -LiteralPath $resolved -Algorithm SHA256).Hash.ToLowerInvariant()
+    if (-not [System.IO.File]::Exists($resolved)) { throw "File not found: $resolved" }
+    $stream = [System.IO.File]::OpenRead($resolved)
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $digest = $sha256.ComputeHash($stream)
+        return ([System.BitConverter]::ToString($digest)).Replace('-', '').ToLowerInvariant()
+    } finally {
+        $sha256.Dispose()
+        $stream.Dispose()
+    }
 }
 
 function Get-PpMcpReleasePublicKeyPath {

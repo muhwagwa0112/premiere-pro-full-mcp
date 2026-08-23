@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, test } from "vitest";
@@ -26,5 +28,22 @@ describe("release packaging contract", () => {
     expect(pkg.scripts["uxp:dev-archive"]).toBeTruthy();
     expect(pkg.scripts["uxp:package"]).toBeUndefined();
     expect(pkg.private).toBe(true);
+  });
+
+  test("hash verification works in Windows PowerShell without Get-FileHash autoloading", () => {
+    const common = resolve(root, "scripts", "install", "Common.ps1");
+    const target = resolve(root, "LICENSE");
+    const expected = createHash("sha256").update(readFileSync(target)).digest("hex");
+    const command = [
+      "$PSModuleAutoLoadingPreference = 'None'",
+      `. '${common.replaceAll("'", "''")}'`,
+      `Get-PpMcpSha256 -Path '${target.replaceAll("'", "''")}'`,
+    ].join("; ");
+    const actual = execFileSync(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", command],
+      { encoding: "utf8" },
+    ).trim();
+    expect(actual).toBe(expected);
   });
 });
