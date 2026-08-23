@@ -8,6 +8,8 @@ No real user project or media was used.
 
 - UXP authenticated over a manifest-constrained `ws://localhost/` permission and reported host
   version 26.3.2. The generated catalog returned 761 members, 91 containers, and 69 roots.
+- The installed CCX registers the `premiereMcp2026Panel` lifecycle through `entrypoints.setup`, so
+  Premiere creates the packaged panel document instead of an empty menu-discovered surface.
 - R0 UXP calls resolved active Project, Sequence, and VideoTrack session handles and read the original
   track name.
 - An R3 `uxp.transaction.execute` request was previewed, approved in the native Windows dialog,
@@ -37,7 +39,7 @@ No real user project or media was used.
 
 ## Automated gates
 
-- TypeScript/bridge check: 14 test files, 44 tests, including concurrent one-shot approval claiming,
+- TypeScript/bridge check: 14 test files, 45 tests, including concurrent one-shot approval claiming,
   the full-surface safety-plan contract, sequence-export single-flight/stable-output verification,
   existing-output rejection, and the UDT-only release packaging contract.
 - Native .NET check: 19 tests, including job-object child cleanup, strict UTF-8 HMAC input, and

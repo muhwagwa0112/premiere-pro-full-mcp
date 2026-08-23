@@ -22,4 +22,17 @@ describe("UXP bridge deployment contract", () => {
     expect(source).toContain('const filename = normalized.slice(separator + 1)');
     expect(source).toContain('exportSequenceFrame(context.sequence, frameTime, filename, directory');
   });
+
+  it("registers the installed panel lifecycle with the manifest entrypoint id", async () => {
+    const [source, manifestText] = await Promise.all([
+      readFile(resolve("uxp-plugin/main.cjs"), "utf8"),
+      readFile(resolve("uxp-plugin/manifest.json"), "utf8"),
+    ]);
+    const manifest = JSON.parse(manifestText);
+    const panelId = manifest.entrypoints.find((entrypoint: { type?: string }) => entrypoint.type === "panel").id;
+    expect(panelId).toBe("premiereMcp2026Panel");
+    expect(source).toContain("uxp.entrypoints.setup({");
+    expect(source).toContain(`${panelId}: {`);
+    for (const hook of ["create", "show", "hide", "destroy"]) expect(source).toContain(`${hook}() {}`);
+  });
 });

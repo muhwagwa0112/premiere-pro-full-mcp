@@ -626,3 +626,18 @@ async function connectFromBootstrap() {
 }
 
 void connectFromBootstrap();
+
+// Register the manifest panel explicitly. Premiere can discover an installed
+// CCX menu entry without this lifecycle contract yet create only an empty
+// panel surface. The first panel's markup already lives in index.html, so the
+// lifecycle hooks intentionally leave the shared document in place.
+uxp.entrypoints.setup({
+  panels: {
+    premiereMcp2026Panel: {
+      create() {},
+      show() {},
+      hide() {},
+      destroy() {}
+    }
+  }
+});
