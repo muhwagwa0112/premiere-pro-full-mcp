@@ -2,6 +2,34 @@
 
 This archive contains the MCP bundle, generated Adobe API catalog, CEP and UXP bridges, a self-contained native Windows launcher, buildable source, documentation, and a SHA-256 manifest. It contains no session token, bearer secret, `.env`, or development bootstrap file.
 
+## Signature and integrity notice
+
+This release candidate is **not Authenticode-signed**. Windows Defender SmartScreen or PowerShell
+may warn before running the launcher or installer. Do not bypass a warning unless the ZIP SHA-256
+matches the checksum published with the release and the download came from the expected release page.
+An unsigned checksum detects accidental or malicious changes only when the checksum itself is obtained
+through a trusted channel; it does not establish publisher identity.
+
+Before extraction, compare the downloaded ZIP with the published value:
+
+```powershell
+(Get-FileHash .\__PACKAGE_NAME__-__VERSION__-win-x64.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+```
+
+After extraction, verify every staged file against `MANIFEST.sha256`:
+
+```powershell
+$failures = foreach ($line in Get-Content .\MANIFEST.sha256) {
+  if ($line -notmatch '^([0-9a-f]{64}) \*(.+)$') { "malformed manifest line"; continue }
+  $path = Join-Path $PWD $Matches[2].Replace('/', '\')
+  if (!(Test-Path -LiteralPath $path)) { "missing: $($Matches[2])"; continue }
+  if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $Matches[1]) {
+    "hash mismatch: $($Matches[2])"
+  }
+}
+if ($failures) { $failures; throw 'Release integrity verification failed' }
+```
+
 ## Install
 
 Extract the ZIP to a local directory, open PowerShell in the extracted package root, then run:
