@@ -35,7 +35,7 @@ No real user project or media was used.
 
 ## Automated gates
 
-- TypeScript/bridge check: 9 test files, 29 tests, including concurrent one-shot approval claiming
+- TypeScript/bridge check: 10 test files, 31 tests, including concurrent one-shot approval claiming
   and the full-surface safety-plan contract.
 - Native .NET check: 19 tests, including job-object child cleanup, strict UTF-8 HMAC input, and
   hostile broker-locator/preload environment scrubbing.
