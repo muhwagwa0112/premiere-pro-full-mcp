@@ -33,7 +33,7 @@
     "validate:uxp-full": "node scripts/uxp-full-surface-validation.mjs",
     "validate:uxp-plan": "node scripts/uxp-full-surface-validation.mjs --plan-only",
     "compliance:generate": "node scripts/generate-release-compliance.mjs",
-    "lint:bridges": "node --check uxp-plugin/main.cjs && node --check cep-plugin/main.js && node --check scripts/generate-adobe-inventory.mjs && node --check scripts/uxp-full-surface-validation.mjs && node --check scripts/generate-release-compliance.mjs",
+    "lint:bridges": "node --check uxp-plugin/main.cjs && node --check cep-plugin/cep-runtime.js && node --check cep-plugin/main.js && node --check scripts/generate-adobe-inventory.mjs && node --check scripts/uxp-full-surface-validation.mjs && node --check scripts/generate-release-compliance.mjs",
     "check": "npm run lint:bridges && npm run typecheck && npm test && npm run build",
     "start": "\"%LOCALAPPDATA%\\PremiereMCP\\bin\\PremiereMcp.WindowsUiAgent.exe\" --launch-mcp \"%LOCALAPPDATA%\\PremiereMCP\\bundle\\premiere-mcp.bundle.mjs\"",
     "doctor": "node dist/cli/doctor.js",

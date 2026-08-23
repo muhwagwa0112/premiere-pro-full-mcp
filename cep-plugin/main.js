@@ -4,7 +4,7 @@
   var crypto = require("crypto");
   var fs = require("fs");
   var path = require("path");
-  var cs = new CSInterface();
+  var cs = new PremiereCepRuntime();
   var extensionRoot = path.resolve(__dirname);
   var installedSuffix = path.join("AppData", "Roaming", "Adobe", "CEP", "extensions", "com.local.ppmcp.cep.2026");
   if (extensionRoot.toLowerCase().slice(-installedSuffix.length) !== installedSuffix.toLowerCase()) {
@@ -233,7 +233,7 @@
     }
     var extensionDirectory = cs.getSystemPath("extension");
     if (!extensionDirectory) throw new Error("CEP extension path is unavailable");
-    var jsonPath = path.join(extensionDirectory, "json2.jsx").replace(/\\/g, "/");
+    var jsonPath = path.join(extensionDirectory, "json-compat.jsx").replace(/\\/g, "/");
     var hostPath = path.join(extensionDirectory, "host.jsx").replace(/\\/g, "/");
     hostLoaderPrefix = "$.evalFile(File(" + JSON.stringify(jsonPath) + "));$.evalFile(File(" + JSON.stringify(hostPath) + "));";
     var bootstrapScript = "(function(){try{" + hostLoaderPrefix + "return (typeof PPMCP === \"object\" && typeof PPMCP.heartbeat === \"function\" ? \"ready\" : \"unavailable\");}catch(error){return \"error|line=\" + String(error.line || \"unknown\") + \"|message=\" + String(error.message || error);}}())";

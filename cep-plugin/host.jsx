@@ -1,7 +1,7 @@
 /* Adobe ExtendScript: ECMAScript 3 only. */
 if (typeof JSON === "undefined") {
   var PPMCP_HOST_DIRECTORY = File($.fileName).parent;
-  $.evalFile(File(PPMCP_HOST_DIRECTORY.fsName + "/json2.jsx"));
+  $.evalFile(File(PPMCP_HOST_DIRECTORY.fsName + "/json-compat.jsx"));
 }
 var PPMCP = PPMCP || {};
 
