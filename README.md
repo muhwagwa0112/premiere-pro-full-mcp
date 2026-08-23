@@ -2,7 +2,18 @@
 
 [English](#english) · [한국어](#한국어)
 
-<a href="https://ko-fi.com/muhwagwa0112"><img src="https://storage.ko-fi.com/cdn/kofi2.png?v=3" alt="Support me on Ko-fi" height="36"></a>
+<p align="center">
+  <strong>If Premiere Pro Full MCP saved you time, please consider supporting its continued development, testing, and security maintenance.<br>
+  Premiere Pro Full MCP로 시간을 아꼈다면, 계속 개발·테스트·보안 유지보수를 이어갈 수 있도록 후원해 주세요.</strong>
+</p>
+
+<p align="center">
+  <a href="https://ko-fi.com/muhwagwa0112">
+    <img src="docs/assets/kofi-support-red.png"
+         alt="Support Muhwagwa0112 on Ko-fi"
+         width="420">
+  </a>
+</p>
 
 Premiere Pro Full MCP is a local, capability-gated MCP server for Adobe Premiere Pro 2026 on Windows. It combines the documented Premiere UXP API, a constrained CEP/ExtendScript bridge, experimental QE discovery, and a fail-closed native Windows UI agent.
 
