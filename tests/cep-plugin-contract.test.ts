@@ -30,4 +30,13 @@ describe("CEP bridge vendored-code boundary", () => {
     expect(() => codec.parse('{"__proto__":{"polluted":true}}')).toThrow(/Invalid JSON/);
     expect(() => codec.parse('{"constructor":{"prototype":{"polluted":true}}}')).toThrow(/Invalid JSON/);
   });
+
+  it("keeps bounded CEP/QE readiness separate from foreground UI probing", async () => {
+    const liveProbe = await readFile(join(process.cwd(), "scripts", "live-host-probe.mjs"), "utf8");
+    const uiProbe = await readFile(join(process.cwd(), "scripts", "ui-live-probe.mjs"), "utf8");
+    expect(liveProbe).not.toContain('call("ui.catalog"');
+    expect(liveProbe).toContain('{ root: "qe", query: "project", offset: 0, limit: 20 }');
+    expect(uiProbe).toContain('actionId: "ui.catalog"');
+    expect(uiProbe).toContain('failClosed: true');
+  });
 });

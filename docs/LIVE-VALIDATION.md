@@ -39,13 +39,13 @@ No real user project or media was used.
 
 ## Automated gates
 
-- TypeScript/bridge check: 15 test files, 47 tests, including concurrent one-shot approval claiming,
+- TypeScript/bridge check: 15 test files, 49 tests, including concurrent one-shot approval claiming,
   the full-surface safety-plan contract, sequence-export single-flight/stable-output verification,
   existing-output rejection, UDT-only release packaging, Windows PowerShell 5.1 hashing, and
   local-path-free release SBOM generation.
 - Native .NET check: 19 tests, including job-object child cleanup, strict UTF-8 HMAC input, and
   hostile broker-locator/preload environment scrubbing.
-- MCP smoke: 13 tools, 761 Adobe UXP members, 139 local plug-ins.
+- MCP smoke: 13 tools, 761 Adobe UXP members, 140 local plug-ins.
 - Security smoke: broker signing succeeded; MCP self-approval remained blocked; preload variables were
   scrubbed.
 - MCP and security smokes use process-specific UI pipes. The security smoke waits for the live UXP
@@ -53,8 +53,13 @@ No real user project or media was used.
   a real backend is selectable; the port can be overridden for an explicitly reconfigured panel.
 - A fresh `codex exec` process called the installed registration and reported target 26.3.2, 761 UXP
   declarations, backend `uxp`, host 26.3.2, and `uxp_available=true` with the panel loaded.
-- A foreground UI catalog completed within its hard deadline and returned three controls with
-  `complete=false` and `truncated=true`; UI mutation remains outside the verified surface.
+- CEP and QE readiness were re-run independently after installation. Host/project inspection,
+  bounded `app` reflection, and bounded `qe` reflection all succeeded against 26.3.2. Full QE
+  effect/transition inventory remains a separate optional diagnostic because Premiere may spend
+  longer than the signed command freshness window enumerating third-party plug-ins.
+- The final foreground named-pipe UI probe returned `automation_timeout` and was terminated by its
+  hard deadline. This is recorded as fail-closed, not as a successful UI check; UI mutation remains
+  outside the verified surface.
 
 ## Explicit boundary
 
@@ -63,14 +68,14 @@ Many Adobe members require object types, installed third-party plug-ins, cloud e
 or project states that cannot all coexist in one fixture. CEP and UXP developer loading can also be
 affected by host modal/busy state during a cold restart and must be checked after installation.
 
-After the final packaged reinstall and host restart, CEP/QE and the named-pipe UI health check
-reconnected automatically. UXP workspace registration was preserved, but Adobe UXP Developer Tool
-still requires **Load** or **Load & Watch** after a cold restart. The panel was loaded for the final
-full-surface run described above, so the latest UXP evidence is from the current bridge rather than an
-earlier bundle.
+After the final packaged reinstall and host restart, CEP/QE and UXP reconnected. The installed CCX
+panel was opened from **Window > UXP Plugins**, paired through the native file picker, and used for
+the final full-surface run described above, so the latest UXP evidence is from the current bridge
+rather than an earlier bundle.
 
-Premiere's native UI Automation provider previously blocked during descendant enumeration on this
-machine. The final build isolates every UIA request in a killable, single-concurrency worker with a hard
-deadline. A foreground catalog now completes and exposes a small, truncated set of semantic controls,
-but that is insufficient to claim broad UI coverage. UI mutation remains fail-closed until a versioned
-adapter selects a unique pattern-backed control and verifies the requested postcondition.
+Premiere's native UI Automation provider can block during descendant enumeration on this machine.
+The final build isolates every UIA request in a killable, single-concurrency worker with a hard
+deadline. Earlier probes exposed a small, truncated set of semantic controls, while the final probe
+timed out and was terminated; neither result supports a broad UI-coverage claim. UI mutation remains
+fail-closed until a versioned adapter selects a unique pattern-backed control and verifies the requested
+postcondition.

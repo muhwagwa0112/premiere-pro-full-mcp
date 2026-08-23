@@ -35,6 +35,9 @@ try {
   assert.equal(apiCatalog.structuredContent?.data?.entries?.length, 5);
 
   const host = await client.callTool({ name: "premiere_inspect", arguments: { actionId: "host.inspect", args: {} } });
+  if (host.structuredContent?.status !== "succeeded") {
+    process.stderr.write(`${JSON.stringify({ smoke: "host.inspect", status: host.structuredContent?.status ?? null, backend: host.structuredContent?.backend ?? null, errorCode: host.structuredContent?.error?.code ?? null })}\n`);
+  }
   assert.equal(host.structuredContent?.status, "succeeded");
   assert(["local", "cep", "uxp"].includes(host.structuredContent?.backend), "No valid host backend was selected");
 

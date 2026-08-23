@@ -42,18 +42,17 @@ async function call(name, actionId, args = {}) {
 try {
   await client.connect(transport);
   const capabilities = await call("capabilities");
-  // UI automation is intentionally foreground-bound. Probe it immediately
-  // after the caller has focused Premiere, before longer CEP/QE round trips.
-  const uiCatalog = await call("ui.catalog", "ui.catalog", { offset: 0, limit: 20 });
   process.stderr.write("[live-host-probe] host.inspect\n");
   const host = data(await client.callTool({ name: "premiere_inspect", arguments: { actionId: "host.inspect", args: {} } }, undefined, { timeout: 75_000, maxTotalTimeout: 75_000 }));
   process.stderr.write("[live-host-probe] project.inspect\n");
   const project = data(await client.callTool({ name: "premiere_inspect", arguments: { actionId: "project.inspect", args: {} } }, undefined, { timeout: 75_000, maxTotalTimeout: 75_000 }));
   const appCatalog = await call("cep.surface.catalog", "cep.surface.catalog", { root: "app", query: "project", offset: 0, limit: 200 });
-  const qeCatalog = await call("qe.catalog", "qe.catalog", { root: "qeProject", query: "effect", offset: 0, limit: 100 });
+  // Keep readiness reflection bounded. qeProject additionally materializes the
+  // complete effect and transition inventories and is a separate diagnostic.
+  const qeCatalog = await call("qe.catalog", "qe.catalog", { root: "qe", query: "project", offset: 0, limit: 20 });
 
-  if ([appCatalog, qeCatalog, uiCatalog].some((result) => result.status !== "succeeded")) {
-    process.stderr.write(JSON.stringify({ appCatalog, qeCatalog, uiCatalog }, null, 2) + "\n");
+  if ([appCatalog, qeCatalog].some((result) => result.status !== "succeeded")) {
+    process.stderr.write(JSON.stringify({ appCatalog, qeCatalog }, null, 2) + "\n");
   }
 
   assert.equal(host.status, "succeeded");
@@ -61,7 +60,6 @@ try {
   assert.equal(host.hostVersion, "26.3.2");
   assert.equal(appCatalog.status, "succeeded");
   assert.equal(qeCatalog.status, "succeeded");
-  assert.equal(uiCatalog.status, "succeeded");
 
   process.stdout.write(JSON.stringify({
     ok: true,
@@ -70,7 +68,6 @@ try {
     project: { status: project.status, data: project.data },
     appCapabilities: appCatalog.data,
     qeCapabilities: qeCatalog.data,
-    uiControlCount: uiCatalog.data?.controls?.length ?? null,
   }, null, 2) + "\n");
 } finally {
   await client.close();
