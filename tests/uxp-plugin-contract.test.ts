@@ -42,6 +42,8 @@ describe("UXP bridge deployment contract", () => {
     expect(source).toContain("[PANEL_ID]: {");
     expect(source).toContain(`const PANEL_ID = "${panelId}"`);
     expect(source).toContain("mountPanel(rootNode)");
+    expect(source).not.toContain('const panelContent = document.getElementById("premiere-mcp-panel");\nlet bridgeInitialized');
+    expect(source).toMatch(/function mountPanel\(rootNode\) \{[\s\S]*const panelContent = document\.getElementById\("premiere-mcp-panel"\);/);
     expect(source).toMatch(/function initializeBridge\(\) \{[\s\S]*require\("\.\/main\.cjs"\);[\s\S]*\}/);
     expect(source).toMatch(/create\(rootNode\) \{[\s\S]*mountPanel\(rootNode\);[\s\S]*initializeBridge\(\);/);
     for (const hook of ["create(rootNode)", "show(rootNode)", "hide()", "destroy()"]) expect(source).toContain(hook);

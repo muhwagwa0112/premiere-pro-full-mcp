@@ -1,7 +1,6 @@
 const { entrypoints } = require("uxp");
 
 const PANEL_ID = "premiereMcp2026Panel";
-const panelContent = document.getElementById("premiere-mcp-panel");
 let bridgeInitialized = false;
 
 function panelBody(rootNode) {
@@ -12,6 +11,10 @@ function panelBody(rootNode) {
 
 function mountPanel(rootNode) {
   const target = panelBody(rootNode);
+  // Premiere can evaluate a deferred script before the external CCX document
+  // has finished materializing its panel markup. Resolve the node at the
+  // lifecycle boundary instead of permanently caching an early null value.
+  const panelContent = document.getElementById("premiere-mcp-panel");
   if (!panelContent || !target || typeof target.appendChild !== "function") return;
   if (panelContent.parentNode !== target) target.appendChild(panelContent);
   panelContent.style.display = "block";
@@ -51,4 +54,3 @@ entrypoints.setup({
     }
   }
 });
-
