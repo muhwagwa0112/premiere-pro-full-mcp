@@ -13,6 +13,12 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 if ($Repository -ne $script:PpMcpRepository) { throw 'The public release repository is pinned and cannot be overridden.' }
 $package = Get-Content -LiteralPath (Join-Path $repoRoot 'package.json') -Raw | ConvertFrom-Json
 $version = [string]$package.version
+if ([string]::IsNullOrWhiteSpace($CcxPath)) {
+    throw 'A CCX packaged by Adobe UXP Developer Tool is required. Pass -CcxPath with the versioned release CCX.'
+}
+$CcxPath = [System.IO.Path]::GetFullPath($CcxPath)
+if (-not (Test-Path -LiteralPath $CcxPath -PathType Leaf)) { throw "Adobe UDT CCX was not found: $CcxPath" }
+if ([System.IO.Path]::GetFileName($CcxPath) -ne "premiere-pro-full-mcp-v$version.ccx") { throw 'CCX filename does not match the release version.' }
 $dirty = @(& git -C $repoRoot status --porcelain --untracked-files=all 2>$null)
 if ($LASTEXITCODE -ne 0 -or $dirty.Count -ne 0) { throw 'Public release builds require a clean Git worktree.' }
 $commit = [string](& git -C $repoRoot rev-parse HEAD 2>$null)
@@ -73,12 +79,6 @@ foreach ($name in @('README.md', 'LICENSE', 'SECURITY.md', 'THIRD-PARTY-NOTICES.
 Copy-Item -LiteralPath (Join-Path $repoRoot 'docs') -Destination (Join-Path $bundleRoot 'docs') -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $repoRoot 'THIRD-PARTY-LICENSES') -Destination (Join-Path $bundleRoot 'THIRD-PARTY-LICENSES') -Recurse -Force
 
-if (-not $CcxPath) {
-    $CcxPath = Join-Path $OutputDirectory "premiere-pro-full-mcp-v$version.ccx"
-    Invoke-PpMcpCommand -FilePath 'powershell.exe' -Arguments @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $repoRoot 'scripts\Build-Ccx.ps1'), '-OutputPath', $CcxPath) -FailureMessage 'CCX packaging failed'
-}
-$CcxPath = [System.IO.Path]::GetFullPath($CcxPath)
-if ([System.IO.Path]::GetFileName($CcxPath) -ne "premiere-pro-full-mcp-v$version.ccx") { throw 'CCX filename does not match the release version.' }
 $ccxZip = Join-Path $stagingRoot 'ccx-validation.zip'
 $ccxExpanded = Join-Path $stagingRoot 'ccx-validation'
 Copy-Item -LiteralPath $CcxPath -Destination $ccxZip -Force

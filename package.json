@@ -38,11 +38,11 @@
     "start": "\"%LOCALAPPDATA%\\PremiereMCP\\bin\\PremiereMcp.WindowsUiAgent.exe\" --launch-mcp \"%LOCALAPPDATA%\\PremiereMCP\\bundle\\premiere-mcp.bundle.mjs\"",
     "doctor": "node dist/cli/doctor.js",
     "approve": "node dist/cli/approve.js",
-    "uxp:package": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\Build-Ccx.ps1",
+    "uxp:dev-archive": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\Build-Ccx.ps1",
     "release:keygen": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\New-ReleaseSigningKey.ps1",
     "release:build": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\Build-Release.ps1",
     "release:verify": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\Verify-Release.ps1",
-    "package:release": "npm run compliance:generate && npm run release:build"
+    "package:release": "npm run compliance:generate && node scripts/package-release.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

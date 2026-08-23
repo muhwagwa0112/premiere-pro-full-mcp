@@ -10,7 +10,8 @@
 - [ ] The final live ledger contains all 761 UXP IDs and does not regress below 281 deterministic successes; failures remain explicit and fail closed.
 - [ ] CEP heartbeat/QE, named-pipe UI, project read/edit/save, frame export, and sequence export pass on the installed release.
 - [ ] `ZXPSignCmd -verify` accepts the bundled CEP directory, and it loads with `PlayerDebugMode=0` on a clean Premiere restart.
-- [ ] The CCX is packaged and installed through Adobe UXP Developer Tool/Creative Cloud Desktop; the panel is visible at minimum, docked, floating, and scaled layouts.
+- [ ] The CCX is packaged through Adobe UXP Developer Tool (not `Build-Ccx.ps1`) and installed through Creative Cloud Desktop; the panel is visible at minimum, docked, floating, and scaled layouts.
+- [ ] A release build without `-CcxPath`, with a development ZIP renamed to `.ccx`, or with a mismatched CCX filename/identity fails before staging or publishing.
 - [ ] The signed release ZIP, CCX, SBOM, notices, hashes, manifest, and signature pass `Verify-Release.ps1`.
 - [ ] Tampered signature, extra ZIP file, path escape, reparse point, case collision, downgrade, and partial-install rollback tests reject safely.
 - [ ] Independent security audit has no open Critical/High issue and no exploitable Medium issue.

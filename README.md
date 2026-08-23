@@ -48,6 +48,7 @@ Updates reject signature, repository, tag, name, size, digest, prerelease, and d
 
 - Documented UXP is preferred. CEP fills typed compatibility gaps, QE is experimental, and Windows UI Automation is the last resort.
 - Failed mutations are never replayed through another backend automatically.
+- Sequence export uses the documented UXP encoder path but does not trust a host Promise that can remain pending after rendering; success requires a changed, non-empty output file that remains stable across repeated observations. Existing outputs are rejected unless an explicitly approved overwrite policy is implemented.
 - R2/R3 operations use short-lived, scope-bound, single-use approval IDs and an independent trusted Windows dialog.
 - Raw ExtendScript, arbitrary QE/object paths, raw UI selectors/clicks, shell commands, and credential extraction are not public MCP operations.
 - Listeners bind to localhost, CEP envelopes are HMAC authenticated through a DPAPI CurrentUser broker, and release artifacts never contain runtime bootstrap material.

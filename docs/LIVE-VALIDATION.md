@@ -19,9 +19,11 @@ No real user project or media was used.
   `3ff1945dccec98b746df00b1a874e60faf67b723ee9dc86b707ee005c25741c4`.
 - `project.save` returned true and retained the active project.
 - CEP/QE live checks covered host/project inspection, reflected surface catalog, effect inventory,
-  project create/open/import, sequence creation, and sequence export. The sequence output was a
-  3-second 1280x720 H.264/AAC MP4, 2,837,041 bytes, SHA-256
-  `6f8d26a9190364cbf964042c37465bf5f9aa652c67e425772b76f5765f9addf6`.
+  project create/open/import, and sequence creation. The UXP `EncoderManager.exportSequence` path
+  dispatched the export without treating its host Promise as completion, then independently verified
+  a changed, non-empty, stable output file. The result was a 3-second 1280x720 H.264/AAC MP4,
+  2,837,041 bytes, SHA-256
+  `910c5b0527eb00715048614d108f05934fe0e92d45c1808e870363562ff53712`.
 - The installed native launcher, bundle integrity pin, DPAPI-backed signing broker, one-shot approval
   dialog, MCP tool discovery, and secret-preload scrubbing passed local smoke checks.
 - A final full-surface ledger matched the generated and live UXP fingerprints and checked catalog
@@ -35,8 +37,9 @@ No real user project or media was used.
 
 ## Automated gates
 
-- TypeScript/bridge check: 10 test files, 31 tests, including concurrent one-shot approval claiming
-  and the full-surface safety-plan contract.
+- TypeScript/bridge check: 14 test files, 44 tests, including concurrent one-shot approval claiming,
+  the full-surface safety-plan contract, sequence-export single-flight/stable-output verification,
+  existing-output rejection, and the UDT-only release packaging contract.
 - Native .NET check: 19 tests, including job-object child cleanup, strict UTF-8 HMAC input, and
   hostile broker-locator/preload environment scrubbing.
 - MCP smoke: 13 tools, 761 Adobe UXP members, 139 local plug-ins.

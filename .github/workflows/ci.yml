@@ -33,7 +33,7 @@ jobs:
       - run: npm run test:coverage
       - run: npm run validate:uxp-plan
       - run: npm run compliance:generate
-      - run: npm run uxp:package
+      - run: npm run uxp:dev-archive
       - shell: pwsh
         run: .\scripts\Test-ReleaseSecurity.ps1
       - run: dotnet test .\windows-ui-agent\tests\PremiereMcp.WindowsUiAgent.Tests.csproj --configuration Release

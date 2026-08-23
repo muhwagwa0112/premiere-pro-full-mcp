@@ -14,7 +14,7 @@ The release build also requires a checksum-verified [Syft](https://github.com/an
 
 Generate the private/public key pair once with `npm run release:keygen`. The private key remains under `%LOCALAPPDATA%\PremiereMCP\release-signing-private.xml` with a current-user-only ACL. Only `scripts/install/release-signing-public.xml` is committed.
 
-For the public CCX, add `uxp-plugin/manifest.json` to Adobe UXP Developer Tool and use Package. Name the result `premiere-pro-full-mcp-v<version>.ccx`, then run:
+For the public CCX, add `uxp-plugin/manifest.json` to Adobe UXP Developer Tool and use **Package**. Rename only that UDT-produced result to `premiere-pro-full-mcp-v<version>.ccx`, then run:
 
 ```powershell
 npm run compliance:generate
@@ -22,7 +22,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Build-Release.ps1 
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Verify-Release.ps1
 ```
 
-The release build refuses a dirty worktree, mismatched private/public key, wrong repository, wrong CCX identity, generated UXP bootstrap, or failed MCP/native build. The signed manifest binds the exact commit, repository, tag, version, platform, architecture, ZIP, CCX, SBOM, and notices.
+`Build-Release.ps1` has no CCX fallback: `-CcxPath` is mandatory and is checked before release staging. `npm run uxp:dev-archive` creates only a non-installable `.zip` for source inspection/CI and refuses a `.ccx` output name. The release build also refuses a dirty worktree, mismatched private/public key, wrong repository, wrong CCX filename or identity, generated UXP bootstrap, or failed MCP/native build. The signed manifest binds the exact commit, repository, tag, version, platform, architecture, ZIP, CCX, SBOM, and notices. UDT provenance is a release-operator attestation; ZIP structure alone cannot prove which packager produced it.
 
 ## Installation layout
 
