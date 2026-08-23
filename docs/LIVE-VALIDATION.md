@@ -39,9 +39,10 @@ No real user project or media was used.
 
 ## Automated gates
 
-- TypeScript/bridge check: 14 test files, 45 tests, including concurrent one-shot approval claiming,
+- TypeScript/bridge check: 15 test files, 47 tests, including concurrent one-shot approval claiming,
   the full-surface safety-plan contract, sequence-export single-flight/stable-output verification,
-  existing-output rejection, and the UDT-only release packaging contract.
+  existing-output rejection, UDT-only release packaging, Windows PowerShell 5.1 hashing, and
+  local-path-free release SBOM generation.
 - Native .NET check: 19 tests, including job-object child cleanup, strict UTF-8 HMAC input, and
   hostile broker-locator/preload environment scrubbing.
 - MCP smoke: 13 tools, 761 Adobe UXP members, 139 local plug-ins.
