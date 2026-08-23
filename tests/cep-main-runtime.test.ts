@@ -11,6 +11,7 @@ describe("CEP host scheduling", () => {
     expect(source).toContain("if (busy || hostEvalBusy) return;");
     expect(source).toContain("Date.now() - lastHeartbeatAt >= 20000");
     expect(source).toContain('["--hmac", "cep-hmac", "session-key", "premiere"]');
+    expect(source).toContain("timeout: 120000");
     expect(source).toContain('crypto.createHmac("sha256", sessionHmacKey)');
     expect(source).toContain("crypto.timingSafeEqual(expected, provided)");
     expect(source).toContain('typeof PPMCP.heartbeat!==\\"function\\"');

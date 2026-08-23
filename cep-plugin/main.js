@@ -117,7 +117,10 @@
   }
 
   function loadSessionHmacKey() {
-    var result = childProcess.spawnSync(helper, ["--hmac", "cep-hmac", "session-key", "premiere"], { encoding: "utf8", windowsHide: true, timeout: 30000, maxBuffer: 4096 });
+    // Authenticode chain validation can legitimately take longer than 30s on
+    // a cold Windows trust cache. This remains a single fail-closed startup
+    // authentication; no command is accepted until it succeeds.
+    var result = childProcess.spawnSync(helper, ["--hmac", "cep-hmac", "session-key", "premiere"], { encoding: "utf8", windowsHide: true, timeout: 120000, maxBuffer: 4096 });
     var encoded = String(result.stdout || "").trim();
     if (result.error || result.status !== 0 || !/^[A-Za-z0-9_-]{43}$/.test(encoded)) throw new Error("CEP session key broker rejected the caller");
     var padded = encoded.replace(/-/g, "+").replace(/_/g, "/") + "=";
