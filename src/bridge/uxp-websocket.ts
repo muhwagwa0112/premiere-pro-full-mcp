@@ -88,10 +88,11 @@ export class UxpWebSocketAdapter implements BackendAdapter {
     if (!availability.available || !this.#socket) return this.failure(request.requestId, "UXP_UNAVAILABLE", availability.reason ?? "UXP unavailable", true);
     if (!this.#capabilities.has(request.operation)) return this.failure(request.requestId, "UXP_CAPABILITY_UNAVAILABLE", `Connected host did not advertise ${request.operation}`, false);
     return new Promise<BridgeResponse>((resolve, reject) => {
+      const timeoutMs = request.operation === "export.sequence" ? 30 * 60_000 : 30_000;
       const timer = setTimeout(() => {
         this.#pending.delete(request.requestId);
         resolve(this.failure(request.requestId, "UXP_TIMEOUT", "Premiere UXP command timed out; it was not retried", true));
-      }, 30_000);
+      }, timeoutMs);
       this.#pending.set(request.requestId, { resolve, reject, timer, request });
       try {
         this.#socket?.send(JSON.stringify({ type: "command", ...request }));
@@ -180,15 +181,15 @@ export class UxpWebSocketAdapter implements BackendAdapter {
       this.#pending.delete(response.requestId);
       const hostVersion = response.hostVersion ?? this.#hostVersion;
       let resolved = hostVersion ? { ...response, hostVersion } : response;
-      if (resolved.ok && pending.request.operation === "export.frame") {
+      if (resolved.ok && (pending.request.operation === "export.frame" || pending.request.operation === "export.sequence")) {
         const outputPath = pending.request.args.outputPath;
         if (typeof outputPath !== "string") {
-          resolved = this.failure(response.requestId, "UXP_FRAME_PATH_INVALID", "Frame output path is unavailable for postcondition verification", false);
+          resolved = this.failure(response.requestId, "UXP_EXPORT_PATH_INVALID", "Export output path is unavailable for postcondition verification", false);
         } else {
-          const bytes = await waitForNonEmptyFile(outputPath);
+          const bytes = await waitForNonEmptyFile(outputPath, pending.request.operation === "export.sequence" ? 60_000 : 5_000);
           resolved = bytes === null
-            ? this.failure(response.requestId, "UXP_FRAME_FILE_NOT_VERIFIED", "Premiere confirmed export but no non-empty output file was observed", false)
-            : { ...resolved, createdFiles: [{ name: outputPath, verified: true }], verification: { outcome: "verified", method: `Exporter response and non-empty file readback (${bytes} bytes)` } };
+            ? this.failure(response.requestId, "UXP_EXPORT_FILE_NOT_VERIFIED", "Premiere confirmed export but no non-empty output file was observed", false)
+            : { ...resolved, createdFiles: [{ name: outputPath, verified: true }], verification: { outcome: "verified", method: `Premiere export response and non-empty file readback (${bytes} bytes)` } };
         }
       }
       pending.resolve(resolved);

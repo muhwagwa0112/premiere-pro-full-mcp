@@ -64,7 +64,7 @@ async function apply(label) {
     }
     assert.equal(available, true, "Authenticated UXP panel did not reconnect before apply");
   }
-  const timeout = saved.request.actionId === "export.sequence" ? 5 * 60_000 : 60_000;
+  const timeout = saved.request.actionId === "export.sequence" ? 10 * 60_000 : 60_000;
   const result = data(await client.callTool({ name: "premiere_operations", arguments: { mode: "apply", request } }, undefined, { timeout }));
   assert.equal(result.status, "succeeded", JSON.stringify(result));
   await writeFile(statePath(`${label}-result`), JSON.stringify(result, null, 2), "utf8");

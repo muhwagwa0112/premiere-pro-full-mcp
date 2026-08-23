@@ -4,7 +4,7 @@ const API_CATALOG = require("./api-catalog.cjs");
 
 const CAPABILITIES = [
   "host.inspect", "project.inspect", "sequence.inspect", "project.save", "captions.inspect",
-  "export.frame",
+  "export.frame", "export.sequence",
   "uxp.catalog", "uxp.read", "uxp.edit", "uxp.sensitive", "uxp.filesystem", "uxp.destructive", "uxp.handle.release",
   "uxp.page.read", "uxp.transaction.execute", "uxp.locked.batch", "uxp.events.subscribe", "uxp.events.poll", "uxp.events.unsubscribe"
 ];
@@ -498,6 +498,19 @@ async function execute(operation, args, expectedRevision) {
     const exported = await ppro.Exporter.exportSequenceFrame(context.sequence, frameTime, filename, directory, frameSize.width, frameSize.height);
     if (!exported) throw Object.assign(new Error("Premiere did not confirm frame export"), { code: "UXP_FRAME_EXPORT_NOT_CONFIRMED" });
     return { beforeRevision, afterRevision: beforeRevision, verification: { outcome: "verified", method: "Exporter.exportSequenceFrame returned true; server verifies the output file" }, createdFiles: [{ name: outputPath, verified: false }], result: { exported: true, outputPath, width: frameSize.width, height: frameSize.height } };
+  }
+  if (operation === "export.sequence") {
+    if (!context.sequence) throw Object.assign(new Error("No active sequence"), { code: "UXP_NO_ACTIVE_SEQUENCE" });
+    const outputPath = args && args.outputPath;
+    const presetPath = args && args.presetPath;
+    if (typeof outputPath !== "string" || !/^[A-Za-z]:[\\/]/.test(outputPath) || typeof presetPath !== "string" || !/^[A-Za-z]:[\\/]/.test(presetPath)) {
+      throw Object.assign(new Error("Windows outputPath and presetPath are required"), { code: "UXP_INVALID_SEQUENCE_EXPORT" });
+    }
+    const encoder = ppro.EncoderManager.getManager();
+    if (!encoder || typeof encoder.exportSequence !== "function") throw Object.assign(new Error("Premiere EncoderManager is unavailable"), { code: "UXP_ENCODER_UNAVAILABLE" });
+    const exported = await encoder.exportSequence(context.sequence, ppro.Constants.ExportType.IMMEDIATELY, outputPath, presetPath, true);
+    if (!exported) throw Object.assign(new Error("Premiere did not confirm sequence export"), { code: "UXP_SEQUENCE_EXPORT_NOT_CONFIRMED" });
+    return { beforeRevision, afterRevision: beforeRevision, verification: { outcome: "committed_unverified", method: "EncoderManager.exportSequence returned true; server verifies the output file" }, createdFiles: [{ name: outputPath, verified: false }], result: { exported: true, outputPath } };
   }
   throw Object.assign(new Error(`Unsupported UXP operation: ${operation}`), { code: "UXP_OPERATION_UNSUPPORTED" });
 }

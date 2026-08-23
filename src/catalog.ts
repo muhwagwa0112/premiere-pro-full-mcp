@@ -198,7 +198,7 @@ const actions: ActionDescriptor[] = [
   },
   {
     id: "export.sequence", domain: "export", title: "Export sequence", description: "Export the active sequence with an approved preset and output path.",
-    risk: "R3", authority: "filesystem", preferredBackends: ["uxp", "cep", "ui"], minimumPremiereVersion: "26.3.0", mutatesProject: false, undoable: false,
+    risk: "R3", authority: "filesystem", preferredBackends: ["uxp"], minimumPremiereVersion: "26.3.0", mutatesProject: false, undoable: false,
     verification: "output size and checksum", support: "implemented_unverified", argsSchema: exportSequence,
   },
   {
