@@ -9,6 +9,7 @@ const bundleRoot = resolve(bundleArgument);
 const outputPath = resolve(outputArgument);
 const base = JSON.parse(await readFile(resolve(syftArgument), "utf8"));
 const packageJson = JSON.parse(await readFile(join(repositoryRoot, "package.json"), "utf8"));
+const normalizedLockText = (await readFile(join(repositoryRoot, "package-lock.json"), "utf8")).replace(/\r\n?/g, "\n");
 
 async function walk(directory) {
   const output = [];
@@ -88,7 +89,7 @@ for (const pkg of base.packages) if (pkg.SPDXID !== mainId) relate(mainId, "DEPE
 base.spdxVersion = "SPDX-2.3";
 base.dataLicense = "CC0-1.0";
 base.name = `${packageJson.name}@${packageJson.version}-windows-release`;
-base.documentNamespace = `https://spdx.local/${packageJson.name}/${sha256(await readFile(join(repositoryRoot, "package-lock.json")))}`;
+base.documentNamespace = `https://spdx.local/${packageJson.name}/${sha256(Buffer.from(normalizedLockText))}`;
 base.creationInfo = { created: "2000-01-01T00:00:00.000Z", creators: ["Tool: anchore/syft", "Tool: premiere-pro-full-mcp/scripts/generate-release-sbom.mjs"] };
 base.files = [...existingFiles.values()];
 base.relationships = relationships;

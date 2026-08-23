@@ -5,7 +5,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const lockText = await readFile(resolve(root, "package-lock.json"), "utf8");
+const lockText = (await readFile(resolve(root, "package-lock.json"), "utf8")).replace(/\r\n?/g, "\n");
 const lock = JSON.parse(lockText);
 
 function packageName(path, metadata) {
