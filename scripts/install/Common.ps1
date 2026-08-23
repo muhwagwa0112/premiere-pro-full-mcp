@@ -206,8 +206,9 @@ function Expand-PpMcpSafeArchive {
                 $seen[$canonical] = $true
                 $target = [System.IO.Path]::GetFullPath((Join-Path $destination ($segments -join [System.IO.Path]::DirectorySeparatorChar)))
                 if (-not $target.StartsWith($destinationPrefix, [System.StringComparison]::OrdinalIgnoreCase)) { throw "Archive entry escapes the destination: $name" }
-                $unixMode = ([uint32]$entry.ExternalAttributes -shr 16) -band 0xF000
-                $windowsAttributes = [uint32]$entry.ExternalAttributes -band 0xFFFF
+                $externalAttributes = [System.BitConverter]::ToUInt32([System.BitConverter]::GetBytes([int32]$entry.ExternalAttributes), 0)
+                $unixMode = ($externalAttributes -shr 16) -band 0xF000
+                $windowsAttributes = $externalAttributes -band 0xFFFF
                 if ($unixMode -eq 0xA000 -or ($windowsAttributes -band [uint32][System.IO.FileAttributes]::ReparsePoint)) { throw "Links and reparse points are not allowed in archives: $name" }
                 $totalBytes += [long]$entry.Length
                 if ($entry.Length -gt 1GB -or $totalBytes -gt 2GB -or ($entry.CompressedLength -gt 0 -and $entry.Length / $entry.CompressedLength -gt 5000)) { throw "Archive expansion limits exceeded: $name" }
