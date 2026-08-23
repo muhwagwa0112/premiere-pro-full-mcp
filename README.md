@@ -3,8 +3,7 @@
 [English](#english) · [한국어](#한국어)
 
 <p align="center">
-  <strong>If Premiere Pro Full MCP saved you time, please consider supporting its continued development, testing, and security maintenance.<br>
-  Premiere Pro Full MCP로 시간을 아꼈다면, 계속 개발·테스트·보안 유지보수를 이어갈 수 있도록 후원해 주세요.</strong>
+  <strong>If Premiere Pro Full MCP saved you time, please consider supporting its continued development, testing, and security maintenance.</strong>
 </p>
 
 <p align="center">
