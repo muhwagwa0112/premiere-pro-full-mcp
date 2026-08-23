@@ -25,6 +25,10 @@ const spdxId = (value) => value.replace(/[^A-Za-z0-9.-]+/g, "-").replace(/^-+|-+
 const sha256 = (buffer) => createHash("sha256").update(buffer).digest("hex");
 const mainId = `SPDXRef-Package-${spdxId(packageJson.name)}-${spdxId(packageJson.version)}`;
 base.packages ??= [];
+const syftDocumentRootIds = new Set(base.packages
+  .filter((item) => item.primaryPackagePurpose === "FILE" || String(item.SPDXID ?? "").startsWith("SPDXRef-DocumentRoot-"))
+  .map((item) => item.SPDXID));
+base.packages = base.packages.filter((item) => !syftDocumentRootIds.has(item.SPDXID));
 let mainPackage = base.packages.find((item) => item.name === packageJson.name && item.versionInfo === packageJson.version);
 const previousMainId = mainPackage?.SPDXID;
 if (!mainPackage) {
@@ -48,6 +52,7 @@ const syftFileIds = new Set((base.files ?? []).map((item) => item.SPDXID));
 const existingFiles = new Map();
 const relationships = (base.relationships ?? [])
   .filter((item) => !syftFileIds.has(item.spdxElementId) && !syftFileIds.has(item.relatedSpdxElement))
+  .filter((item) => !syftDocumentRootIds.has(item.spdxElementId) && !syftDocumentRootIds.has(item.relatedSpdxElement))
   .map((item) => ({
     ...item,
     spdxElementId: item.spdxElementId === previousMainId ? mainId : item.spdxElementId,
@@ -88,5 +93,23 @@ base.creationInfo = { created: "2000-01-01T00:00:00.000Z", creators: ["Tool: anc
 base.files = [...existingFiles.values()];
 base.relationships = relationships;
 mainPackage.packageVerificationCode = { packageVerificationCodeValue: sha256(Buffer.from(releaseFiles.map((item) => item.checksums.find((checksum) => checksum.algorithm === "SHA256").checksumValue).sort().join(""))) };
+const localPathLeaks = [];
+function findLocalPathLeaks(value, location = "$") {
+  if (typeof value === "string") {
+    if (/(?:^|[\s"'(=])[A-Za-z]:[\\/]/.test(value) || /^\\\\[^\\]/.test(value) || /(?:^|[\\/])Users[\\/][^\\/]+/i.test(value)) {
+      localPathLeaks.push(`${location}: ${value}`);
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => findLocalPathLeaks(item, `${location}[${index}]`));
+    return;
+  }
+  if (value && typeof value === "object") {
+    for (const [key, item] of Object.entries(value)) findLocalPathLeaks(item, `${location}.${key}`);
+  }
+}
+findLocalPathLeaks(base);
+if (localPathLeaks.length) throw new Error(`SBOM contains local absolute paths:\n${localPathLeaks.join("\n")}`);
 await writeFile(outputPath, `${JSON.stringify(base, null, 2)}\n`, "utf8");
 console.log(`Release SPDX SBOM: ${basename(outputPath)} (${base.packages.length} packages, ${releaseFiles.length} release files, ${base.files.length} cataloged files)`);
