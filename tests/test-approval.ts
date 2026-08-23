@@ -12,16 +12,18 @@ export const testApprovalAuthenticator: ApprovalAuthenticator = {
     const provided = Buffer.from(signature);
     return expected.length === provided.length && timingSafeEqual(expected, provided);
   },
+  async protect(message) { return Buffer.from(message, "utf8").toString("base64"); },
+  async unprotect(ciphertext) { return Buffer.from(ciphertext, "base64").toString("utf8"); },
 };
 
 export async function approveForTest(approvalId: string, directory: string): Promise<void> {
   const pending = join(directory, `pending-${approvalId}.json`);
   const envelope = JSON.parse(await readFile(pending, "utf8")) as { payload: string; signature: string };
   if (!await testApprovalAuthenticator.verify(envelope.payload, envelope.signature)) throw new Error("Test pending signature is invalid");
-  const payload = JSON.parse(envelope.payload) as Record<string, unknown>;
+  const payload = JSON.parse(await testApprovalAuthenticator.unprotect(envelope.payload)) as Record<string, unknown>;
   payload.state = "approved";
   payload.approvedAt = Date.now();
-  const approvedPayload = JSON.stringify(payload);
+  const approvedPayload = await testApprovalAuthenticator.protect(JSON.stringify(payload));
   await writeFile(join(directory, `approved-${approvalId}.json`), JSON.stringify({ payload: approvedPayload, signature: await testApprovalAuthenticator.sign(approvedPayload) }));
   await rm(pending, { force: true });
 }

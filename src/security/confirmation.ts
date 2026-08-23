@@ -1,9 +1,9 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import type { ActionDescriptor, ActionRequest } from "../contracts.js";
-import { brokerSign, brokerVerify } from "./hmac-broker.js";
+import { brokerProtect, brokerSign, brokerUnprotect, brokerVerify } from "./hmac-broker.js";
 import { canonicalJson } from "./signed-envelope.js";
 
 interface ApprovalPayload {
@@ -36,11 +36,15 @@ interface ApprovalEnvelope { payload: string; signature: string }
 export interface ApprovalAuthenticator {
   sign(message: string): Promise<string>;
   verify(message: string, signature: string): Promise<boolean>;
+  protect(message: string): Promise<string>;
+  unprotect(ciphertext: string): Promise<string>;
 }
 
 const brokerAuthenticator: ApprovalAuthenticator = {
   sign: (message) => brokerSign("approval-hmac", message),
   verify: (message, signature) => brokerVerify("approval-hmac", message, signature),
+  protect: brokerProtect,
+  unprotect: brokerUnprotect,
 };
 
 function defaultApprovalDirectory(): string {
@@ -93,6 +97,7 @@ export class ConfirmationService {
 
   async issue(action: ActionDescriptor, request: ActionRequest, ttlMs = 5 * 60_000): Promise<{ approvalId: string; expiresAt: string; summary: Record<string, unknown>; approvalCommand: string }> {
     await mkdir(this.#directory, { recursive: true, mode: 0o700 });
+    await this.cleanupStaleRecords();
     const now = Date.now();
     const approvalId = randomUUID();
     const payload: ApprovalPayload = {
@@ -100,12 +105,13 @@ export class ConfirmationService {
       summary: { title: action.title, risk: action.risk, mutatesProject: action.mutatesProject, undoable: action.undoable, backendPreference: action.preferredBackends },
       issuedAt: now, expiresAt: now + ttlMs, approvedAt: null, nonce: randomBytes(18).toString("base64url"),
     };
-    const payloadText = canonicalJson(payload);
-    await writeAtomic(approvalPath(this.#directory, approvalId, "pending"), { payload: payloadText, signature: await this.#authenticate.sign(payloadText) });
+    const protectedPayload = await this.#authenticate.protect(canonicalJson(payload));
+    await writeAtomic(approvalPath(this.#directory, approvalId, "pending"), { payload: protectedPayload, signature: await this.#authenticate.sign(protectedPayload) });
     return { approvalId, expiresAt: new Date(payload.expiresAt).toISOString(), summary: { actionId: action.id, ...payload.summary }, approvalCommand: `& '${installedHelperPath().replaceAll("'", "''")}' --approval approve ${approvalId}` };
   }
 
   async consume(action: ActionDescriptor, request: ActionRequest, approvalId: string): Promise<void> {
+    await this.cleanupStaleRecords();
     const approvedPath = approvalPath(this.#directory, approvalId, "approved");
     const claimedPath = join(this.#directory, `claimed-${approvalId}-${randomUUID()}.json`);
     // Claim before any asynchronous verification. rename() is the one-shot arbitration
@@ -114,7 +120,7 @@ export class ConfirmationService {
     try {
       const envelope = await readEnvelope(claimedPath);
       if (!await this.#authenticate.verify(envelope.payload, envelope.signature)) throw new Error("Approval signature is invalid");
-      const payload = JSON.parse(envelope.payload) as ApprovalPayload;
+      const payload = JSON.parse(await this.#authenticate.unprotect(envelope.payload)) as ApprovalPayload;
       if (payload.version !== 1 || payload.state !== "approved" || payload.approvalId !== approvalId) throw new Error("Approval is not in the approved state");
       if (payload.expiresAt < Date.now()) throw new Error("Approval has expired");
       if (payload.actionId !== action.id) throw new Error("Approval is for a different action");
@@ -122,6 +128,16 @@ export class ConfirmationService {
       if (payload.request.expectedRevision !== (request.expectedRevision ?? null)) throw new Error("Approval revision mismatch");
     } finally {
       await rm(claimedPath, { force: true });
+    }
+  }
+
+  private async cleanupStaleRecords(maxAgeMs = 10 * 60_000): Promise<void> {
+    const cutoff = Date.now() - maxAgeMs;
+    for (const name of await readdir(this.#directory).catch(() => [] as string[])) {
+      if (!/^(pending|approved|claimed)-[0-9a-f-]+(?:-[0-9a-f-]+)?\.json(?:\..+\.tmp)?$/i.test(name) && !/\.tmp$/i.test(name)) continue;
+      const path = join(this.#directory, name);
+      const metadata = await stat(path).catch(() => null);
+      if (metadata?.isFile() && metadata.mtimeMs < cutoff) await rm(path, { force: true });
     }
   }
 }

@@ -1,112 +1,107 @@
-# Premiere Pro 2026 Local MCP
+# Premiere Pro Full MCP v0.2.0
 
-Local, capability-aware MCP control for the installed Adobe Premiere Pro 2026 host.
-The project is a runtime-adaptive implementation targeting Windows and Premiere Pro 26.3.2.
+[English](#english) · [한국어](#한국어)
 
-## Safety and support contract
+<a href="https://ko-fi.com/muhwagwa0112"><img src="https://storage.ko-fi.com/cdn/kofi2.png?v=3" alt="Support me on Ko-fi" height="36"></a>
 
-- Documented UXP is preferred. CEP/ExtendScript fills documented gaps, QE is experimental,
-  and foreground Windows UI Automation is the last resort.
-- A failed mutating request is never replayed through another backend automatically.
-- R0 inspection and R1 undoable edits may execute directly. R2/R3 operations require a
-  short-lived approval ID created by `premiere_operations` in `preview` mode and explicitly
-  approved out-of-band in a local interactive terminal with `npm run approve -- <approval-id>`.
-- Raw ExtendScript, arbitrary QE, selectors, clicks, shell commands, and credential extraction
-  are not public MCP operations.
-- `verified` means a postcondition was observed in a supported live host. Unit tests and mocks
-  alone never establish live Premiere support.
+Premiere Pro Full MCP is a local, capability-gated MCP server for Adobe Premiere Pro 2026 on Windows. It combines the documented Premiere UXP API, a constrained CEP/ExtendScript bridge, experimental QE discovery, and a fail-closed native Windows UI agent.
 
-## Development
+> This is an unofficial community project and is not affiliated with or endorsed by Adobe Inc. “Full” means the supported API surface is inventoried and routed; it does not mean every UI feature is scriptable in every host state.
 
-Requirements: Node.js 20.19+ (Node 24 preferred), .NET 8 SDK, Premiere Pro 2026 26.3+,
-and UXP Developer Tools.
+## English
+
+### Quick start for Windows
+
+Requirements: Windows 10/11 x64, Premiere Pro 26.3 or later, Creative Cloud Desktop, and Codex Desktop or the Codex CLI. Node.js is not required for the packaged runtime.
+
+1. Download `premiere-pro-full-mcp-v0.2.0-windows.zip` from the [latest release](https://github.com/muhwagwa0112/premiere-pro-full-mcp/releases/latest). Verify its adjacent `.sha256` file, then extract it.
+2. Open PowerShell in the extracted `premiere-pro-full-mcp-0.2.0` folder and run:
+
+   ```powershell
+   powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1
+   ```
+
+   The installer verifies every packaged file, installs only in the current user profile, registers `premiere_pro_full_mcp` with Codex, and opens the bundled CCX.
+3. Approve the independent-plugin warning in Creative Cloud Desktop. Restart Premiere, then open **Window > UXP Plugins > Premiere Pro Full MCP**.
+4. On first use, click **Pair with installed helper…** and select `%LOCALAPPDATA%\PremiereMCP\app\runtime-bootstrap.json`. UXP remembers only the file permission; the session token is not stored in the CCX.
+5. Restart Codex and call the host/capability inspection tools. Run Doctor if the bridge is not connected:
+
+   ```powershell
+   powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\PremiereMCP\app\tools\Doctor.ps1" -CheckLive
+   ```
+
+The executables and PowerShell scripts are not Authenticode-signed. Windows may show SmartScreen warnings. The release uses a separate RSA-signed update manifest, exact asset size/SHA-256 bindings, and an in-package SHA-256 manifest. The initial download still depends on GitHub HTTPS and the published checksum; do not bypass a warning if the checksum or source is unexpected.
+
+### Update and uninstall
 
 ```powershell
-npm install
-npm run inventory:adobe
-npm run check
-dotnet test .\windows-ui-agent\tests\PremiereMcp.WindowsUiAgent.Tests.csproj
-npm run validate:uxp-full -- --ledger "$env:TEMP\ppmcp-uxp-full-surface-live.json"
+# Download and install the newest authenticated GitHub release
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\PremiereMCP\app\tools\Update.ps1"
+
+# Recoverable removal; pairing/workspace data is preserved
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\PremiereMCP\app\tools\Uninstall.ps1"
 ```
 
-Run the local MCP server with `npm start`. Set `PREMIERE_MCP_UXP_TOKEN` to a secret of at
-least 24 characters before connecting the UXP panel. The listener binds to `127.0.0.1`; the
-default port is `17777` and can be changed with `PREMIERE_MCP_UXP_PORT`.
+Updates reject signature, repository, tag, name, size, digest, prerelease, and downgrade mismatches. Remove the CCX separately in Creative Cloud Desktop > Plugins > Manage Plugins.
 
-CEP uses `%LOCALAPPDATA%\PremiereMCP\cep` unless `PREMIERE_MCP_CEP_DIR` is set. It accepts
-typed operation envelopes only. Command, response, and heartbeat files are HMAC authenticated
-through a caller-restricted .NET broker whose DPAPI CurrentUser-protected key is never exported;
-they also include nonce, CEP-session, and freshness checks. The Windows UI agent uses the `PremiereMcpUi` named pipe and
-requires a 24+ character `PREMIERE_MCP_UI_TOKEN`. The UI agent foundation exposes semantic
-UI Automation primitives, but the MCP router rejects UI mutation until a versioned per-feature
-adapter has been registered and live-verified.
+### Safety and capability contract
 
-The registered MCP starts through the installed native `--launch-mcp` broker. It pins the Node,
-Premiere, and installed helper paths and SHA-256 values, clears Node preload variables, and runs a
-single dependency-bundled MCP file whose exact directory contents and hash are verified before
-launching. The runtime therefore does not load executable code from `node_modules`. After any
-source, Node, or Premiere upgrade, rebuild and deliberately update the broker manifest before reinstalling.
+- Documented UXP is preferred. CEP fills typed compatibility gaps, QE is experimental, and Windows UI Automation is the last resort.
+- Failed mutations are never replayed through another backend automatically.
+- R2/R3 operations use short-lived, scope-bound, single-use approval IDs and an independent trusted Windows dialog.
+- Raw ExtendScript, arbitrary QE/object paths, raw UI selectors/clicks, shell commands, and credential extraction are not public MCP operations.
+- Listeners bind to localhost, CEP envelopes are HMAC authenticated through a DPAPI CurrentUser broker, and release artifacts never contain runtime bootstrap material.
+- Filesystem work is confined to explicitly approved canonical roots and rejects reparse-point escapes.
+- No telemetry is collected. Logs and ledgers exclude prompts, arguments, results, tokens, project paths, media names, and personal identifiers.
 
-Filesystem actions are fail-closed until `PREMIERE_MCP_APPROVED_ROOTS` contains one or more
-semicolon-separated absolute roots. Existing paths and the nearest existing parent of new output
-paths are canonicalized so Windows junction/reparse-point escapes are rejected.
+The generated Adobe 26.3 inventory contains 69 roots and 761 callable members. The final live full-surface baseline matched all 761 IDs. Of 312 deterministic read-only calls attempted, 281 succeeded and 31 failed closed because the required method, root, or session handle was unavailable. Another 151 risk-bearing entries were preview-only and 298 context-dependent entries were skipped with explicit reasons. See [live validation](docs/LIVE-VALIDATION.md).
 
-## MCP surface
+### Development
 
-The server exposes capability discovery, inspection, operation lifecycle, and consolidated
-domain tools for project, media, timeline, effects/audio, text/captions, export, workspace,
-plugins, cloud workflows, and the `premiere_api` full-surface router. The generated Adobe 26.3
-catalog contains 69 roots and 761 callable members (418 methods, 323 properties/constants, and
-20 constructor/call signatures). Search it with `uxp.catalog`, then use the server-selected risk
-operation (`uxp.read`, `uxp.edit`, `uxp.sensitive`, `uxp.filesystem`, or `uxp.destructive`).
-Returned native objects use session-bound `$ref` handles; oversized results use explicit pages.
-Transactions, locked read batches, callback-backed APIs, and event subscriptions have bridge-owned
-adapters instead of accepting JavaScript functions.
+Requirements: Node.js 20.19+ (Node 24 preferred), .NET 8 SDK, Premiere Pro 26.3+, and Adobe UXP Developer Tool.
 
-Legacy ExtendScript and QE discovery returns opaque capability IDs from approved roots. It never
-accepts a caller-provided object path or script. QE additionally inventories installed video effects
-and transitions. `ui.catalog` enumerates bounded foreground controls that have a stable AutomationId
-and a supported semantic pattern; `ui.invoke` accepts only an exact AutomationId, allowlisted control
-type, and invoke/toggle/select action. Menu labels, coordinates, raw selectors, arbitrary CSXS events,
-raw JSX, shell execution, and credential access are intentionally not representable.
+```powershell
+npm ci
+npm run inventory:adobe
+npm run check
+npm run test:coverage
+dotnet test .\windows-ui-agent\tests\PremiereMcp.WindowsUiAgent.Tests.csproj --configuration Release
+npm run validate:uxp-plan
+```
 
-Action-specific schemas and backend status are available from
-the `premiere://capabilities` and `premiere://actions/{domain}` resources.
+Release builds require a clean Git worktree and the dedicated private signing key under `%LOCALAPPDATA%\PremiereMCP`. The private key is never committed or uploaded to GitHub Actions. See [deployment](docs/DEPLOYMENT.md), [security](SECURITY.md), and [contributing](CONTRIBUTING.md).
 
-## Current verification boundary
+## 한국어
 
-Automated tests verify the 761-member declaration inventory, fail-closed risk classification,
-schemas, authority, confirmation binding, routing, privacy-safe ledger records, and bridge protocol
-behavior. The full-surface validator checks every catalog ID exactly once against the live catalog,
-but live-executes only deterministic read-only entries. Declaration coverage is not a claim that every
-member succeeds in every host state. CEP, QE, UI, third-party panels, entitlements, modal dialogs, and
-cloud workflows are reported separately. Features which Adobe exposes only through an undocumented or
-credential-bearing interface remain blocked rather than being simulated with raw code or clicks.
+### Windows 빠른 설치
 
-The v0.2.0 release candidate was exercised against installed Premiere Pro 26.3.2 using an isolated
-project under `%LOCALAPPDATA%\PremiereMCP\workspace`. The authenticated UXP bridge advertised the
-full 761-member catalog through a `ws://localhost`-only manifest permission; live checks covered R0
-project/sequence/track handles, an approved R3 deferred-action transaction with exact name readback
-and restoration, project save, and a verified 640x360 PNG frame export. CEP/QE checks covered host,
-project, generated surface, installed effects, project create/open/import, sequence creation, and a
-verified H.264/AAC sequence export. The native approval broker, bundle pinning, and fresh-process MCP
-startup were also exercised. See `docs/LIVE-VALIDATION.md` for the evidence boundary.
+요구 사항은 Windows 10/11 x64, Premiere Pro 26.3 이상, Creative Cloud Desktop, Codex Desktop 또는 Codex CLI입니다. 배포 ZIP에는 자체 포함 네이티브 런처와 번들 MCP가 들어 있어 별도 Node.js 설치가 필요하지 않습니다.
 
-After a final packaged reinstall and host restart, CEP/QE and UI-agent health reconnected automatically.
-UXP workspace registration remains intact, but Adobe UXP Developer Tool still requires **Load** or
-**Load & Watch** after a cold host restart. With the panel loaded in Premiere 26.3.2, the final live
-full-surface run matched the generated fingerprint and found all 761 IDs. It attempted 312 deterministic
-read-only calls: 281 succeeded and 31 failed closed (`METHOD_UNAVAILABLE` 18, `ROOT_UNAVAILABLE` 7,
-`HANDLE_REQUIRED` 6). Another 151 mutation/filesystem/sensitive/destructive entries were preview-only
-and not applied; 298 context-dependent entries were skipped with an explicit reason.
+1. [최신 릴리스](https://github.com/muhwagwa0112/premiere-pro-full-mcp/releases/latest)에서 `premiere-pro-full-mcp-v0.2.0-windows.zip`과 `.sha256`을 내려받아 해시를 확인하고 압축을 풉니다.
+2. 압축을 푼 폴더에서 다음 명령을 실행합니다.
 
-Windows UI Automation health is live-verified through a killable, single-concurrency worker with a hard
-deadline. A foreground read-only catalog returned three semantic controls and an explicit truncated
-result; it did not establish general UI mutation coverage. `ui.invoke` therefore remains fail-closed
-outside registered per-feature adapters. A catalog entry is addressable, not proof that every
-context-dependent Adobe call can succeed without the required project object, plug-in, entitlement,
-media type, or foreground UI state.
+   ```powershell
+   powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1
+   ```
 
-Public release preparation and the required legal/signing decisions are tracked in
-`docs/RELEASE-CHECKLIST.md`. This repository intentionally does not infer a project license from its
-dependencies.
+3. Creative Cloud Desktop에서 독립 플러그인 설치 경고를 승인합니다. Premiere를 재시작한 뒤 **창 > UXP 플러그인 > Premiere Pro Full MCP**를 엽니다.
+4. 첫 실행 때 **Pair with installed helper…**를 누르고 `%LOCALAPPDATA%\PremiereMCP\app\runtime-bootstrap.json`을 선택합니다. CCX에는 세션 토큰이 포함되지 않습니다.
+5. Codex를 재시작합니다. 연결되지 않으면 다음 Doctor를 실행합니다.
+
+   ```powershell
+   powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\PremiereMCP\app\tools\Doctor.ps1" -CheckLive
+   ```
+
+설치기는 패키지 전 파일의 해시를 검증하고 현재 사용자 영역만 변경하며, 기존 설치와 Codex 설정을 실패 시 복원합니다. CCX 설치를 나중에 하려면 `-SkipCcxLaunch`, Codex 등록을 생략하려면 `-SkipCodexRegistration`을 사용합니다.
+
+### 보안 및 지원 범위
+
+이 프로젝트는 “Premiere의 모든 기능이 모든 상황에서 무조건 성공한다”고 주장하지 않습니다. 공개 API 표면 전체를 목록화하고, 라이브 검증된 경로만 지원으로 표시하며, 프로젝트 상태·미디어·플러그인·로그인·권한이 필요한 경로는 명확하게 실패하거나 보류합니다. UXP·CEP·QE·UI 자동화의 검증 범위는 각각 분리해 보고합니다.
+
+취약점은 공개 이슈가 아니라 저장소 **Security > Report a vulnerability**에서 비공개로 신고해 주세요. 토큰, 실제 프로젝트, 사용자 경로, 미디어 이름은 이슈나 로그에 첨부하지 마세요.
+
+## Support
+
+If Premiere Pro Full MCP saves you time, you can support continued development, host-version testing, and security maintenance on [Ko-fi](https://ko-fi.com/muhwagwa0112).
+
+MIT License. Copyright (c) 2026 muhwagwa0112.

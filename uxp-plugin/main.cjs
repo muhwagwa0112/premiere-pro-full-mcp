@@ -564,19 +564,47 @@ function connect() {
 
 document.getElementById("connect").addEventListener("click", connect);
 
+const BOOTSTRAP_PERMISSION_KEY = "premiere-mcp-bootstrap-file-v1";
+
+function validateBootstrap(bootstrap) {
+  if (bootstrap.version !== 1 || !Number.isInteger(bootstrap.port) || bootstrap.port < 1025 || bootstrap.port > 65535 || typeof bootstrap.token !== "string" || bootstrap.token.length < 24) {
+    throw new Error("Provisioned bootstrap is invalid");
+  }
+  return bootstrap;
+}
+
+async function applyBootstrapFile(file) {
+  if (!file || file.name !== "runtime-bootstrap.json") throw new Error("Select the installed runtime-bootstrap.json file");
+  const bootstrap = validateBootstrap(JSON.parse(await file.read()));
+  const permission = await uxp.storage.localFileSystem.createPersistentToken(file);
+  localStorage.setItem(BOOTSTRAP_PERMISSION_KEY, permission);
+  document.getElementById("port").value = String(bootstrap.port);
+  document.getElementById("token").value = bootstrap.token;
+  connect();
+}
+
+document.getElementById("pair").addEventListener("click", async () => {
+  try {
+    const file = await uxp.storage.localFileSystem.getFileForOpening({ types: ["json"], allowMultiple: false });
+    if (!file) return;
+    await applyBootstrapFile(file);
+  } catch (error) {
+    status(error && error.message || "Pairing failed", "error");
+  }
+});
+
 async function connectFromBootstrap() {
   try {
-    const pluginFolder = await uxp.storage.localFileSystem.getPluginFolder();
-    const bootstrapFile = await pluginFolder.getEntry("runtime-bootstrap.json");
-    const bootstrap = JSON.parse(await bootstrapFile.read());
-    if (bootstrap.version !== 1 || !Number.isInteger(bootstrap.port) || bootstrap.port < 1025 || bootstrap.port > 65535 || typeof bootstrap.token !== "string" || bootstrap.token.length < 24) {
-      throw new Error("Provisioned bootstrap is invalid");
-    }
+    const permission = localStorage.getItem(BOOTSTRAP_PERMISSION_KEY);
+    if (!permission) throw new Error("Not paired");
+    const bootstrapFile = await uxp.storage.localFileSystem.getEntryForPersistentToken(permission);
+    const bootstrap = validateBootstrap(JSON.parse(await bootstrapFile.read()));
     document.getElementById("port").value = String(bootstrap.port);
     document.getElementById("token").value = bootstrap.token;
     connect();
   } catch (_) {
-    status("Disconnected\nRun the installed helper with --provision-uxp, or enter the session token manually.");
+    localStorage.removeItem(BOOTSTRAP_PERMISSION_KEY);
+    status("Disconnected\nChoose Pair with installed helper, then select %LOCALAPPDATA%\\PremiereMCP\\app\\runtime-bootstrap.json.");
   }
 }
 

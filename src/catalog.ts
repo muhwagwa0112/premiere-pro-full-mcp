@@ -25,7 +25,7 @@ const subscriptionId = z.object({ subscriptionId: z.string().min(8).max(256) }).
 const eventPoll = z.object({ subscriptionId: z.string().min(8).max(256).optional(), limit: z.number().int().min(1).max(200).default(100) }).strict();
 const capabilityCall = z.object({ capabilityId: z.string().min(8).max(256), arguments: z.array(z.unknown()).max(64).default([]), value: z.unknown().optional(), paths: z.array(z.string().min(1).max(4096)).max(64).optional() }).strict();
 const capabilityCatalog = z.object({ root: z.string().max(128).optional(), objectRef: z.string().min(8).max(256).optional(), query: z.string().max(128).optional(), offset: z.number().int().nonnegative().default(0), limit: z.number().int().min(1).max(200).default(100) }).strict();
-const uiInvoke = z.object({ automationId: z.string().min(1).max(512), controlType: z.enum(["Button", "MenuItem", "CheckBox", "RadioButton", "ListItem", "TabItem"]), action: z.enum(["invoke", "toggle", "select"]) }).strict();
+const uiInvoke = z.object({ capability: z.string().regex(/^[a-f0-9]{64}$/), automationId: z.string().min(1).max(512), controlType: z.enum(["Button", "MenuItem", "CheckBox", "RadioButton", "ListItem", "TabItem"]), action: z.enum(["invoke", "toggle", "select"]) }).strict();
 
 const actions: ActionDescriptor[] = [
   {
@@ -122,7 +122,7 @@ const actions: ActionDescriptor[] = [
     verification: "foreground UI Automation tree", support: "ui_fallback", argsSchema: z.object({ offset: z.number().int().nonnegative().default(0), limit: z.number().int().min(1).max(500).default(200) }).strict(),
   },
   {
-    id: "ui.invoke", domain: "api", title: "Invoke semantic Premiere control", description: "Invoke, toggle, or select an exact foreground Premiere control without coordinates or raw selectors.",
+    id: "ui.invoke", domain: "api", title: "Invoke semantic Premiere control", description: "Use a short-lived, single-use capability issued by ui.catalog to invoke, toggle, or select the exact unchanged foreground Premiere control.",
     risk: "R3", authority: "experimental", preferredBackends: ["ui"], minimumPremiereVersion: "26.3.2", mutatesProject: true, undoable: false,
     verification: "semantic UI state and host readback", support: "ui_fallback", argsSchema: uiInvoke,
   },

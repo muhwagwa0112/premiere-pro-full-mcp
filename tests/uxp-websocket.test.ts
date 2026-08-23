@@ -24,4 +24,18 @@ describe("UXP websocket bridge", () => {
     expect(unsupported.error?.code).toBe("UXP_CAPABILITY_UNAVAILABLE");
     socket.close();
   });
+
+  it("rejects browser origins before accepting a websocket", async () => {
+    const port = 28000 + Math.floor(Math.random() * 2000);
+    const adapter = new UxpWebSocketAdapter("test-token-with-more-than-24-characters", port);
+    adapters.push(adapter);
+    await adapter.start();
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/uxp`, { origin: "https://attacker.example" });
+    socket.on("error", () => {});
+    const status = await new Promise<number>((resolve) => socket.once("unexpected-response", (_request, response) => {
+      response.resume();
+      resolve(response.statusCode ?? 0);
+    }));
+    expect(status).toBe(403);
+  });
 });

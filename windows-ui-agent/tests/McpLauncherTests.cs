@@ -110,22 +110,11 @@ public sealed class McpLauncherTests
     }
 
     [Fact]
-    public void UxpBootstrapTargetMustBeAnInstalledVersionedPluginDirectory()
+    public void UxpBootstrapTargetIsFixedUnderTheCurrentUserApplicationRoot()
     {
         var localBase = Path.Combine(Path.GetTempPath(), $"ppmcp-local-{Guid.NewGuid():N}");
-        var valid = Path.Combine(localBase, "uxp-plugin-0.2.0");
-        Directory.CreateDirectory(valid);
-        File.WriteAllText(Path.Combine(valid, "manifest.json"), "{}");
-        try
-        {
-            Assert.Equal(valid, UxpBootstrapProvisioner.ValidatePluginRoot(valid, localBase));
-            Assert.Throws<UnauthorizedAccessException>(() => UxpBootstrapProvisioner.ValidatePluginRoot(Path.Combine(localBase, "other"), localBase));
-            Assert.Throws<UnauthorizedAccessException>(() => UxpBootstrapProvisioner.ValidatePluginRoot(Path.Combine(localBase, "uxp-plugin-0.2.0", "nested"), localBase));
-        }
-        finally
-        {
-            Directory.Delete(localBase, recursive: true);
-        }
+        Assert.Equal(Path.Combine(Path.GetFullPath(localBase), "app", "runtime-bootstrap.json"), UxpBootstrapProvisioner.ResolveTarget(localBase));
+        Assert.Throws<ArgumentException>(() => UxpBootstrapProvisioner.ResolveTarget(""));
     }
 
     [Fact]

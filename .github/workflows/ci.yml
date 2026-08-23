@@ -12,21 +12,32 @@ jobs:
   test:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
           cache: npm
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           dotnet-version: 8.0.x
       - run: npm ci
+      - run: npm audit --omit=dev --audit-level=high
       - run: npm run inventory:adobe
       - run: npm run check
       - run: npm run test:coverage
       - run: npm run validate:uxp-plan
       - run: npm run compliance:generate
+      - run: npm run uxp:package
+      - shell: pwsh
+        run: .\scripts\Test-ReleaseSecurity.ps1
       - run: dotnet test .\windows-ui-agent\tests\PremiereMcp.WindowsUiAgent.Tests.csproj --configuration Release
+      - run: dotnet list .\windows-ui-agent\PremiereMcp.WindowsUiAgent.csproj package --vulnerable --include-transitive
       - name: Verify generated compliance files are current
         shell: pwsh
         run: |

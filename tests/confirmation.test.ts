@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getAction } from "../src/catalog.js";
@@ -20,6 +20,8 @@ describe("confirmation binding", () => {
     const action = getAction(request.actionId);
     const issued = await service.issue(action, request);
     expect(issued).not.toHaveProperty("token");
+    const stored = await readFile(join(directory, `pending-${issued.approvalId}.json`), "utf8");
+    expect(stored).not.toContain("C:\\approved\\frame.png");
     await approveForTest(issued.approvalId, directory);
     await service.consume(action, request, issued.approvalId);
     await expect(service.consume(action, request, issued.approvalId)).rejects.toThrow();

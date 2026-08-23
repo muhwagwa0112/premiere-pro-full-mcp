@@ -1,5 +1,7 @@
 # Security policy
 
+Supported security fixes are published for the latest `v0.2.x` release. Report vulnerabilities privately through [GitHub Security Advisories](https://github.com/muhwagwa0112/premiere-pro-full-mcp/security/advisories/new). Do not open a public issue for an exploitable finding.
+
 This server is local-only. Do not expose its UXP listener, CEP queue, or UI-agent pipe beyond
 the current Windows user session.
 
@@ -21,10 +23,11 @@ the current Windows user session.
   media names, revision values, person data, or cloud identifiers.
 - Cloud purchase, publish, sharing, deletion, overwrite, and access outside approved roots are R3.
 
-Report vulnerabilities through the repository's **Security** tab using **Report a vulnerability**
-(GitHub Security Advisories) after the public remote is created. If that private channel is not
-enabled, contact the repository owner privately before disclosing details; do not open a public
-issue containing exploit details, real projects, paths, or tokens.
+Release updates are authenticated by a Premiere-specific RSA public key committed in the repository.
+The matching private key is held only under `%LOCALAPPDATA%\PremiereMCP` with a current-user-only ACL;
+it is not shared with the Photoshop project or uploaded to GitHub Actions. The signed manifest binds
+the repository, tag, version, commit, asset names, sizes, SHA-256 values, platform, and architecture.
+The Windows executable and PowerShell scripts are not Authenticode-signed in v0.2.0.
 
 All processes running as the current Windows user, plus the integrity of the repository used to build
 the release, the installed helper, Premiere, and Node, are trust anchors. DPAPI CurrentUser does not isolate mutually hostile

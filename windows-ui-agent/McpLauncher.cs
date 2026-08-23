@@ -26,13 +26,16 @@ internal static class McpLauncher
         };
         start.ArgumentList.Add(Path.GetFullPath(entrypoint));
         var localApplicationData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var premiereRoot = Path.Combine(localApplicationData, "PremiereMCP");
+        foreach (var directory in new[] { premiereRoot, Path.Combine(premiereRoot, "approvals"), Path.Combine(premiereRoot, "cep"), Path.Combine(premiereRoot, "workspace"), Path.Combine(premiereRoot, "secrets") })
+            SecretStore.EnsureCurrentUserDirectory(directory);
         HardenChildEnvironment(start.Environment, localApplicationData);
 
         var runtime = McpRuntimeConfiguration.Create(
             start.Environment,
             SecretStore.GetOrCreateToken,
             localApplicationData,
-            path => Directory.CreateDirectory(path));
+            SecretStore.EnsureCurrentUserDirectory);
         runtime.ApplyTo(start.Environment);
         UiAgentHost.StartBackground(runtime.UiToken, runtime.UiPipeName);
 

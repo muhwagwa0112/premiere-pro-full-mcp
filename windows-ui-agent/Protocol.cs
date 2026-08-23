@@ -188,17 +188,19 @@ public sealed class RequestDispatcher
 
         var allowedProperties = new HashSet<string>(StringComparer.Ordinal)
         {
-            "automationId", "controlType", "action"
+            "capability", "automationId", "controlType", "action"
         };
         if (args.EnumerateObject().Any(property => !allowedProperties.Contains(property.Name)))
         {
             throw new RequestValidationException("args contains a property that is not allowlisted.");
         }
 
+        var capability = RequiredString(args, "capability", 64);
+        if (capability.Length != 64 || capability.Any(character => !Uri.IsHexDigit(character))) throw new RequestValidationException("capability must be a 64-character hexadecimal value issued by ui.catalog.");
         var automationId = RequiredString(args, "automationId", 256);
         var controlType = RequiredString(args, "controlType", 64);
         var action = RequiredString(args, "action", 64);
-        return new ControlInvokeArgs(automationId, controlType, action);
+        return new ControlInvokeArgs(capability.ToLowerInvariant(), automationId, controlType, action);
     }
 
     private static ControlCatalogArgs ParseCatalogArgs(JsonElement args)

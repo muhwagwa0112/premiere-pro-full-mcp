@@ -1,5 +1,8 @@
 using System.Security.Cryptography;
 using System.IO;
+using System.Security.AccessControl;
+using System.Security.Principal;
+using System.Text;
 
 namespace PremiereMcp.WindowsUiAgent;
 
@@ -18,7 +21,7 @@ internal static class SecretStore
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "PremiereMCP",
             "secrets");
-        Directory.CreateDirectory(root);
+        EnsureCurrentUserDirectory(root);
         var path = Path.Combine(root, $"{name}.dpapi");
 
         byte[] protectedValue;
@@ -59,4 +62,29 @@ internal static class SecretStore
 
     internal static string GetOrCreateToken(string name) =>
         UseSecret(name, Convert.ToHexString);
+
+    internal static string ProtectText(string purpose, string value)
+    {
+        var entropy = SHA256.HashData(Entropy.Concat(Encoding.UTF8.GetBytes(purpose)).ToArray());
+        var protectedValue = ProtectedData.Protect(Encoding.UTF8.GetBytes(value), entropy, DataProtectionScope.CurrentUser);
+        return Convert.ToBase64String(protectedValue);
+    }
+
+    internal static string UnprotectText(string purpose, string ciphertext)
+    {
+        var entropy = SHA256.HashData(Entropy.Concat(Encoding.UTF8.GetBytes(purpose)).ToArray());
+        var value = ProtectedData.Unprotect(Convert.FromBase64String(ciphertext), entropy, DataProtectionScope.CurrentUser);
+        return new UTF8Encoding(false, true).GetString(value);
+    }
+
+    internal static void EnsureCurrentUserDirectory(string path)
+    {
+        Directory.CreateDirectory(path);
+        var identity = WindowsIdentity.GetCurrent().User ?? throw new UnauthorizedAccessException("Current Windows identity is unavailable.");
+        var security = new DirectorySecurity();
+        security.SetOwner(identity);
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        security.AddAccessRule(new FileSystemAccessRule(identity, FileSystemRights.FullControl, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
+        new DirectoryInfo(path).SetAccessControl(security);
+    }
 }

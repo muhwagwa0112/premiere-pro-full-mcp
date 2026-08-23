@@ -6,7 +6,7 @@
   var path = require("path");
   var cs = new PremiereCepRuntime();
   var extensionRoot = path.resolve(__dirname);
-  var installedSuffix = path.join("AppData", "Roaming", "Adobe", "CEP", "extensions", "com.local.ppmcp.cep.2026");
+  var installedSuffix = path.join("AppData", "Roaming", "Adobe", "CEP", "extensions", "com.codex.premiere-pro-full-mcp.cep");
   if (extensionRoot.toLowerCase().slice(-installedSuffix.length) !== installedSuffix.toLowerCase()) {
     throw new Error("CEP bridge must run from its trusted installed extension directory");
   }

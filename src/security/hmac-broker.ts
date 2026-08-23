@@ -18,7 +18,7 @@ async function invoke(args: string[], message: string): Promise<{ code: number; 
         const stdout: Buffer[] = [];
         const stderr: Buffer[] = [];
         const timer = setTimeout(() => { child.kill(); reject(new Error("HMAC broker timed out")); }, 10_000);
-        child.stdout.on("data", (chunk: Buffer) => { if (stdout.reduce((sum, value) => sum + value.length, 0) + chunk.length <= 4096) stdout.push(chunk); });
+        child.stdout.on("data", (chunk: Buffer) => { if (stdout.reduce((sum, value) => sum + value.length, 0) + chunk.length <= 1024 * 1024) stdout.push(chunk); });
         child.stderr.on("data", (chunk: Buffer) => { if (stderr.reduce((sum, value) => sum + value.length, 0) + chunk.length <= 4096) stderr.push(chunk); });
         child.once("error", (error) => { clearTimeout(timer); reject(error); });
         child.once("close", (code) => {
@@ -44,4 +44,15 @@ export async function brokerSign(key: KeyName, message: string): Promise<string>
 export async function brokerVerify(key: KeyName, message: string, signature: string): Promise<boolean> {
   if (!/^[A-Za-z0-9_-]{43}$/.test(signature)) return false;
   return (await invoke(["--hmac", key, "verify", "node-server", signature], message)).code === 0;
+}
+
+export async function brokerProtect(message: string): Promise<string> {
+  const value = (await invoke(["--protect", "approval-payload", "protect", "node-server"], message)).stdout.trim();
+  if (!/^[A-Za-z0-9+/=]+$/.test(value)) throw new Error("Protection broker returned invalid ciphertext");
+  return value;
+}
+
+export async function brokerUnprotect(ciphertext: string): Promise<string> {
+  if (!/^[A-Za-z0-9+/=]+$/.test(ciphertext)) throw new Error("Protected approval payload is invalid");
+  return (await invoke(["--protect", "approval-payload", "unprotect", "node-server"], ciphertext)).stdout;
 }

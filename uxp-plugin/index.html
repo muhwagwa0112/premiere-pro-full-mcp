@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Premiere MCP 2026</title>
+  <title>Premiere Pro Full MCP</title>
   <style>
     :root { color-scheme:dark; font:12px/1.35 system-ui,sans-serif; }
     * { box-sizing:border-box; }
@@ -35,7 +35,7 @@
 <body>
   <main class="panel">
     <header>
-      <h1>Premiere MCP 2026</h1>
+      <h1>Premiere Pro Full MCP</h1>
       <span class="badge">Local bridge</span>
     </header>
     <div class="field">
@@ -44,13 +44,14 @@
     </div>
     <div class="field">
       <label for="token">Token</label>
-      <input id="token" type="password" autocomplete="off" placeholder="Provisioned automatically" aria-describedby="status">
+      <input id="token" type="password" autocomplete="off" placeholder="Loaded after pairing" aria-describedby="status">
     </div>
+    <button id="pair" type="button">Pair with installed helper…</button>
     <button id="connect" type="button">Connect</button>
     <div id="status" role="status" aria-live="polite">Disconnected</div>
     <details>
       <summary>Connection details</summary>
-      <p>Authenticated loopback-only bridge. The installer provisions the current-user token; it is never logged.</p>
+      <p>Choose runtime-bootstrap.json from the installed helper once. Only an opaque file permission is remembered; the token is never logged or packaged.</p>
     </details>
   </main>
   <script src="main.cjs"></script>

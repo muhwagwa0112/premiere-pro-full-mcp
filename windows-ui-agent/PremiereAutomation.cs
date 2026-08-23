@@ -4,7 +4,14 @@ using System.Windows.Automation;
 
 namespace PremiereMcp.WindowsUiAgent;
 
-public sealed record ControlInvokeArgs(string AutomationId, string ControlType, string Action);
+public sealed record ControlInvokeArgs(
+    string Capability,
+    string AutomationId,
+    string ControlType,
+    string Action,
+    string? ExpectedName = null,
+    int? ExpectedProcessId = null,
+    long? ExpectedWindowHandle = null);
 public sealed record ControlCatalogArgs(int Offset, int Limit);
 
 public interface IPremiereAutomation
@@ -112,6 +119,14 @@ public sealed class PremiereAutomation : IPremiereAutomation
         {
             throw new PremiereNotForegroundException("Adobe Premiere Pro must be the foreground application for UI mutations.");
         }
+        if (args.ExpectedProcessId is null || args.ExpectedWindowHandle is null || args.ExpectedName is null)
+        {
+            throw new RequestValidationException("ui.invoke requires catalog-bound foreground context.");
+        }
+        if (foreground.Value.ProcessId != args.ExpectedProcessId || foreground.Value.Handle.ToInt64() != args.ExpectedWindowHandle)
+        {
+            throw new ControlActionException("The foreground Premiere window changed after ui.catalog; request a new capability.");
+        }
 
         var root = AutomationElement.FromHandle(foreground.Value.Handle);
         var condition = new AndCondition(
@@ -130,6 +145,14 @@ public sealed class PremiereAutomation : IPremiereAutomation
         }
 
         var target = matches[0];
+        if (!string.Equals(target.Current.Name, args.ExpectedName, StringComparison.Ordinal))
+        {
+            throw new ControlActionException("The semantic control changed after ui.catalog; request a new capability.");
+        }
+        if (!SupportsAction(target, args.Action))
+        {
+            throw new ControlActionException("The semantic action is no longer supported by the catalogued control.");
+        }
         ExecuteAction(target, args.Action);
 
         return new
@@ -219,6 +242,7 @@ public sealed class PremiereAutomation : IPremiereAutomation
         return new
         {
             processId = foreground.Value.ProcessId,
+            windowHandle = foreground.Value.Handle.ToInt64(),
             total = traversalComplete ? matched : (int?)null,
             offset = args.Offset,
             limit = args.Limit,

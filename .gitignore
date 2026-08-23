@@ -3,6 +3,7 @@ dist/
 coverage/
 artifacts/
 release/
+.release-staging/
 bundle/
 validation-results/
 .env

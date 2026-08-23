@@ -41,7 +41,7 @@ public sealed class ProtocolTests
     [Fact]
     public void RejectsExtraInvokeProperties()
     {
-        var json = """{"protocolVersion":1,"requestId":"r1","token":"secret","operation":"ui.control.invoke","args":{"automationId":"exportButton","controlType":"Button","action":"invoke","selector":"#x"}}""";
+        var json = """{"protocolVersion":1,"requestId":"r1","token":"secret","operation":"ui.control.invoke","args":{"capability":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","automationId":"exportButton","controlType":"Button","action":"invoke","selector":"#x"}}""";
         var response = new RequestDispatcher("secret", new FakeAutomation()).Dispatch(json);
 
         Assert.False(response.Ok);
@@ -52,11 +52,11 @@ public sealed class ProtocolTests
     public void DispatchesAllowlistedSemanticInvoke()
     {
         var automation = new FakeAutomation();
-        var json = """{"protocolVersion":1,"requestId":"r1","token":"secret","operation":"ui.control.invoke","args":{"automationId":"exportButton","controlType":"Button","action":"invoke"}}""";
+        var json = """{"protocolVersion":1,"requestId":"r1","token":"secret","operation":"ui.control.invoke","args":{"capability":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","automationId":"exportButton","controlType":"Button","action":"invoke"}}""";
         var response = new RequestDispatcher("secret", automation).Dispatch(json);
 
         Assert.True(response.Ok);
-        Assert.Equal(new ControlInvokeArgs("exportButton", "Button", "invoke"), automation.LastArgs);
+        Assert.Equal(new ControlInvokeArgs(new string('a', 64), "exportButton", "Button", "invoke"), automation.LastArgs);
     }
 
     [Fact]
@@ -83,7 +83,7 @@ public sealed class ProtocolTests
     [Fact]
     public void PreservesUnknownMutationOutcomeAsNonRetryable()
     {
-        var json = """{"protocolVersion":1,"requestId":"r1","token":"secret","operation":"ui.control.invoke","args":{"automationId":"exportButton","controlType":"Button","action":"invoke"}}""";
+        var json = """{"protocolVersion":1,"requestId":"r1","token":"secret","operation":"ui.control.invoke","args":{"capability":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","automationId":"exportButton","controlType":"Button","action":"invoke"}}""";
         var response = new RequestDispatcher("secret", new ThrowingMutationAutomation()).Dispatch(json);
 
         Assert.False(response.Ok);

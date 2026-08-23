@@ -1,6 +1,7 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { stat } from "node:fs/promises";
 import { WebSocketServer, type WebSocket } from "ws";
+import type { IncomingMessage } from "node:http";
 import type { BackendAdapter, BridgeRequest, BridgeResponse } from "../contracts.js";
 import { loadAdobeApiCatalog } from "../adobe-api-catalog.js";
 
@@ -49,6 +50,8 @@ export class UxpWebSocketAdapter implements BackendAdapter {
   #hostVersion: string | null = null;
   #capabilities = new Set<string>();
   #apiFingerprint: string | null = null;
+  readonly #unauthenticated = new Set<WebSocket>();
+  readonly #failedAuthByAddress = new Map<string, number[]>();
 
   constructor(token = process.env.PREMIERE_MCP_UXP_TOKEN ?? null, port = Number.parseInt(process.env.PREMIERE_MCP_UXP_PORT ?? "17777", 10)) {
     this.#token = token && token.length >= 24 ? token : null;
@@ -59,11 +62,17 @@ export class UxpWebSocketAdapter implements BackendAdapter {
     if (!this.#token || this.#server) return;
     this.#apiFingerprint = (await loadAdobeApiCatalog()).fingerprint;
     await new Promise<void>((resolve, reject) => {
-      const server = new WebSocketServer({ host: "127.0.0.1", port: this.#port, path: "/uxp", maxPayload: 1024 * 1024 });
+      const server = new WebSocketServer({
+        host: "127.0.0.1",
+        port: this.#port,
+        path: "/uxp",
+        maxPayload: 1024 * 1024,
+        verifyClient: ({ origin }, done) => done(this.isAllowedOrigin(origin), 403, "Browser origins are not allowed"),
+      });
       this.#server = server;
       server.once("listening", resolve);
       server.once("error", reject);
-      server.on("connection", (socket) => this.handleConnection(socket));
+      server.on("connection", (socket, request) => this.handleConnection(socket, request));
     });
   }
 
@@ -104,11 +113,25 @@ export class UxpWebSocketAdapter implements BackendAdapter {
     this.#socket = null;
     if (this.#server) await new Promise<void>((resolve) => this.#server?.close(() => resolve()));
     this.#server = null;
+    this.#unauthenticated.clear();
+    this.#failedAuthByAddress.clear();
   }
 
-  private handleConnection(socket: WebSocket): void {
+  private handleConnection(socket: WebSocket, request: IncomingMessage): void {
+    const address = request.socket.remoteAddress ?? "unknown";
+    const now = Date.now();
+    const recentFailures = (this.#failedAuthByAddress.get(address) ?? []).filter((timestamp) => now - timestamp < 60_000);
+    this.#failedAuthByAddress.set(address, recentFailures);
+    if (this.#unauthenticated.size >= 4 || recentFailures.length >= 8) {
+      socket.close(1013, "Authentication rate limit exceeded");
+      return;
+    }
+    this.#unauthenticated.add(socket);
     let authenticated = false;
-    const authTimer = setTimeout(() => socket.close(1008, "Authentication required"), 5_000);
+    const authTimer = setTimeout(() => {
+      this.#unauthenticated.delete(socket);
+      socket.close(1008, "Authentication required");
+    }, 5_000);
     socket.on("message", async (data) => {
       const messageBytes = Array.isArray(data) ? data.reduce((total, item) => total + item.byteLength, 0) : data.byteLength;
       if (messageBytes > 1024 * 1024) {
@@ -125,6 +148,9 @@ export class UxpWebSocketAdapter implements BackendAdapter {
       if (!authenticated) {
         const auth = message as Partial<AuthMessage>;
         if (auth.type !== "auth" || auth.protocolVersion !== 1 || typeof auth.token !== "string" || !this.#token || !constantTimeEqual(auth.token, this.#token)) {
+          recentFailures.push(Date.now());
+          this.#failedAuthByAddress.set(address, recentFailures);
+          this.#unauthenticated.delete(socket);
           socket.close(1008, "Authentication failed");
           return;
         }
@@ -138,6 +164,7 @@ export class UxpWebSocketAdapter implements BackendAdapter {
         }
         authenticated = true;
         clearTimeout(authTimer);
+        this.#unauthenticated.delete(socket);
         this.#socket?.close(1012, "Superseded by a new authenticated panel");
         this.#socket = socket;
         this.#hostVersion = auth.hostVersion;
@@ -168,6 +195,7 @@ export class UxpWebSocketAdapter implements BackendAdapter {
     });
     socket.on("close", () => {
       clearTimeout(authTimer);
+      this.#unauthenticated.delete(socket);
       if (socket !== this.#socket) return;
       this.#socket = null;
       this.#hostVersion = null;
@@ -178,6 +206,15 @@ export class UxpWebSocketAdapter implements BackendAdapter {
       }
       this.#pending.clear();
     });
+  }
+
+  private isAllowedOrigin(origin: string | undefined): boolean {
+    if (!origin || origin === "null") return true;
+    try {
+      return new URL(origin).protocol === "uxp:";
+    } catch {
+      return false;
+    }
   }
 
   private failure(requestId: string, code: string, message: string, retryable: boolean): BridgeResponse {

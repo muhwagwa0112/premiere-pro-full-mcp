@@ -50,7 +50,7 @@ export class OperationEngine {
     }));
     const backends = Object.fromEntries(backendEntries);
     return {
-      server: { name: "premiere-pro-2026-local-mcp", version: "0.2.0", transport: "stdio" },
+      server: { name: "premiere-pro-full-mcp", version: "0.2.0", transport: "stdio" },
       target: { product: "Adobe Premiere Pro 2026", version: "26.3.2", platform: "win32" },
       authorities: [...this.#authorities].sort(),
       backends,
@@ -187,11 +187,15 @@ export class OperationEngine {
             warnings: response.verification?.outcome === "committed_unverified" ? ["Host accepted the operation, but its full postcondition was not verified."] : [],
             data: response.result,
           }
-        : this.failureResult(operationId, action.id, action.risk, selected.backend, response.error?.code ?? "BRIDGE_ERROR", response.error?.message ?? "Bridge request failed", response.error?.retryable ?? false);
+        : this.isOutcomeSensitive(action) && (response.error?.retryable ?? false)
+          ? this.outcomeUnknownResult(operationId, action.id, action.risk, selected.backend, response.error?.message ?? "The host may have accepted the operation before the bridge failed")
+          : this.failureResult(operationId, action.id, action.risk, selected.backend, response.error?.code ?? "BRIDGE_ERROR", response.error?.message ?? "Bridge request failed", response.error?.retryable ?? false);
       await this.record(result);
       return result;
     } catch (error) {
-      const result = this.failureResult(operationId, action.id, action.risk, selected.backend, "BRIDGE_EXCEPTION", (error as Error).message, true);
+      const result = this.isOutcomeSensitive(action)
+        ? this.outcomeUnknownResult(operationId, action.id, action.risk, selected.backend, (error as Error).message)
+        : this.failureResult(operationId, action.id, action.risk, selected.backend, "BRIDGE_EXCEPTION", (error as Error).message, true);
       await this.record(result);
       return result;
     }
@@ -232,6 +236,28 @@ export class OperationEngine {
       createdFiles: [],
       warnings: [],
       error: { code, message, retryable },
+    };
+  }
+
+  private isOutcomeSensitive(action: { mutatesProject: boolean; authority: Authority; risk: "R0" | "R1" | "R2" | "R3" }): boolean {
+    return action.mutatesProject || action.authority === "filesystem" || action.authority === "cloud" || action.risk === "R2" || action.risk === "R3";
+  }
+
+  private outcomeUnknownResult(operationId: string, actionId: string, risk: "R0" | "R1" | "R2" | "R3", backend: Backend, detail: string): OperationResult {
+    return {
+      operationId,
+      actionId,
+      status: "failed",
+      backend,
+      hostVersion: null,
+      risk,
+      beforeRevision: null,
+      afterRevision: null,
+      verification: { outcome: "committed_unverified", method: "bridge outcome unavailable after dispatch", detail },
+      undo: { available: false, method: null },
+      createdFiles: [],
+      warnings: ["The host outcome is unknown. Inspect Premiere and output files before any manual retry; never retry this operation automatically."],
+      error: { code: "OUTCOME_UNKNOWN", message: "The operation may have committed before the bridge failed. Inspect host state before retrying.", retryable: false },
     };
   }
 

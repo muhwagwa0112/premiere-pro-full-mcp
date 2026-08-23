@@ -37,6 +37,16 @@ internal static class Program
             try { return McpLauncher.Run(args[1]); }
             catch (Exception ex) { Console.Error.WriteLine($"MCP launcher failed: {ex.Message}"); return 6; }
         }
+        if (args is ["--verify-install"])
+        {
+            try
+            {
+                BrokerSecurity.AssertServerEntryIntegrity(BrokerSecurity.AuthorizedServerEntry);
+                Console.Out.WriteLine("Signed installed runtime verification passed.");
+                return 0;
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"Installed runtime verification failed: {ex.Message}"); return 9; }
+        }
         if (args is ["--hmac", "cep-hmac" or "approval-hmac", "sign", "node-server" or "premiere"])
         {
             try
@@ -66,6 +76,26 @@ internal static class Program
                 return 3;
             }
         }
+        if (args is ["--protect", "approval-payload", "protect", "node-server"])
+        {
+            try
+            {
+                BrokerSecurity.AssertCaller(args[3]);
+                Console.Out.Write(SecretStore.ProtectText(args[1], ReadBoundedStandardInput()));
+                return 0;
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"Protection broker failed: {ex.Message}"); return 3; }
+        }
+        if (args is ["--protect", "approval-payload", "unprotect", "node-server"])
+        {
+            try
+            {
+                BrokerSecurity.AssertCaller(args[3]);
+                Console.Out.Write(SecretStore.UnprotectText(args[1], ReadBoundedStandardInput()));
+                return 0;
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"Protection broker failed: {ex.Message}"); return 3; }
+        }
         if (args is ["--approval", "approve", _])
         {
             try
@@ -80,12 +110,12 @@ internal static class Program
                 return 5;
             }
         }
-        if (args is ["--provision-uxp", _])
+        if (args is ["--provision-uxp"])
         {
             try
             {
-                BrokerSecurity.AssertTrustedInstalledSelf();
-                var path = UxpBootstrapProvisioner.Provision(args[1]);
+                BrokerSecurity.AssertServerEntryIntegrity(BrokerSecurity.AuthorizedServerEntry);
+                var path = UxpBootstrapProvisioner.Provision();
                 Console.Out.WriteLine($"Provisioned authenticated UXP bootstrap: {path}");
                 return 0;
             }

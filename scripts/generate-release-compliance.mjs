@@ -97,7 +97,7 @@ const sbom = execFileSync(command, commandArguments, {
 });
 const normalizedSbom = JSON.parse(sbom);
 const lockHash = createHash("sha256").update(lockText).digest("hex");
-normalizedSbom.documentNamespace = `https://spdx.local/premiere-pro-2026-local-mcp/${lockHash}`;
+normalizedSbom.documentNamespace = `https://spdx.local/premiere-pro-full-mcp/${lockHash}`;
 normalizedSbom.creationInfo.created = "2026-08-23T00:00:00.000Z";
 await writeFile(resolve(root, "SBOM.spdx.json"), `${JSON.stringify(normalizedSbom, null, 2)}\n`, "utf8");
 

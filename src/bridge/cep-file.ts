@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { Backend, BackendAdapter, BridgeRequest, BridgeResponse } from "../contracts.js";
@@ -40,6 +40,7 @@ export class CepFileAdapter implements BackendAdapter {
 
   async availability(): Promise<{ available: boolean; reason?: string; hostVersion?: string }> {
     try {
+      await this.cleanupStaleQueueFiles();
       const heartbeat = JSON.parse(await readFile(join(this.#directory, "heartbeat.json"), "utf8")) as { timestamp?: number; hostVersion?: string; capabilities?: string[]; nonce?: string; sessionId?: string; signature?: string };
       if (!heartbeat.timestamp || Date.now() - heartbeat.timestamp > heartbeatMaxAgeMs) return { available: false, reason: "CEP heartbeat is stale" };
       if (heartbeat.timestamp > Date.now() + 5_000 || typeof heartbeat.nonce !== "string" || typeof heartbeat.sessionId !== "string") return { available: false, reason: "CEP heartbeat timestamp or session is invalid" };
@@ -54,6 +55,7 @@ export class CepFileAdapter implements BackendAdapter {
   }
 
   async execute(request: BridgeRequest): Promise<BridgeResponse> {
+    await this.cleanupStaleQueueFiles();
     if (!this.#sessionId) {
       const status = await this.availability();
       if (!status.available || !this.#sessionId) return this.failure(request.requestId, "CEP_SESSION_UNAVAILABLE", status.reason ?? "CEP session is unavailable", true);
@@ -109,5 +111,15 @@ export class CepFileAdapter implements BackendAdapter {
 
   private failure(requestId: string, code: string, message: string, retryable: boolean): BridgeResponse {
     return { protocolVersion: 1, requestId, ok: false, error: { code, message, retryable } };
+  }
+
+  private async cleanupStaleQueueFiles(maxAgeMs = 2 * 60_000): Promise<void> {
+    const cutoff = Date.now() - maxAgeMs;
+    for (const name of await readdir(this.#directory).catch(() => [] as string[])) {
+      if (!/^(command|response)-[0-9a-f-]+\.json(?:\.tmp)?$/i.test(name)) continue;
+      const path = join(this.#directory, name);
+      const metadata = await stat(path).catch(() => null);
+      if (metadata?.isFile() && metadata.mtimeMs < cutoff) await rm(path, { force: true });
+    }
   }
 }

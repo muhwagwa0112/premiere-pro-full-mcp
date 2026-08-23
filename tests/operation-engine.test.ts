@@ -52,9 +52,32 @@ describe("operation routing", () => {
     const request = { actionId: "project.save", args: {} };
     const result = await engine.execute(await confirm(engine, approvalDirectory, request));
     expect(result.status).toBe("failed");
-    expect(result.error?.code).toBe("UXP_FAILED");
+    expect(result.error?.code).toBe("OUTCOME_UNKNOWN");
+    expect(result.error?.retryable).toBe(false);
+    expect(result.verification.outcome).toBe("committed_unverified");
     expect(uxp.calls).toHaveLength(1);
     expect(cep.calls).toHaveLength(0);
+  });
+
+  it("keeps retryable read-only bridge failures retryable", async () => {
+    const cep = new FakeAdapter("cep", true, (request) => ({ protocolVersion: 1, requestId: request.requestId, ok: false, error: { code: "CEP_TIMEOUT", message: "read timed out", retryable: true } }));
+    const { engine } = await engineWith([cep]);
+    const result = await engine.execute({ actionId: "project.inspect", args: {} });
+    expect(result.error).toMatchObject({ code: "CEP_TIMEOUT", retryable: true });
+    expect(result.verification.outcome).toBe("failed");
+  });
+
+  it("marks mutation adapter exceptions as non-retryable unknown outcomes", async () => {
+    const cep: BackendAdapter = {
+      backend: "cep",
+      availability: async () => ({ available: true, hostVersion: "26.3.2" }),
+      execute: async () => { throw new Error("connection lost after dispatch"); },
+    };
+    const { engine, approvalDirectory } = await engineWith([cep]);
+    const request = { actionId: "project.save", args: {} };
+    const result = await engine.execute(await confirm(engine, approvalDirectory, request));
+    expect(result.error).toMatchObject({ code: "OUTCOME_UNKNOWN", retryable: false });
+    expect(result.warnings[0]).toContain("never retry");
   });
 
   it("requires and consumes exact confirmation for R2 actions", async () => {

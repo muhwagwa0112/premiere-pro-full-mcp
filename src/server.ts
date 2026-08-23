@@ -26,7 +26,7 @@ function normalizeRequest(input: Record<string, unknown>): Record<string, unknow
 }
 
 export function createServer(engine: OperationEngine): McpServer {
-  const server = new McpServer({ name: "premiere-pro-2026-local-mcp", version: "0.2.0" });
+  const server = new McpServer({ name: "premiere-pro-full-mcp", version: "0.2.0" });
 
   server.registerTool("premiere_capabilities", {
     title: "Premiere capabilities",

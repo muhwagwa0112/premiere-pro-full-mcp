@@ -1,0 +1,35 @@
+name: Bug report
+description: Report a reproducible Premiere Pro Full MCP problem without private project data.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not include tokens, project paths, media names, private footage, or security vulnerabilities. Use the Security tab for vulnerabilities.
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Windows, Premiere Pro, MCP release, UXP bridge, and Codex versions.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Use a synthetic project and redact personal paths.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Privacy check
+      options:
+        - label: I removed tokens, personal paths, media names, project data, and credentials.
+          required: true

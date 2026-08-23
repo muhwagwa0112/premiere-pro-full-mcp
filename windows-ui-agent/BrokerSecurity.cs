@@ -3,26 +3,23 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.IO;
+using System.Security.Cryptography.X509Certificates;
+using System.Text.Json;
 
 namespace PremiereMcp.WindowsUiAgent;
 
 internal static class BrokerSecurity
 {
     private static readonly string InstallationRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PremiereMCP");
-    private static readonly string AuthorizedServerEntry = Path.Combine(InstallationRoot, "bundle", "premiere-mcp.bundle.mjs");
+    internal static readonly string AuthorizedServerEntry = Path.Combine(InstallationRoot, "bundle", "premiere-mcp.bundle.mjs");
     private static readonly string TrustedHelperPath = Path.Combine(InstallationRoot, "bin", "PremiereMcp.WindowsUiAgent.exe");
-    internal const string NodeExecutablePath = @"C:\Program Files\nodejs\node.exe";
-    private const string NodeExecutableSha256 = "63c259c81e5d472b5f11c8d506070130cb04a1ecf84b80377a34ed6ec9048088";
-    private const string PremiereExecutablePath = @"C:\Program Files\Adobe\Adobe Premiere Pro 2026\Adobe Premiere Pro.exe";
-    private const string PremiereExecutableSha256 = "5014182d789e62e5d7fbef69e933b12273e0d99707ff72ca86212685aacd002b";
-    private const string CepExecutablePath = @"C:\Program Files\Adobe\Adobe Premiere Pro 2026\CEPHtmlEngine\CEPHtmlEngine.exe";
-    private const string CepExecutableSha256 = "dacd9a11030b8979d687f1af34750552c80123366174caac339651ddb1239c2d";
-    private const string AuthorizedCepExtensionId = "com.local.ppmcp.cep.2026.headless";
-    private static readonly string AuthorizedCepExtensionRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Adobe", "CEP", "extensions", "com.local.ppmcp.cep.2026");
-    private static readonly IReadOnlyDictionary<string, string> AuthorizedRuntime = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-    {
-        ["premiere-mcp.bundle.mjs"] = "2c4c4c8d5d5c2f376207decc6e2de163788b2bc153c4762b6e8d5f7cfb9c8d72",
-    };
+    internal static readonly string NodeExecutablePath = Path.Combine(InstallationRoot, "runtime", "node", "node.exe");
+    private static readonly string RuntimeIntegrityManifestPath = Path.Combine(InstallationRoot, "app", "integrity", "runtime-integrity.json");
+    private static readonly string RuntimeIntegritySignaturePath = Path.Combine(InstallationRoot, "app", "integrity", "runtime-integrity.json.sig");
+    private const string ReleasePublicModulus = "3yADERIQUnDZxb5ZesfsTIZdhY+m97JGs6mZCuP4b1nHL+5cBwzqGxYmtVbdMZaE00KGP5dqVRur1+rjOKQK1QnUMUnb4dRTiFlpDdGYzBzOuJqUy1Mc33aP0U/1Px8ID49ME8vmgI7OvRORsrxhY4IZQGJusx2DkLbba+n0ijGyguYWmaCGLI/rL2zjCCvH4jjqO99vCSKlPdjsu84kYdolR+jMCsWrgPHFBB6WgmVlyzHHr6azAZC2S8jibQznqQAAre2JFKgko7bJOyRfso4k1D/QTJCTDDJR+zSNmwtJwk54Pt9L6/Mn9vkvlFDPQnCJAg37gDuhNgl1IGNexxwTlFug14/CsrJUfsZkRkHU4rNsT6bPpA+PmEej/W4ChTA8zgnhYNQNNOGRxuZ9kXse3cUz6lPOIAzOjdoXivFhFDbnXMBXNhwVUxcithTprTXDuV0Hp+TRNj54z9CH7kya2gY6L1guuQFNm5B/5qaM3cxyxm59KGJPkfeRUh9J";
+    private const string ReleasePublicExponent = "AQAB";
+    private const string AuthorizedCepExtensionId = "com.codex.premiere-pro-full-mcp.cep.headless";
+    private static readonly string AuthorizedCepExtensionRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Adobe", "CEP", "extensions", "com.codex.premiere-pro-full-mcp.cep");
     private const uint SnapshotProcesses = 0x00000002;
     private const uint QueryLimitedInformation = 0x1000;
     private const int ProcessCommandLineInformation = 60;
@@ -32,16 +29,9 @@ internal static class BrokerSecurity
         AssertSelfIntegrity();
         if (!Path.GetFullPath(path).Equals(AuthorizedServerEntry, StringComparison.OrdinalIgnoreCase))
             throw new UnauthorizedAccessException("MCP entrypoint path is not authorized.");
-        var root = Path.GetDirectoryName(AuthorizedServerEntry) ?? throw new InvalidOperationException("MCP runtime root is unavailable.");
-        var files = Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories).ToArray();
-        if (files.Length != AuthorizedRuntime.Count) throw new UnauthorizedAccessException("MCP bundled runtime file set changed.");
-        foreach (var file in files)
-        {
-            var relative = Path.GetRelativePath(root, file).Replace('\\', '/');
-            if (!AuthorizedRuntime.TryGetValue(relative, out var expected) || !HashMatches(file, expected))
-                throw new UnauthorizedAccessException($"MCP bundled runtime integrity check failed for {relative}.");
-        }
-        AssertExecutable(NodeExecutablePath, NodeExecutableSha256, "Node runtime");
+        var runtime = ReadSignedRuntimeIntegrity();
+        AssertRuntimeFile(AuthorizedServerEntry, "bundle/premiere-mcp.bundle.mjs", runtime);
+        AssertRuntimeFile(NodeExecutablePath, "runtime/node/node.exe", runtime);
     }
 
     internal static void AssertTrustedInstalledSelf()
@@ -88,7 +78,8 @@ internal static class BrokerSecurity
         }
         if (role == "node-server")
         {
-            AssertExecutable(image, NodeExecutableSha256, "Node runtime");
+            var runtime = ReadSignedRuntimeIntegrity();
+            AssertRuntimeFile(image, "runtime/node/node.exe", runtime);
             if (!Path.GetFullPath(image).Equals(NodeExecutablePath, StringComparison.OrdinalIgnoreCase))
                 throw new UnauthorizedAccessException("Node broker calls require the pinned Node runtime path.");
             var arguments = ParseCommandLine(GetCommandLine(parent));
@@ -113,9 +104,11 @@ internal static class BrokerSecurity
 
     private static void AssertCepCaller(Process immediateParent, string image)
     {
-        AssertExecutable(image, CepExecutableSha256, "Adobe CEP runtime");
-        if (!Path.GetFullPath(image).Equals(CepExecutablePath, StringComparison.OrdinalIgnoreCase))
-            throw new UnauthorizedAccessException("CEP broker calls require the pinned Premiere CEP runtime path.");
+        var cepPath = Path.GetFullPath(image);
+        AssertAdobeExecutable(cepPath, "CEPHtmlEngine.exe", requirePremiereVersion: false);
+        var premiereRoot = Directory.GetParent(Path.GetDirectoryName(cepPath) ?? string.Empty)?.FullName
+            ?? throw new UnauthorizedAccessException("Adobe CEP runtime root is unavailable.");
+        var premiereExecutablePath = Path.Combine(premiereRoot, "Adobe Premiere Pro.exe");
 
         var commandLine = GetCommandLine(immediateParent);
         var extensionMarker = $"--params_extensionid={AuthorizedCepExtensionId}";
@@ -130,25 +123,77 @@ internal static class BrokerSecurity
             using var ancestor = Process.GetProcessById(ancestorId);
             var ancestorImage = ancestor.MainModule?.FileName ?? throw new UnauthorizedAccessException("CEP ancestor image is unavailable.");
             var fullAncestorImage = Path.GetFullPath(ancestorImage);
-            if (fullAncestorImage.Equals(PremiereExecutablePath, StringComparison.OrdinalIgnoreCase))
+            if (fullAncestorImage.Equals(premiereExecutablePath, StringComparison.OrdinalIgnoreCase))
             {
-                AssertExecutable(fullAncestorImage, PremiereExecutableSha256, "Adobe Premiere Pro");
+                AssertAdobeExecutable(fullAncestorImage, "Adobe Premiere Pro.exe", requirePremiereVersion: true);
                 return;
             }
-            if (!fullAncestorImage.Equals(CepExecutablePath, StringComparison.OrdinalIgnoreCase))
-                throw new UnauthorizedAccessException("CEP broker process ancestry left the pinned Adobe runtime.");
-            AssertExecutable(fullAncestorImage, CepExecutableSha256, "Adobe CEP runtime");
+            if (!fullAncestorImage.Equals(cepPath, StringComparison.OrdinalIgnoreCase))
+                throw new UnauthorizedAccessException("CEP broker process ancestry left the authenticated Adobe runtime.");
+            AssertAdobeExecutable(fullAncestorImage, "CEPHtmlEngine.exe", requirePremiereVersion: false);
             var ancestorCommandLine = GetCommandLine(ancestor);
             if (depth == 0 && !ancestorCommandLine.Contains(AuthorizedCepExtensionRoot, StringComparison.OrdinalIgnoreCase))
                 throw new UnauthorizedAccessException("CEP broker ancestor is not rooted in the authorized extension directory.");
             processId = ancestorId;
         }
-        throw new UnauthorizedAccessException("CEP broker caller is not descended from the pinned Premiere process.");
+        throw new UnauthorizedAccessException("CEP broker caller is not descended from the authenticated Premiere process.");
     }
 
-    private static void AssertExecutable(string path, string expectedHash, string label)
+    private static IReadOnlyDictionary<string, string> ReadSignedRuntimeIntegrity()
     {
-        if (!File.Exists(path) || !HashMatches(path, expectedHash)) throw new UnauthorizedAccessException($"{label} integrity check failed.");
+        if (!File.Exists(RuntimeIntegrityManifestPath) || !File.Exists(RuntimeIntegritySignaturePath))
+            throw new UnauthorizedAccessException("Signed runtime integrity metadata is missing.");
+        var manifestBytes = File.ReadAllBytes(RuntimeIntegrityManifestPath);
+        byte[] signature;
+        try { signature = Convert.FromBase64String(File.ReadAllText(RuntimeIntegritySignaturePath).Trim()); }
+        catch { throw new UnauthorizedAccessException("Runtime integrity signature is invalid."); }
+        using var rsa = RSA.Create();
+        rsa.ImportParameters(new RSAParameters { Modulus = Convert.FromBase64String(ReleasePublicModulus), Exponent = Convert.FromBase64String(ReleasePublicExponent) });
+        if (!rsa.VerifyData(manifestBytes, signature, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1))
+            throw new UnauthorizedAccessException("Runtime integrity signature verification failed.");
+        using var document = JsonDocument.Parse(manifestBytes);
+        var root = document.RootElement;
+        if (!root.TryGetProperty("schema", out var schema) || schema.GetString() != "premiere-pro-full-mcp-runtime/1" ||
+            !root.TryGetProperty("product", out var product) || product.GetString() != "premiere-pro-full-mcp" ||
+            !root.TryGetProperty("files", out var files) || files.ValueKind != JsonValueKind.Object)
+            throw new UnauthorizedAccessException("Runtime integrity metadata is invalid.");
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var property in files.EnumerateObject())
+        {
+            if (property.Name is not ("bundle/premiere-mcp.bundle.mjs" or "runtime/node/node.exe") ||
+                property.Value.ValueKind != JsonValueKind.String || property.Value.GetString() is not { } hash ||
+                hash.Length != 64 || hash.Any(character => !Uri.IsHexDigit(character)))
+                throw new UnauthorizedAccessException("Runtime integrity file entry is invalid.");
+            result.Add(property.Name, hash.ToLowerInvariant());
+        }
+        if (result.Count != 2) throw new UnauthorizedAccessException("Runtime integrity file set is incomplete.");
+        return result;
+    }
+
+    private static void AssertRuntimeFile(string path, string relative, IReadOnlyDictionary<string, string> runtime)
+    {
+        if (!runtime.TryGetValue(relative, out var expected) || !File.Exists(path) || !HashMatches(path, expected))
+            throw new UnauthorizedAccessException($"Signed runtime integrity check failed for {relative}.");
+    }
+
+    private static void AssertAdobeExecutable(string path, string expectedFileName, bool requirePremiereVersion)
+    {
+        var fullPath = Path.GetFullPath(path);
+        var adobeRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Adobe") + Path.DirectorySeparatorChar;
+        if (!fullPath.StartsWith(adobeRoot, StringComparison.OrdinalIgnoreCase) ||
+            !Path.GetFileName(fullPath).Equals(expectedFileName, StringComparison.OrdinalIgnoreCase) ||
+            !fullPath.Contains($"{Path.DirectorySeparatorChar}Adobe Premiere Pro ", StringComparison.OrdinalIgnoreCase) ||
+            !File.Exists(fullPath) || !HasValidAuthenticodeSignature(fullPath))
+            throw new UnauthorizedAccessException($"Authenticated Adobe executable check failed for {expectedFileName}.");
+        using var certificate = new X509Certificate2(X509Certificate.CreateFromSignedFile(fullPath));
+        if (!certificate.Subject.Contains("O=Adobe Inc.", StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException($"{expectedFileName} is not signed by Adobe Inc.");
+        if (requirePremiereVersion)
+        {
+            var versionText = FileVersionInfo.GetVersionInfo(fullPath).ProductVersion?.Split(' ')[0];
+            if (!Version.TryParse(versionText, out var version) || version < new Version(26, 3))
+                throw new UnauthorizedAccessException("Premiere Pro 26.3 or later is required.");
+        }
     }
 
     private static void AssertSelfIntegrity()
@@ -164,6 +209,41 @@ internal static class BrokerSecurity
         var actualBytes = Encoding.ASCII.GetBytes(actual);
         var expectedBytes = Encoding.ASCII.GetBytes(expectedHash);
         return actualBytes.Length == expectedBytes.Length && CryptographicOperations.FixedTimeEquals(actualBytes, expectedBytes);
+    }
+
+    private static bool HasValidAuthenticodeSignature(string path)
+    {
+        var filePath = Marshal.StringToCoTaskMemUni(path);
+        var fileInfo = new WinTrustFileInfo
+        {
+            StructSize = (uint)Marshal.SizeOf<WinTrustFileInfo>(),
+            FilePath = filePath,
+            FileHandle = IntPtr.Zero,
+            KnownSubject = IntPtr.Zero
+        };
+        var fileInfoPointer = Marshal.AllocCoTaskMem(Marshal.SizeOf<WinTrustFileInfo>());
+        try
+        {
+            Marshal.StructureToPtr(fileInfo, fileInfoPointer, false);
+            var trustData = new WinTrustData
+            {
+                StructSize = (uint)Marshal.SizeOf<WinTrustData>(),
+                UiChoice = 2,
+                RevocationChecks = 0,
+                UnionChoice = 1,
+                FileInfo = fileInfoPointer,
+                StateAction = 0,
+                ProviderFlags = 0x00001000,
+                UiContext = 0
+            };
+            var policy = new Guid("00AAC56B-CD44-11d0-8CC2-00C04FC295EE");
+            return WinVerifyTrust(IntPtr.Zero, ref policy, ref trustData) == 0;
+        }
+        finally
+        {
+            Marshal.FreeCoTaskMem(fileInfoPointer);
+            Marshal.FreeCoTaskMem(filePath);
+        }
     }
 
     internal static string Sign(string keyName, string message) => SecretStore.UseSecret(keyName, key =>
@@ -231,6 +311,31 @@ internal static class BrokerSecurity
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] internal string ExeFile;
     }
     [StructLayout(LayoutKind.Sequential)] private struct UnicodeString { internal ushort Length; internal ushort MaximumLength; internal IntPtr Buffer; }
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct WinTrustFileInfo
+    {
+        internal uint StructSize;
+        internal IntPtr FilePath;
+        internal IntPtr FileHandle;
+        internal IntPtr KnownSubject;
+    }
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct WinTrustData
+    {
+        internal uint StructSize;
+        internal IntPtr PolicyCallbackData;
+        internal IntPtr SipClientData;
+        internal uint UiChoice;
+        internal uint RevocationChecks;
+        internal uint UnionChoice;
+        internal IntPtr FileInfo;
+        internal uint StateAction;
+        internal IntPtr StateData;
+        internal IntPtr UrlReference;
+        internal uint ProviderFlags;
+        internal uint UiContext;
+        internal IntPtr SignatureSettings;
+    }
     [DllImport("kernel32.dll", SetLastError = true)] private static extern IntPtr CreateToolhelp32Snapshot(uint flags, uint processId);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern bool Process32First(IntPtr snapshot, ref ProcessEntry32 entry);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern bool Process32Next(IntPtr snapshot, ref ProcessEntry32 entry);
@@ -239,4 +344,5 @@ internal static class BrokerSecurity
     [DllImport("ntdll.dll")] private static extern int NtQueryInformationProcess(IntPtr process, int informationClass, IntPtr information, int informationLength, out int returnLength);
     [DllImport("shell32.dll", SetLastError = true)] private static extern IntPtr CommandLineToArgvW([MarshalAs(UnmanagedType.LPWStr)] string commandLine, out int argumentCount);
     [DllImport("kernel32.dll")] private static extern IntPtr LocalFree(IntPtr memory);
+    [DllImport("wintrust.dll", CharSet = CharSet.Unicode, ExactSpelling = true)] private static extern int WinVerifyTrust(IntPtr window, ref Guid actionId, ref WinTrustData data);
 }
