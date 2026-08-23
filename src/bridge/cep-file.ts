@@ -25,16 +25,18 @@ export class CepFileAdapter implements BackendAdapter {
   readonly backend: Backend;
   readonly #directory: string;
   readonly #timeoutMs: number;
+  readonly #longRunningTimeoutMs: number;
   readonly #authenticate: { sign(value: Record<string, unknown>): Promise<string>; verify(value: Record<string, unknown>, signature: unknown): Promise<boolean> };
   #sessionId: string | null = null;
 
   constructor(backend: "cep" | "qe", directory = process.env.PREMIERE_MCP_CEP_DIR ?? defaultBridgeDirectory(), timeoutMs = 58_000, authenticate = {
     sign: (value: Record<string, unknown>) => brokerSign("cep-hmac", canonicalJson(value)),
     verify: (value: Record<string, unknown>, signature: unknown) => typeof signature === "string" ? brokerVerify("cep-hmac", canonicalJson(value), signature) : Promise.resolve(false),
-  }) {
+  }, longRunningTimeoutMs = 5 * 60_000) {
     this.backend = backend;
     this.#directory = directory;
     this.#timeoutMs = timeoutMs;
+    this.#longRunningTimeoutMs = Math.max(timeoutMs, longRunningTimeoutMs);
     this.#authenticate = authenticate;
   }
 
@@ -82,7 +84,12 @@ export class CepFileAdapter implements BackendAdapter {
     if (Buffer.byteLength(body, "utf8") > 1024 * 1024) return this.failure(request.requestId, "CEP_MESSAGE_TOO_LARGE", "CEP request exceeds 1 MiB", false);
     await writeFile(temporaryPath, body, { encoding: "utf8", mode: 0o600, flag: "wx" });
     await rename(temporaryPath, commandPath);
-    const deadline = Date.now() + this.#timeoutMs;
+    // The signed command must still be accepted within the one-minute
+    // freshness window. Once CEP has authenticated and consumed it, a direct
+    // sequence render may legitimately need several minutes before its signed
+    // response can be produced.
+    const responseTimeoutMs = request.operation === "export.sequence" ? this.#longRunningTimeoutMs : this.#timeoutMs;
+    const deadline = Date.now() + responseTimeoutMs;
     try {
       while (Date.now() < deadline) {
         try {

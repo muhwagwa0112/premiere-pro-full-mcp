@@ -13,6 +13,8 @@ describe("bounded live bridge deadlines", () => {
 
     expect(cep).toContain("timeoutMs = 58_000");
     expect(cep).toContain("Math.min(this.#timeoutMs, 60_000)");
+    expect(cep).toContain('request.operation === "export.sequence" ? this.#longRunningTimeoutMs : this.#timeoutMs');
+    expect(cep).toContain("longRunningTimeoutMs = 5 * 60_000");
     expect(ui).toContain('operation === "premiere.controls.catalog" ? 50_000 : 5_000');
     expect(worker).toContain("CatalogDeadline = TimeSpan.FromSeconds(45)");
     expect(broker).toContain('["--hmac", key, "session-key", "node-server"]');
