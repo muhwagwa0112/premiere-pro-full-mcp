@@ -42,13 +42,15 @@ async function call(name, actionId, args = {}) {
 try {
   await client.connect(transport);
   const capabilities = await call("capabilities");
+  // UI automation is intentionally foreground-bound. Probe it immediately
+  // after the caller has focused Premiere, before longer CEP/QE round trips.
+  const uiCatalog = await call("ui.catalog", "ui.catalog", { offset: 0, limit: 20 });
   process.stderr.write("[live-host-probe] host.inspect\n");
   const host = data(await client.callTool({ name: "premiere_inspect", arguments: { actionId: "host.inspect", args: {} } }, undefined, { timeout: 50_000, maxTotalTimeout: 50_000 }));
   process.stderr.write("[live-host-probe] project.inspect\n");
   const project = data(await client.callTool({ name: "premiere_inspect", arguments: { actionId: "project.inspect", args: {} } }, undefined, { timeout: 50_000, maxTotalTimeout: 50_000 }));
   const appCatalog = await call("cep.surface.catalog", "cep.surface.catalog", { root: "app", query: "project", offset: 0, limit: 200 });
   const qeCatalog = await call("qe.catalog", "qe.catalog", { root: "qeProject", query: "effect", offset: 0, limit: 100 });
-  const uiCatalog = await call("ui.catalog", "ui.catalog", { offset: 0, limit: 20 });
 
   if ([appCatalog, qeCatalog, uiCatalog].some((result) => result.status !== "succeeded")) {
     process.stderr.write(JSON.stringify({ appCatalog, qeCatalog, uiCatalog }, null, 2) + "\n");

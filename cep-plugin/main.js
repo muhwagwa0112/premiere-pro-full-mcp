@@ -29,6 +29,7 @@
   var leader = false;
   var leaderAcquiredAt = 0;
   var lastLeaderRenewal = 0;
+  var lastHeartbeatAt = 0;
   var writeCounter = 0;
   var leaderPath = path.join(directory, "bridge-owner.lock");
   var LEADER_LEASE_MS = 60000;
@@ -165,6 +166,7 @@
           var unsigned = { timestamp: Date.now(), hostVersion: host.hostVersion || "unknown", capabilities: host.capabilities || ["typed"], nonce: base64url(crypto.randomBytes(18)), sessionId: sessionId };
           unsigned.signature = sign(unsigned);
           atomicWrite(path.join(directory, "heartbeat.json"), unsigned);
+          lastHeartbeatAt = Date.now();
         } catch (_) {
           // A transient broker or filesystem failure must not terminate the timer.
         } finally {
@@ -196,6 +198,10 @@
   function poll() {
     if (!renewLeadership()) return;
     if (busy || hostEvalBusy) return;
+    // A signed heartbeat must remain fresh across a burst of authenticated
+    // commands. Refresh it before accepting more work instead of allowing a
+    // long verify/eval/sign sequence to age out the next request.
+    if (Date.now() - lastHeartbeatAt >= 20000) { heartbeat(); return; }
     var filename;
     try { filename = nextCommand(); } catch (_) { return; }
     if (!filename) return;

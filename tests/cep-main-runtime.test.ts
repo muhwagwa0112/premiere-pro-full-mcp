@@ -7,7 +7,9 @@ describe("CEP host scheduling", () => {
 
     expect(source).toContain('"PremiereMCP", "cep-public-v1"');
     expect(source).toContain("var hostEvalBusy = false;");
+    expect(source).toContain("var lastHeartbeatAt = 0;");
     expect(source).toContain("if (busy || hostEvalBusy) return;");
+    expect(source).toContain("Date.now() - lastHeartbeatAt >= 20000");
     expect(source).toContain('typeof PPMCP.heartbeat!==\\"function\\"');
     expect(source).toContain('typeof PPMCP.dispatch!==\\"function\\"');
     expect(source).not.toContain('hostLoaderPrefix + "return PPMCP.heartbeat()');
