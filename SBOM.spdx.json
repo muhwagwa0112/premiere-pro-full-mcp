@@ -7,7 +7,8 @@
   "creationInfo": {
     "created": "2026-08-23T00:00:00.000Z",
     "creators": [
-      "Tool: npm/cli-11.9.0"
+      "Tool: npm/cli",
+      "Tool: premiere-pro-full-mcp/scripts/generate-release-compliance.mjs"
     ]
   },
   "documentDescribes": [

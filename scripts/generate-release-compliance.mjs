@@ -37,8 +37,9 @@ for (const entry of packages) {
 }
 const unique = [...uniqueMap.values()];
 const licenseRoot = resolve(root, "THIRD-PARTY-LICENSES");
-await rm(licenseRoot, { recursive: true, force: true });
-await mkdir(resolve(licenseRoot, "node"), { recursive: true });
+const nodeLicenseRoot = resolve(licenseRoot, "node");
+await rm(nodeLicenseRoot, { recursive: true, force: true });
+await mkdir(nodeLicenseRoot, { recursive: true });
 
 function safeDirectoryName(entry) {
   return `${entry.name.replace(/^@/, "").replaceAll("/", "__").replaceAll(/[^A-Za-z0-9_.-]/g, "_")}@${entry.version}`;
@@ -63,13 +64,10 @@ for (const entry of unique) {
   entry.licenseText = `${relativeDirectory}/${files.map((file) => file.name).join(", ")}`;
 }
 
-const dotnetRoot = resolve(process.env.ProgramFiles || "C:\\Program Files", "dotnet");
 const dotnetNotices = ["LICENSE.txt", "ThirdPartyNotices.txt"];
-await mkdir(resolve(licenseRoot, "dotnet"), { recursive: true });
 for (const file of dotnetNotices) {
-  const source = resolve(dotnetRoot, file);
-  if (!(await stat(source).catch(() => null))) throw new Error(`Required .NET redistribution notice is missing: ${file}`);
-  await cp(source, resolve(licenseRoot, "dotnet", file));
+  const pinnedNotice = resolve(licenseRoot, "dotnet", file);
+  if (!(await stat(pinnedNotice).catch(() => null))) throw new Error(`Pinned .NET redistribution notice is missing: ${file}`);
 }
 
 const lines = [
@@ -99,6 +97,7 @@ const normalizedSbom = JSON.parse(sbom);
 const lockHash = createHash("sha256").update(lockText).digest("hex");
 normalizedSbom.documentNamespace = `https://spdx.local/premiere-pro-full-mcp/${lockHash}`;
 normalizedSbom.creationInfo.created = "2026-08-23T00:00:00.000Z";
+normalizedSbom.creationInfo.creators = ["Tool: npm/cli", "Tool: premiere-pro-full-mcp/scripts/generate-release-compliance.mjs"];
 await writeFile(resolve(root, "SBOM.spdx.json"), `${JSON.stringify(normalizedSbom, null, 2)}\n`, "utf8");
 
 process.stdout.write(`${JSON.stringify({

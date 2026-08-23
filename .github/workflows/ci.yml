@@ -33,7 +33,7 @@ jobs:
           cache: npm
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
-          dotnet-version: 8.0.x
+          dotnet-version: 8.0.424
       - run: npm ci
       - run: npm audit --omit=dev --audit-level=high
       - run: npm run inventory:adobe
