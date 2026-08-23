@@ -602,8 +602,14 @@ async function applyBootstrapFile(file) {
 
 document.getElementById("pair").addEventListener("click", async () => {
   try {
-    const file = await uxp.storage.localFileSystem.getFileForOpening({ types: ["json"], allowMultiple: false });
-    if (!file) return;
+    status("Select the installed runtime-bootstrap.json file…");
+    const selection = await uxp.storage.localFileSystem.getFileForOpening({ types: ["json"], allowMultiple: false });
+    const file = Array.isArray(selection) ? selection[0] : selection;
+    if (!file) {
+      status("Disconnected — select Pair to connect.");
+      return;
+    }
+    status("Validating installed helper…");
     await applyBootstrapFile(file);
   } catch (error) {
     status(error && error.message || "Pairing failed", "error");
@@ -626,18 +632,3 @@ async function connectFromBootstrap() {
 }
 
 void connectFromBootstrap();
-
-// Register the manifest panel explicitly. Premiere can discover an installed
-// CCX menu entry without this lifecycle contract yet create only an empty
-// panel surface. The first panel's markup already lives in index.html, so the
-// lifecycle hooks intentionally leave the shared document in place.
-uxp.entrypoints.setup({
-  panels: {
-    premiereMcp2026Panel: {
-      create() {},
-      show() {},
-      hide() {},
-      destroy() {}
-    }
-  }
-});

@@ -3,13 +3,14 @@
 <head>
   <meta charset="utf-8">
   <title>Premiere Pro Full MCP</title>
+  <script defer src="./main.js"></script>
   <style>
     :root { color-scheme:dark; font:12px/1.35 system-ui,sans-serif; }
     * { box-sizing:border-box; }
     html { width:100%; height:100vh; min-width:0; margin:0; background:#1e1e1e; color:#f1f1f1; }
     body { position:relative; width:100%; height:100vh; min-width:0; min-height:260px; margin:0; overflow:auto; background:#1e1e1e; color:#f1f1f1; }
     .panel { position:absolute; inset:0; display:block; width:100%; min-width:0; min-height:260px; padding:7px; overflow:auto; }
-    header { display:flex; align-items:center; justify-content:space-between; gap:8px; min-width:0; }
+    .panel-header { display:flex; align-items:center; justify-content:space-between; gap:8px; min-width:0; }
     h1 { min-width:0; margin:0; overflow:hidden; font-size:14px; font-weight:600; line-height:1.2; text-overflow:ellipsis; white-space:nowrap; }
     .badge { flex:none; padding:2px 6px; border:1px solid #555; border-radius:999px; color:#cfcfcf; font-size:10px; }
     .field { display:block; width:100%; min-width:0; margin:4px 0; }
@@ -29,11 +30,11 @@
   </style>
 </head>
 <body>
-  <main class="panel">
-    <header>
+  <div id="premiere-mcp-panel" class="panel">
+    <div class="panel-header">
       <h1>Premiere Pro Full MCP</h1>
       <span class="badge">Local bridge</span>
-    </header>
+    </div>
     <div class="field">
       <label for="port">Port</label>
       <input id="port" value="17777" inputmode="numeric" aria-describedby="status">
@@ -45,7 +46,6 @@
     <button id="pair" type="button" title="Select the installed runtime-bootstrap.json file. The token is never logged or packaged.">Pair with installed helper…</button>
     <button id="connect" type="button">Connect</button>
     <div id="status" role="status" aria-live="polite">Disconnected</div>
-  </main>
-  <script src="main.cjs"></script>
+  </div>
 </body>
 </html>

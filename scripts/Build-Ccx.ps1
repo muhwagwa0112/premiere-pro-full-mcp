@@ -19,7 +19,7 @@ foreach ($path in @($stagingRoot, $verificationRoot)) { if (Test-Path -LiteralPa
 if (Test-Path -LiteralPath $OutputPath) { Remove-Item -LiteralPath $OutputPath -Force }
 New-Item -ItemType Directory -Path $stagingRoot -Force | Out-Null
 New-Item -ItemType Directory -Path (Split-Path -Parent $OutputPath) -Force | Out-Null
-foreach ($name in @('manifest.json', 'index.html', 'main.cjs', 'api-catalog.cjs')) {
+foreach ($name in @('manifest.json', 'index.html', 'main.js', 'main.cjs', 'api-catalog.cjs')) {
     $source = Join-Path $pluginRoot $name
     if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "UXP package file is missing: $source" }
     Copy-Item -LiteralPath $source -Destination (Join-Path $stagingRoot $name) -Force
