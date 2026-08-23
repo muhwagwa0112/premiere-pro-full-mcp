@@ -199,7 +199,7 @@ function Expand-PpMcpSafeArchive {
             foreach ($entry in $zip.Entries) {
                 $name = [string]$entry.FullName
                 if (-not $name -or $name.IndexOf([char]0) -ge 0 -or $name -match '^[\\/]' -or $name.Contains(':')) { throw "Unsafe archive entry: $name" }
-                $segments = @($name -split '[\\/]') | Where-Object { $_ -ne '' }
+                $segments = @(@($name -split '[\\/]') | Where-Object { $_ -ne '' })
                 if (-not $segments.Count -or ($segments | Where-Object { $_ -in @('.', '..') -or $_ -match '[\. ]$' }).Count) { throw "Unsafe archive path segment: $name" }
                 $canonical = ($segments -join '/').ToLowerInvariant()
                 if ($seen.ContainsKey($canonical)) { throw "Duplicate or case-colliding archive entry: $name" }
