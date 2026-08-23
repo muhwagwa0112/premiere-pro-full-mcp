@@ -604,7 +604,7 @@ async function connectFromBootstrap() {
     connect();
   } catch (_) {
     localStorage.removeItem(BOOTSTRAP_PERMISSION_KEY);
-    status("Disconnected\nChoose Pair with installed helper, then select %LOCALAPPDATA%\\PremiereMCP\\app\\runtime-bootstrap.json.");
+    status("Disconnected — select Pair to connect.");
   }
 }
 

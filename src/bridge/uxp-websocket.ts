@@ -209,7 +209,10 @@ export class UxpWebSocketAdapter implements BackendAdapter {
   }
 
   private isAllowedOrigin(origin: string | undefined): boolean {
-    if (!origin || origin === "null") return true;
+    // Premiere Pro 26.3 identifies UXP panel websocket handshakes with the
+    // exact opaque file origin below. Keep the match exact: accepting general
+    // file URLs would unnecessarily broaden the local bridge surface.
+    if (!origin || origin === "null" || origin === "file://") return true;
     try {
       return new URL(origin).protocol === "uxp:";
     } catch {

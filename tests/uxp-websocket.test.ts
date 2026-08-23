@@ -38,4 +38,19 @@ describe("UXP websocket bridge", () => {
     }));
     expect(status).toBe(403);
   });
+
+  it("accepts Premiere UXP's exact file origin while still requiring authentication", async () => {
+    const port = 30001 + Math.floor(Math.random() * 2000);
+    const token = "test-token-with-more-than-24-characters";
+    const adapter = new UxpWebSocketAdapter(token, port);
+    adapters.push(adapter);
+    await adapter.start();
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/uxp`, { origin: "file://" });
+    await new Promise<void>((resolve) => socket.once("open", () => resolve()));
+    const catalog = await loadAdobeApiCatalog();
+    socket.send(JSON.stringify({ type: "auth", protocolVersion: 1, token, hostVersion: "26.3.2", capabilities: ["host.inspect"], apiFingerprint: catalog.fingerprint }));
+    await new Promise<void>((resolve) => socket.once("message", () => resolve()));
+    expect((await adapter.availability()).available).toBe(true);
+    socket.close();
+  });
 });
