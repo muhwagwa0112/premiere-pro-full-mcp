@@ -10,7 +10,7 @@ namespace PremiereMcp.WindowsUiAgent;
 
 internal static class BrokerSecurity
 {
-    private static readonly string InstallationRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PremiereMCP");
+    internal static readonly string InstallationRoot = ResolveInstallationRoot();
     internal static readonly string AuthorizedServerEntry = Path.Combine(InstallationRoot, "bundle", "premiere-mcp.bundle.mjs");
     private static readonly string TrustedHelperPath = Path.Combine(InstallationRoot, "bin", "PremiereMcp.WindowsUiAgent.exe");
     internal static readonly string NodeExecutablePath = Path.Combine(InstallationRoot, "runtime", "node", "node.exe");
@@ -23,6 +23,18 @@ internal static class BrokerSecurity
     private const uint SnapshotProcesses = 0x00000002;
     private const uint QueryLimitedInformation = 0x1000;
     private const int ProcessCommandLineInformation = 60;
+
+    private static string ResolveInstallationRoot()
+    {
+        var configured = Environment.GetEnvironmentVariable("PREMIERE_MCP_INSTALL_ROOT");
+        var root = string.IsNullOrWhiteSpace(configured)
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PremiereMCP")
+            : Path.GetFullPath(configured);
+        var pathRoot = Path.GetPathRoot(root)?.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (string.IsNullOrWhiteSpace(root) || root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).Equals(pathRoot, StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException("Premiere MCP installation root is unsafe.");
+        return root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+    }
 
     internal static void AssertServerEntryIntegrity(string path)
     {

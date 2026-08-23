@@ -11,6 +11,8 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Common.ps1')
 $packageRoot = if ($PackagePath) { [System.IO.Path]::GetFullPath($PackagePath) } else { [System.IO.Path]::GetFullPath((Split-Path -Parent $PSCommandPath)) }
 $resolvedInstallRoot = Get-PpMcpInstallRoot -InstallRoot $InstallRoot
+$previousInstallRootEnvironment = $env:PREMIERE_MCP_INSTALL_ROOT
+$env:PREMIERE_MCP_INSTALL_ROOT = $resolvedInstallRoot
 $resolvedCepRoot = Get-PpMcpCepInstallRoot -CepInstallRoot $CepInstallRoot
 $releaseMetadataPath = Join-Path $packageRoot 'release-manifest.json'
 $hashManifestPath = Join-Path $packageRoot 'MANIFEST.sha256'
@@ -149,6 +151,7 @@ try {
     throw
 } finally {
     if (Test-Path -LiteralPath $stageRoot) { Remove-Item -LiteralPath $stageRoot -Recurse -Force }
+    $env:PREMIERE_MCP_INSTALL_ROOT = $previousInstallRootEnvironment
 }
 
 Write-Host "Installed Premiere Pro Full MCP $version for the current Windows user."

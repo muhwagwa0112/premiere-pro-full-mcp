@@ -38,10 +38,15 @@ foreach ($binding in $bindings) {
 
 $temporaryBase = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
 $temporaryRoot = Join-Path $temporaryBase ('premiere-mcp-release-smoke-' + [Guid]::NewGuid().ToString('N'))
+$originalLocalAppData = $env:LOCALAPPDATA
+$originalInstallRootEnvironment = $env:PREMIERE_MCP_INSTALL_ROOT
 if (-not ([System.IO.Path]::GetFullPath($temporaryRoot)).StartsWith($temporaryBase, [System.StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe release verification temp path.' }
 try {
     $expanded = Join-Path $temporaryRoot 'expanded'
-    $installRoot = Join-Path $temporaryRoot 'installed'
+    $isolatedLocalAppData = Join-Path $temporaryRoot 'localappdata'
+    $env:LOCALAPPDATA = $isolatedLocalAppData
+    $installRoot = Join-Path $isolatedLocalAppData 'PremiereMCP'
+    $env:PREMIERE_MCP_INSTALL_ROOT = $installRoot
     $cepRoot = Join-Path $temporaryRoot 'cep-extension'
     New-Item -ItemType Directory -Path $expanded -Force | Out-Null
     Expand-PpMcpSafeArchive -ArchivePath $ArchivePath -DestinationPath $expanded
@@ -81,4 +86,8 @@ try {
     Write-Host "Authenticated SHA-256: $(Get-PpMcpSha256 $ArchivePath)"
     Write-Host 'Tampered signature rejection: passed'
     Write-Host 'Isolated install, Doctor, and recoverable uninstall: passed'
-} finally { if (Test-Path -LiteralPath $temporaryRoot) { Remove-Item -LiteralPath $temporaryRoot -Recurse -Force } }
+} finally {
+    $env:LOCALAPPDATA = $originalLocalAppData
+    $env:PREMIERE_MCP_INSTALL_ROOT = $originalInstallRootEnvironment
+    if (Test-Path -LiteralPath $temporaryRoot) { Remove-Item -LiteralPath $temporaryRoot -Recurse -Force }
+}

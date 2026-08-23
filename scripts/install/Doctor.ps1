@@ -11,6 +11,8 @@ param(
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Common.ps1')
 $resolvedInstallRoot = Get-PpMcpInstallRoot -InstallRoot $InstallRoot
+$previousInstallRootEnvironment = $env:PREMIERE_MCP_INSTALL_ROOT
+$env:PREMIERE_MCP_INSTALL_ROOT = $resolvedInstallRoot
 $resolvedCepRoot = Get-PpMcpCepInstallRoot -CepInstallRoot $CepInstallRoot
 $checks = New-Object System.Collections.ArrayList
 function Add-Check([string]$Name, [bool]$Ok, [string]$Detail, [bool]$Required = $true) { [void]$checks.Add([ordered]@{ name = $Name; ok = $Ok; required = $Required; detail = $Detail }) }
@@ -57,4 +59,5 @@ if ($CheckLive -and $metadata) {
 $success = -not ($checks | Where-Object { $_.required -and -not $_.ok })
 $result = [ordered]@{ ok = $success; installRoot = $resolvedInstallRoot; checks = @($checks) }
 if ($Json) { $result | ConvertTo-Json -Depth 6 } else { foreach ($check in $checks) { Write-Host ("[{0}] {1}: {2}" -f $(if ($check.ok) { 'OK' } else { 'FAIL' }), $check.name, $check.detail) } }
+$env:PREMIERE_MCP_INSTALL_ROOT = $previousInstallRootEnvironment
 if (-not $success) { exit 1 }

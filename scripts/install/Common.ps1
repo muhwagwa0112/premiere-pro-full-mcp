@@ -200,7 +200,7 @@ function Expand-PpMcpSafeArchive {
                 $name = [string]$entry.FullName
                 if (-not $name -or $name.IndexOf([char]0) -ge 0 -or $name -match '^[\\/]' -or $name.Contains(':')) { throw "Unsafe archive entry: $name" }
                 $segments = @(@($name -split '[\\/]') | Where-Object { $_ -ne '' })
-                if (-not $segments.Count -or ($segments | Where-Object { $_ -in @('.', '..') -or $_ -match '[\. ]$' }).Count) { throw "Unsafe archive path segment: $name" }
+                if (-not $segments.Count -or @($segments | Where-Object { $_ -in @('.', '..') -or $_ -match '[\. ]$' }).Count) { throw "Unsafe archive path segment: $name" }
                 $canonical = ($segments -join '/').ToLowerInvariant()
                 if ($seen.ContainsKey($canonical)) { throw "Duplicate or case-colliding archive entry: $name" }
                 $seen[$canonical] = $true
@@ -237,7 +237,7 @@ function Set-PpMcpCodexRegistration {
     try {
         $null = & codex mcp get $script:PpMcpRegistration 2>$null
         if ($LASTEXITCODE -eq 0) { Invoke-PpMcpCommand -FilePath 'codex' -Arguments @('mcp', 'remove', $script:PpMcpRegistration) -FailureMessage 'Could not replace the existing Premiere MCP registration' }
-        Invoke-PpMcpCommand -FilePath 'codex' -Arguments @('mcp', 'add', $script:PpMcpRegistration, '--', $Launcher, '--launch-mcp', $Bundle) -FailureMessage 'Codex MCP registration failed'
+        Invoke-PpMcpCommand -FilePath 'codex' -Arguments @('mcp', 'add', '--env', "PREMIERE_MCP_INSTALL_ROOT=$InstallRoot", $script:PpMcpRegistration, '--', $Launcher, '--launch-mcp', $Bundle) -FailureMessage 'Codex MCP registration failed'
     } catch {
         if ($configPath) {
             if ($hadConfig) { Copy-Item -LiteralPath $backup -Destination $configPath -Force }

@@ -11,7 +11,7 @@ internal static class UxpBootstrapProvisioner
 
     internal static string Provision()
     {
-        var localBase = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PremiereMCP");
+        var localBase = BrokerSecurity.InstallationRoot;
         var applicationRoot = Path.Combine(localBase, "app");
         SecretStore.EnsureCurrentUserDirectory(localBase);
         SecretStore.EnsureCurrentUserDirectory(applicationRoot);
