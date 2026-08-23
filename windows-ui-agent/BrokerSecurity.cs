@@ -261,7 +261,7 @@ internal static class BrokerSecurity
     internal static string Sign(string keyName, string message) => SecretStore.UseSecret(keyName, key =>
         Convert.ToBase64String(HMACSHA256.HashData(key, Encoding.UTF8.GetBytes(message))).TrimEnd('=').Replace('+', '-').Replace('/', '_'));
 
-    internal static string ExportCepSessionKey() => SecretStore.UseSecret("cep-hmac", key =>
+    internal static string ExportSessionKey(string keyName) => SecretStore.UseSecret(keyName, key =>
         Convert.ToBase64String(key).TrimEnd('=').Replace('+', '-').Replace('/', '_'));
 
     internal static bool Verify(string keyName, string message, string signature)

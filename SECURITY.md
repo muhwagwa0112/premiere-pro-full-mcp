@@ -6,9 +6,11 @@ This server is local-only. Do not expose its UXP listener, CEP queue, or UI-agen
 the current Windows user session.
 
 - Keep UXP and UI tokens out of source, MCP configuration arguments, logs, and support bundles.
-- CEP and approval HMAC keys are created and used only inside the bundled DPAPI CurrentUser
-  broker. Raw keys are never exported. HMAC calls are restricted to the integrity-pinned MCP
-  entrypoint or a direct Adobe Premiere Pro parent process.
+- CEP and approval HMAC keys are DPAPI CurrentUser-protected at rest. After full executable,
+  signature, ancestry, and command-line verification, the broker releases each required key once
+  into the memory of the integrity-pinned MCP entrypoint or authorized Premiere CEP renderer.
+  Keys are never written to disk, configuration, logs, or support bundles; those processes already
+  had authority to request arbitrary HMACs for the same key scopes.
 - The native MCP launcher clears Node preload paths and pins the full installed-helper, Node, and
   Premiere executable paths and hashes. The server is bundled with all runtime dependencies into
   one pinned file; unexpected or extra files in the bundle directory fail closed.

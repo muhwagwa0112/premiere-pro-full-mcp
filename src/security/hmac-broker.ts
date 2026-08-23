@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { join } from "node:path";
 
 type KeyName = "cep-hmac" | "approval-hmac";
@@ -9,7 +10,7 @@ function installedHelper(): string {
   return join(localAppData, "PremiereMCP", "bin", "PremiereMcp.WindowsUiAgent.exe");
 }
 
-async function invoke(args: string[], message: string): Promise<{ code: number; stdout: string }> {
+async function invoke(args: string[], message: string, timeoutMs = 10_000): Promise<{ code: number; stdout: string }> {
   if (Buffer.byteLength(message, "utf8") > 1024 * 1024) throw new Error("HMAC broker input exceeds 1 MiB");
   const helper = installedHelper();
   try {
@@ -17,7 +18,7 @@ async function invoke(args: string[], message: string): Promise<{ code: number; 
         const child = spawn(helper, args, { windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
         const stdout: Buffer[] = [];
         const stderr: Buffer[] = [];
-        const timer = setTimeout(() => { child.kill(); reject(new Error("HMAC broker timed out")); }, 10_000);
+        const timer = setTimeout(() => { child.kill(); reject(new Error("HMAC broker timed out")); }, timeoutMs);
         child.stdout.on("data", (chunk: Buffer) => { if (stdout.reduce((sum, value) => sum + value.length, 0) + chunk.length <= 1024 * 1024) stdout.push(chunk); });
         child.stderr.on("data", (chunk: Buffer) => { if (stderr.reduce((sum, value) => sum + value.length, 0) + chunk.length <= 4096) stderr.push(chunk); });
         child.once("error", (error) => { clearTimeout(timer); reject(error); });
@@ -34,16 +35,37 @@ async function invoke(args: string[], message: string): Promise<{ code: number; 
   }
 }
 
+const sessionKeys = new Map<KeyName, Promise<Buffer>>();
+
+async function sessionKey(key: KeyName): Promise<Buffer> {
+  const existing = sessionKeys.get(key);
+  if (existing) return existing;
+  const pending = invoke(["--hmac", key, "session-key", "node-server"], "", 30_000).then((result) => {
+    const encoded = result.stdout.trim();
+    if (!/^[A-Za-z0-9_-]{43}$/.test(encoded)) throw new Error("HMAC broker returned an invalid session key");
+    const value = Buffer.from(encoded, "base64url");
+    if (value.length !== 32) throw new Error("HMAC broker returned an invalid session key length");
+    return value;
+  });
+  sessionKeys.set(key, pending);
+  try {
+    return await pending;
+  } catch (error) {
+    sessionKeys.delete(key);
+    throw error;
+  }
+}
+
 export async function brokerSign(key: KeyName, message: string): Promise<string> {
-  const result = await invoke(["--hmac", key, "sign", "node-server"], message);
-  const signature = result.stdout.trim();
-  if (!/^[A-Za-z0-9_-]{43}$/.test(signature)) throw new Error("HMAC broker returned an invalid signature");
-  return signature;
+  if (Buffer.byteLength(message, "utf8") > 1024 * 1024) throw new Error("HMAC input exceeds 1 MiB");
+  return createHmac("sha256", await sessionKey(key)).update(message, "utf8").digest("base64url");
 }
 
 export async function brokerVerify(key: KeyName, message: string, signature: string): Promise<boolean> {
   if (!/^[A-Za-z0-9_-]{43}$/.test(signature)) return false;
-  return (await invoke(["--hmac", key, "verify", "node-server", signature], message)).code === 0;
+  const expected = Buffer.from(await brokerSign(key, message), "ascii");
+  const provided = Buffer.from(signature, "ascii");
+  return expected.length === provided.length && timingSafeEqual(expected, provided);
 }
 
 export async function brokerProtect(message: string): Promise<string> {

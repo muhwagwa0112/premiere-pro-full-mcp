@@ -67,12 +67,26 @@ internal static class Program
             try
             {
                 BrokerSecurity.AssertCaller("premiere");
-                Console.Out.Write(BrokerSecurity.ExportCepSessionKey());
+                Console.Out.Write(BrokerSecurity.ExportSessionKey("cep-hmac"));
                 return 0;
             }
             catch (Exception ex)
             {
                 Console.Error.WriteLine($"CEP session key broker failed: {ex.Message}");
+                return 3;
+            }
+        }
+        if (args is ["--hmac", "cep-hmac" or "approval-hmac", "session-key", "node-server"])
+        {
+            try
+            {
+                BrokerSecurity.AssertCaller("node-server");
+                Console.Out.Write(BrokerSecurity.ExportSessionKey(args[1]));
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"MCP session key broker failed: {ex.Message}");
                 return 3;
             }
         }
