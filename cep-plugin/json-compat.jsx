@@ -126,6 +126,7 @@ if (typeof JSON !== "object") JSON = {};
       this.skip();
       if (this.text.charAt(this.index) !== '"') this.fail();
       var key = this.string();
+      if (key === "__proto__" || key === "constructor" || key === "prototype") this.fail();
       this.skip();
       if (this.text.charAt(this.index++) !== ":") this.fail();
       result[key] = this.value();

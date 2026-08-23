@@ -27,5 +27,7 @@ describe("CEP bridge vendored-code boundary", () => {
     expect(decoded.a[2]).toBe(3.5);
     expect(decoded.z).toBe("line\n");
     expect(() => codec.parse('{"a":1} trailing')).toThrow(/Invalid JSON/);
+    expect(() => codec.parse('{"__proto__":{"polluted":true}}')).toThrow(/Invalid JSON/);
+    expect(() => codec.parse('{"constructor":{"prototype":{"polluted":true}}}')).toThrow(/Invalid JSON/);
   });
 });
