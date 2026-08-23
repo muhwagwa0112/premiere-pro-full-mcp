@@ -15,8 +15,8 @@ public sealed class UiaWorkerClient : IPremiereAutomation
     // single cross-process TreeWalker call even after the catalog's own 8-second
     // traversal budget has elapsed. Keep the worker isolated, but leave enough
     // process-level headroom for that bounded traversal to unwind and serialize its
-    // partial result instead of killing it at the old 10-second boundary.
-    private static readonly TimeSpan CatalogDeadline = TimeSpan.FromSeconds(30);
+    // partial result. The named-pipe caller retains a separate 50-second cap.
+    private static readonly TimeSpan CatalogDeadline = TimeSpan.FromSeconds(45);
     private static readonly TimeSpan InvokeDeadline = TimeSpan.FromSeconds(4);
     private static readonly TimeSpan CapabilityLifetime = TimeSpan.FromMinutes(2);
     private static readonly ConcurrentDictionary<string, CatalogCapability> Capabilities = new(StringComparer.Ordinal);

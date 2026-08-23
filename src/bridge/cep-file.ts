@@ -28,7 +28,7 @@ export class CepFileAdapter implements BackendAdapter {
   readonly #authenticate: { sign(value: Record<string, unknown>): Promise<string>; verify(value: Record<string, unknown>, signature: unknown): Promise<boolean> };
   #sessionId: string | null = null;
 
-  constructor(backend: "cep" | "qe", directory = process.env.PREMIERE_MCP_CEP_DIR ?? defaultBridgeDirectory(), timeoutMs = 45_000, authenticate = {
+  constructor(backend: "cep" | "qe", directory = process.env.PREMIERE_MCP_CEP_DIR ?? defaultBridgeDirectory(), timeoutMs = 58_000, authenticate = {
     sign: (value: Record<string, unknown>) => brokerSign("cep-hmac", canonicalJson(value)),
     verify: (value: Record<string, unknown>, signature: unknown) => typeof signature === "string" ? brokerVerify("cep-hmac", canonicalJson(value), signature) : Promise.resolve(false),
   }) {

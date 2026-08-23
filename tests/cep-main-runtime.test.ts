@@ -8,13 +8,16 @@ describe("CEP host scheduling", () => {
     expect(source).toContain('"PremiereMCP", "cep-public-v1"');
     expect(source).toContain("var hostEvalBusy = false;");
     expect(source).toContain("var lastHeartbeatAt = 0;");
+    expect(source).toContain('var cachedHost = { hostVersion: "unknown", capabilities: ["typed"] };');
     expect(source).toContain("if (busy || hostEvalBusy) return;");
     expect(source).toContain("Date.now() - lastHeartbeatAt >= 20000");
     expect(source).toContain('["--hmac", "cep-hmac", "session-key", "premiere"]');
     expect(source).toContain("timeout: 120000");
     expect(source).toContain('crypto.createHmac("sha256", sessionHmacKey)');
     expect(source).toContain("crypto.timingSafeEqual(expected, provided)");
-    expect(source).toContain('typeof PPMCP.heartbeat!==\\"function\\"');
+    expect(source).toContain("hostVersion: cachedHost.hostVersion");
+    expect(source).toContain("PPMCP.heartbeat() : \\\"unavailable\\\"");
+    expect(source).not.toContain("setInterval(function () { cs.evalScript");
     expect(source).toContain('typeof PPMCP.dispatch!==\\"function\\"');
     expect(source).not.toContain('hostLoaderPrefix + "return PPMCP.heartbeat()');
     expect(source).not.toContain('hostLoaderPrefix + "return PPMCP.dispatch(');

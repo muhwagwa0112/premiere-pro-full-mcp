@@ -46,7 +46,7 @@ export class UiNamedPipeAdapter implements BackendAdapter {
         },
       };
     }
-    const response = await this.call(operation, request.operation === "host.inspect" ? {} : request.args, operation === "premiere.controls.catalog" ? 30_000 : 5_000);
+    const response = await this.call(operation, request.operation === "host.inspect" ? {} : request.args, operation === "premiere.controls.catalog" ? 50_000 : 5_000);
     if (!response.ok) {
       return { protocolVersion: 1, requestId: request.requestId, ok: false, error: { code: response.error?.code ?? "UI_AGENT_ERROR", message: response.error?.message ?? "UI agent failed", retryable: response.error?.retryable ?? false } };
     }

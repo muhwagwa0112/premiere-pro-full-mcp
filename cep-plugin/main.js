@@ -31,6 +31,7 @@
   var leaderAcquiredAt = 0;
   var lastLeaderRenewal = 0;
   var lastHeartbeatAt = 0;
+  var cachedHost = { hostVersion: "unknown", capabilities: ["typed"] };
   var writeCounter = 0;
   var leaderPath = path.join(directory, "bridge-owner.lock");
   var LEADER_LEASE_MS = 60000;
@@ -168,26 +169,13 @@
 
   function heartbeat() {
     if (!renewLeadership()) return;
-    if (busy || hostEvalBusy) return;
-    hostEvalBusy = true;
     try {
-      var heartbeatScript = "(function(){if(typeof PPMCP!==\"object\"||typeof PPMCP.heartbeat!==\"function\"){" + hostLoaderPrefix + "}return PPMCP.heartbeat();}())";
-      cs.evalScript(heartbeatScript, function (raw) {
-        try {
-          var host = {};
-          try { host = JSON.parse(raw); } catch (_) {}
-          var unsigned = { timestamp: Date.now(), hostVersion: host.hostVersion || "unknown", capabilities: host.capabilities || ["typed"], nonce: base64url(crypto.randomBytes(18)), sessionId: sessionId };
-          unsigned.signature = sign(unsigned);
-          atomicWrite(path.join(directory, "heartbeat.json"), unsigned);
-          lastHeartbeatAt = Date.now();
-        } catch (_) {
-          // A transient broker or filesystem failure must not terminate the timer.
-        } finally {
-          hostEvalBusy = false;
-        }
-      });
+      var unsigned = { timestamp: Date.now(), hostVersion: cachedHost.hostVersion, capabilities: cachedHost.capabilities, nonce: base64url(crypto.randomBytes(18)), sessionId: sessionId };
+      unsigned.signature = sign(unsigned);
+      atomicWrite(path.join(directory, "heartbeat.json"), unsigned);
+      lastHeartbeatAt = Date.now();
     } catch (_) {
-      hostEvalBusy = false;
+      // A transient filesystem failure must not terminate the timer.
     }
   }
 
@@ -270,9 +258,11 @@
     var jsonPath = path.join(extensionDirectory, "json-compat.jsx").replace(/\\/g, "/");
     var hostPath = path.join(extensionDirectory, "host.jsx").replace(/\\/g, "/");
     hostLoaderPrefix = "$.evalFile(File(" + JSON.stringify(jsonPath) + "));$.evalFile(File(" + JSON.stringify(hostPath) + "));";
-    var bootstrapScript = "(function(){try{" + hostLoaderPrefix + "return (typeof PPMCP === \"object\" && typeof PPMCP.heartbeat === \"function\" ? \"ready\" : \"unavailable\");}catch(error){return \"error|line=\" + String(error.line || \"unknown\") + \"|message=\" + String(error.message || error);}}())";
+    var bootstrapScript = "(function(){try{" + hostLoaderPrefix + "return (typeof PPMCP === \"object\" && typeof PPMCP.heartbeat === \"function\" ? PPMCP.heartbeat() : \"unavailable\");}catch(error){return \"error|line=\" + String(error.line || \"unknown\") + \"|message=\" + String(error.message || error);}}())";
     cs.evalScript(bootstrapScript, function (raw) {
-      if (raw !== "ready") {
+      var host = {};
+      try { host = JSON.parse(raw); } catch (_) {}
+      if (typeof host.hostVersion !== "string" || !Array.isArray(host.capabilities) || !host.capabilities.length) {
         var unavailable = { timestamp: Date.now(), hostVersion: "unknown", capabilities: [], nonce: base64url(crypto.randomBytes(18)), sessionId: sessionId };
         unavailable.signature = sign(unavailable);
         atomicWrite(path.join(directory, "heartbeat.json"), unavailable);
@@ -280,6 +270,7 @@
         return;
       }
       if (started) return;
+      cachedHost = { hostVersion: host.hostVersion, capabilities: host.capabilities.slice(0, 16) };
       started = true;
       heartbeat();
       setInterval(heartbeat, 2000);

@@ -35,7 +35,7 @@ async function call(name, actionId, args = {}) {
   return data(await client.callTool(
     { name: actionId ? "premiere_api" : "premiere_capabilities", arguments: actionId ? { actionId, args } : {} },
     undefined,
-    { timeout: 50_000, maxTotalTimeout: 50_000 },
+    { timeout: 75_000, maxTotalTimeout: 75_000 },
   ));
 }
 
@@ -46,9 +46,9 @@ try {
   // after the caller has focused Premiere, before longer CEP/QE round trips.
   const uiCatalog = await call("ui.catalog", "ui.catalog", { offset: 0, limit: 20 });
   process.stderr.write("[live-host-probe] host.inspect\n");
-  const host = data(await client.callTool({ name: "premiere_inspect", arguments: { actionId: "host.inspect", args: {} } }, undefined, { timeout: 50_000, maxTotalTimeout: 50_000 }));
+  const host = data(await client.callTool({ name: "premiere_inspect", arguments: { actionId: "host.inspect", args: {} } }, undefined, { timeout: 75_000, maxTotalTimeout: 75_000 }));
   process.stderr.write("[live-host-probe] project.inspect\n");
-  const project = data(await client.callTool({ name: "premiere_inspect", arguments: { actionId: "project.inspect", args: {} } }, undefined, { timeout: 50_000, maxTotalTimeout: 50_000 }));
+  const project = data(await client.callTool({ name: "premiere_inspect", arguments: { actionId: "project.inspect", args: {} } }, undefined, { timeout: 75_000, maxTotalTimeout: 75_000 }));
   const appCatalog = await call("cep.surface.catalog", "cep.surface.catalog", { root: "app", query: "project", offset: 0, limit: 200 });
   const qeCatalog = await call("qe.catalog", "qe.catalog", { root: "qeProject", query: "effect", offset: 0, limit: 100 });
 
