@@ -76,6 +76,18 @@ $destinations = [ordered]@{
     app = (Join-Path $resolvedInstallRoot 'app')
     cep = $resolvedCepRoot
 }
+$defaultInstallRoot = if ($env:LOCALAPPDATA) { [System.IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'PremiereMCP')) } else { '' }
+$defaultCepRoot = if ($env:APPDATA) { [System.IO.Path]::GetFullPath((Join-Path $env:APPDATA 'Adobe\CEP\extensions\com.codex.premiere-pro-full-mcp.cep')) } else { '' }
+$isActiveUserInstall = $defaultInstallRoot -and $defaultCepRoot -and
+    [System.IO.Path]::GetFullPath($resolvedInstallRoot).Equals($defaultInstallRoot, [System.StringComparison]::OrdinalIgnoreCase) -and
+    [System.IO.Path]::GetFullPath($resolvedCepRoot).Equals($defaultCepRoot, [System.StringComparison]::OrdinalIgnoreCase)
+$runningPremiere = @($(if ($isActiveUserInstall) { Get-Process -Name 'Adobe Premiere Pro' -ErrorAction SilentlyContinue }))
+$runningBridge = @(Get-CimInstance Win32_Process -Filter "Name='PremiereMcp.WindowsUiAgent.exe'" -ErrorAction SilentlyContinue | Where-Object {
+    $_.ExecutablePath -and [System.IO.Path]::GetFullPath([string]$_.ExecutablePath).StartsWith(([System.IO.Path]::GetFullPath($resolvedInstallRoot) + [System.IO.Path]::DirectorySeparatorChar), [System.StringComparison]::OrdinalIgnoreCase)
+})
+if ($runningPremiere.Count -gt 0 -or $runningBridge.Count -gt 0) {
+    throw 'Close Premiere Pro and any Premiere Pro Full MCP helper process before installing or updating. No files were changed.'
+}
 $backedUp = New-Object System.Collections.ArrayList
 $activated = New-Object System.Collections.ArrayList
 $codexConfigPath = Get-PpMcpCodexConfigPath

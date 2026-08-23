@@ -4,7 +4,7 @@ The supported public install starts from the versioned GitHub Release ZIP, not t
 
 1. Download the Windows ZIP and its `.sha256` sidecar from the latest release.
 2. Verify the checksum with `Get-FileHash` and extract the archive.
-3. Run `powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1`.
+3. Close Premiere Pro, then run `powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1`. The installer fails closed before changing files if Premiere or the installed helper is still running.
 4. Approve the CCX installation in Creative Cloud Desktop, restart Premiere, and open **Window > UXP Plugins > Premiere Pro Full MCP**.
 5. Click **Pair with installed helper…** and select `%LOCALAPPDATA%\PremiereMCP\app\runtime-bootstrap.json`. The persistent UXP permission references that current-user ACL-protected file; no bootstrap is packaged in the CCX.
 6. Restart Codex and run the installed `Doctor.ps1 -CheckLive`.

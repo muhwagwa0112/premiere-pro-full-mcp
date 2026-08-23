@@ -15,7 +15,7 @@ Premiere Pro Full MCP is a local, capability-gated MCP server for Adobe Premiere
 Requirements: Windows 10/11 x64, Premiere Pro 26.3 or later, Creative Cloud Desktop, and Codex Desktop or the Codex CLI. Node.js is not required for the packaged runtime.
 
 1. Download `premiere-pro-full-mcp-v0.2.0-windows.zip` from the [latest release](https://github.com/muhwagwa0112/premiere-pro-full-mcp/releases/latest). Verify its adjacent `.sha256` file, then extract it.
-2. Open PowerShell in the extracted `premiere-pro-full-mcp-0.2.0` folder and run:
+2. Close Premiere Pro, open PowerShell in the extracted `premiere-pro-full-mcp-0.2.0` folder, and run:
 
    ```powershell
    powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1
@@ -78,7 +78,7 @@ Release builds require a clean Git worktree and the dedicated private signing ke
 요구 사항은 Windows 10/11 x64, Premiere Pro 26.3 이상, Creative Cloud Desktop, Codex Desktop 또는 Codex CLI입니다. 배포 ZIP에는 자체 포함 네이티브 런처와 번들 MCP가 들어 있어 별도 Node.js 설치가 필요하지 않습니다.
 
 1. [최신 릴리스](https://github.com/muhwagwa0112/premiere-pro-full-mcp/releases/latest)에서 `premiere-pro-full-mcp-v0.2.0-windows.zip`과 `.sha256`을 내려받아 해시를 확인하고 압축을 풉니다.
-2. 압축을 푼 폴더에서 다음 명령을 실행합니다.
+2. Premiere Pro를 종료하고 압축을 푼 폴더에서 다음 명령을 실행합니다.
 
    ```powershell
    powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1
