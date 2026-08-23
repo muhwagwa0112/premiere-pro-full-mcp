@@ -1,0 +1,33 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - run: npm ci
+      - run: npm run inventory:adobe
+      - run: npm run check
+      - run: npm run test:coverage
+      - run: npm run validate:uxp-plan
+      - run: npm run compliance:generate
+      - run: dotnet test .\windows-ui-agent\tests\PremiereMcp.WindowsUiAgent.Tests.csproj --configuration Release
+      - name: Verify generated compliance files are current
+        shell: pwsh
+        run: |
+          git diff --exit-code -- THIRD-PARTY-NOTICES.md SBOM.spdx.json

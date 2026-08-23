@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ExtensionManifest Version="7.0" ExtensionBundleId="com.local.ppmcp.cep.2026" ExtensionBundleVersion="0.2.0" ExtensionBundleName="Premiere MCP 2026 Capability CEP Bridge">
+  <ExtensionList>
+    <Extension Id="com.local.ppmcp.cep.2026.headless" Version="0.2.0"/>
+  </ExtensionList>
+  <ExecutionEnvironment>
+    <HostList><Host Name="PPRO" Version="26.3"/></HostList>
+    <LocaleList><Locale Code="All"/></LocaleList>
+    <RequiredRuntimeList><RequiredRuntime Name="CSXS" Version="9.0"/></RequiredRuntimeList>
+  </ExecutionEnvironment>
+  <DispatchInfoList>
+    <Extension Id="com.local.ppmcp.cep.2026.headless">
+      <DispatchInfo>
+        <Resources>
+          <MainPath>./index.html</MainPath>
+          <ScriptPath>./loader.jsx</ScriptPath>
+          <CEFCommandLine><Parameter>--enable-nodejs</Parameter><Parameter>--allow-file-access-from-files</Parameter></CEFCommandLine>
+        </Resources>
+        <Lifecycle>
+          <AutoVisible>false</AutoVisible>
+          <StartOn><Event>com.adobe.csxs.events.ApplicationActivate</Event><Event>applicationActivate</Event></StartOn>
+        </Lifecycle>
+        <UI><Type>Custom</Type><Geometry><Size><Width>1</Width><Height>1</Height></Size></Geometry></UI>
+      </DispatchInfo>
+    </Extension>
+  </DispatchInfoList>
+</ExtensionManifest>

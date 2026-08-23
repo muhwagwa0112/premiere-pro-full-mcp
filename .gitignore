@@ -1,0 +1,15 @@
+node_modules/
+dist/
+coverage/
+artifacts/
+release/
+bundle/
+validation-results/
+.env
+*.log
+*.user
+*.suo
+windows-ui-agent/**/bin/
+windows-ui-agent/**/obj/
+windows-ui-agent/publish/
+uxp-plugin/runtime-bootstrap.json
