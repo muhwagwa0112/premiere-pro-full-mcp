@@ -34,10 +34,10 @@ else {
 Add-Check 'cep-extension' ([bool](Test-Path -LiteralPath (Join-Path $resolvedCepRoot 'CSXS\manifest.xml') -PathType Leaf)) $resolvedCepRoot
 if ($SkipPremiereCheck) { Add-Check 'premiere-pro' $true 'Skipped for isolated package verification.' $false }
 else {
-    $premierePaths = @(
+    $premierePaths = @(@(
         (Join-Path ${env:ProgramFiles} 'Adobe\Adobe Premiere Pro 2026\Adobe Premiere Pro.exe'),
         (Join-Path ${env:ProgramFiles} 'Adobe\Adobe Premiere Pro 2025\Adobe Premiere Pro.exe')
-    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
+    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) })
     Add-Check 'premiere-pro' ($premierePaths.Count -gt 0) ($(if ($premierePaths.Count) { $premierePaths -join ', ' } else { 'Adobe Premiere Pro was not found in the standard Program Files locations.' }))
 }
 
