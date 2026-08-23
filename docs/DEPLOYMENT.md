@@ -10,6 +10,8 @@ Public releases are built from a clean commit with a Premiere-specific RSA signi
 - `.sha256` sidecars
 - versioned SPDX SBOM and third-party notices
 
+The release build also requires a checksum-verified [Syft](https://github.com/anchore/syft) executable through `-SyftPath`, `SYFT_PATH`, or the local audit-tools directory. The emitted SPDX starts with Syft's native and package inventory, then adds SHA-256 entries for every non-metadata file in the release ZIP.
+
 Generate the private/public key pair once with `npm run release:keygen`. The private key remains under `%LOCALAPPDATA%\PremiereMCP\release-signing-private.xml` with a current-user-only ACL. Only `scripts/install/release-signing-public.xml` is committed.
 
 For the public CCX, add `uxp-plugin/manifest.json` to Adobe UXP Developer Tool and use Package. Name the result `premiere-pro-full-mcp-v<version>.ccx`, then run:

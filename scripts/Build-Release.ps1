@@ -3,6 +3,7 @@ param(
     [string]$OutputDirectory = '',
     [string]$CcxPath = '',
     [string]$SigningKeyPath = '',
+    [string]$SyftPath = '',
     [string]$Repository = 'muhwagwa0112/premiere-pro-full-mcp'
 )
 
@@ -22,6 +23,11 @@ if (-not $SigningKeyPath) {
     elseif ($env:LOCALAPPDATA) { $SigningKeyPath = Join-Path $env:LOCALAPPDATA 'PremiereMCP\release-signing-private.xml' }
 }
 Assert-PpMcpReleaseSigningKey -PrivateKeyPath $SigningKeyPath -PublicKeyPath $publicKeyPath
+if (-not $SyftPath) {
+    if ($env:SYFT_PATH) { $SyftPath = $env:SYFT_PATH }
+    elseif ($env:LOCALAPPDATA) { $SyftPath = (Get-ChildItem (Join-Path $env:LOCALAPPDATA 'PremiereMCP\audit-tools\syft-*\syft.exe') -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -First 1).FullName }
+}
+if (-not $SyftPath -or -not (Test-Path -LiteralPath $SyftPath -PathType Leaf)) { throw 'A checksum-verified Syft executable is required. Pass -SyftPath or set SYFT_PATH.' }
 if (-not $OutputDirectory) { $OutputDirectory = Join-Path $repoRoot 'artifacts' }
 $OutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
 $stagingRoot = Join-Path $repoRoot '.release-staging'
@@ -81,7 +87,9 @@ $ccxManifest = Get-Content -LiteralPath (Join-Path $ccxExpanded 'manifest.json')
 if ($ccxManifest.id -ne $script:PpMcpPluginId -or [string]$ccxManifest.version -ne $version -or $ccxManifest.host.app -ne 'premierepro') { throw 'CCX identity does not match this release.' }
 Copy-Item -LiteralPath $CcxPath -Destination (Join-Path $bundleRoot "premiere-pro-full-mcp-v$version.ccx") -Force
 
-Invoke-PpMcpCommand -FilePath 'node.exe' -Arguments @((Join-Path $repoRoot 'scripts\generate-release-sbom.mjs'), $bundleRoot, (Join-Path $bundleRoot 'SBOM.spdx.json')) -FailureMessage 'Release SPDX SBOM generation failed'
+$syftSbomPath = Join-Path $stagingRoot 'syft.spdx.json'
+Invoke-PpMcpCommand -FilePath $SyftPath -Arguments @("dir:$bundleRoot", '-o', "spdx-json=$syftSbomPath", '-q') -FailureMessage 'Syft release inventory failed'
+Invoke-PpMcpCommand -FilePath 'node.exe' -Arguments @((Join-Path $repoRoot 'scripts\generate-release-sbom.mjs'), $bundleRoot, $syftSbomPath, (Join-Path $bundleRoot 'SBOM.spdx.json')) -FailureMessage 'Release SPDX SBOM generation failed'
 
 $bundleManifest = [ordered]@{ schema = 'premiere-pro-full-mcp-bundle/1'; product = $script:PpMcpProduct; version = $version; commit = $commit; platform = 'windows'; architecture = 'win-x64' }
 Write-PpMcpJsonAtomic -Path (Join-Path $bundleRoot 'release-manifest.json') -Value $bundleManifest

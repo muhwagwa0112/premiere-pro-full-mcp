@@ -1,13 +1,13 @@
 import { createHash } from "node:crypto";
-import { readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { readFile, readdir, writeFile } from "node:fs/promises";
 import { basename, join, relative, resolve } from "node:path";
 
-const [bundleArgument, outputArgument] = process.argv.slice(2);
-if (!bundleArgument || !outputArgument) throw new Error("Usage: node scripts/generate-release-sbom.mjs <bundle-root> <output>");
+const [bundleArgument, syftArgument, outputArgument] = process.argv.slice(2);
+if (!bundleArgument || !syftArgument || !outputArgument) throw new Error("Usage: node scripts/generate-release-sbom.mjs <bundle-root> <syft-spdx-json> <output>");
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const bundleRoot = resolve(bundleArgument);
 const outputPath = resolve(outputArgument);
-const base = JSON.parse(await readFile(join(repositoryRoot, "SBOM.spdx.json"), "utf8"));
+const base = JSON.parse(await readFile(resolve(syftArgument), "utf8"));
 const packageJson = JSON.parse(await readFile(join(repositoryRoot, "package.json"), "utf8"));
 
 async function walk(directory) {
@@ -21,93 +21,72 @@ async function walk(directory) {
   return output;
 }
 
-function spdxId(value) {
-  return value.replace(/[^A-Za-z0-9.-]+/g, "-").replace(/^-+|-+$/g, "");
+const spdxId = (value) => value.replace(/[^A-Za-z0-9.-]+/g, "-").replace(/^-+|-+$/g, "");
+const sha256 = (buffer) => createHash("sha256").update(buffer).digest("hex");
+const mainId = `SPDXRef-Package-${spdxId(packageJson.name)}-${spdxId(packageJson.version)}`;
+base.packages ??= [];
+let mainPackage = base.packages.find((item) => item.name === packageJson.name && item.versionInfo === packageJson.version);
+const previousMainId = mainPackage?.SPDXID;
+if (!mainPackage) {
+  mainPackage = {
+    name: packageJson.name, SPDXID: mainId, versionInfo: packageJson.version, packageFileName: "",
+    description: packageJson.description, primaryPackagePurpose: "APPLICATION",
+    downloadLocation: "https://github.com/muhwagwa0112/premiere-pro-full-mcp",
+    homepage: "https://github.com/muhwagwa0112/premiere-pro-full-mcp", filesAnalyzed: true,
+    licenseDeclared: "MIT", licenseConcluded: "NOASSERTION", copyrightText: "Copyright (c) 2026 muhwagwa0112",
+    externalRefs: [{ referenceCategory: "PACKAGE-MANAGER", referenceType: "purl", referenceLocator: `pkg:github/muhwagwa0112/premiere-pro-full-mcp@${packageJson.version}` }],
+  };
+  base.packages.push(mainPackage);
+} else {
+  mainPackage.SPDXID = mainId;
+  mainPackage.filesAnalyzed = true;
+  mainPackage.licenseDeclared = "MIT";
+}
+base.documentDescribes = [mainId];
+
+const syftFileIds = new Set((base.files ?? []).map((item) => item.SPDXID));
+const existingFiles = new Map();
+const relationships = (base.relationships ?? [])
+  .filter((item) => !syftFileIds.has(item.spdxElementId) && !syftFileIds.has(item.relatedSpdxElement))
+  .map((item) => ({
+    ...item,
+    spdxElementId: item.spdxElementId === previousMainId ? mainId : item.spdxElementId,
+    relatedSpdxElement: item.relatedSpdxElement === previousMainId ? mainId : item.relatedSpdxElement,
+  }));
+const relationshipKeys = new Set(relationships.map((item) => `${item.spdxElementId}|${item.relationshipType}|${item.relatedSpdxElement}`));
+function relate(source, type, target) {
+  const key = `${source}|${type}|${target}`;
+  if (!relationshipKeys.has(key)) {
+    relationshipKeys.add(key);
+    relationships.push({ spdxElementId: source, relationshipType: type, relatedSpdxElement: target });
+  }
 }
 
-function sha256(buffer) {
-  return createHash("sha256").update(buffer).digest("hex");
-}
-
-const mainPackage = base.packages.find((item) => base.documentDescribes?.includes(item.SPDXID)) ?? base.packages[0];
-mainPackage.name = packageJson.name;
-mainPackage.versionInfo = packageJson.version;
-mainPackage.SPDXID = `SPDXRef-Package-${spdxId(packageJson.name)}-${spdxId(packageJson.version)}`;
-mainPackage.description = packageJson.description;
-mainPackage.downloadLocation = `https://github.com/muhwagwa0112/premiere-pro-full-mcp`;
-mainPackage.homepage = `https://github.com/muhwagwa0112/premiere-pro-full-mcp`;
-mainPackage.licenseDeclared = "MIT";
-mainPackage.filesAnalyzed = true;
-mainPackage.externalRefs = [{ referenceCategory: "PACKAGE-MANAGER", referenceType: "purl", referenceLocator: `pkg:github/muhwagwa0112/premiere-pro-full-mcp@${packageJson.version}` }];
-base.documentDescribes = [mainPackage.SPDXID];
-for (const pkg of base.packages) {
-  if (pkg !== mainPackage && typeof pkg.SPDXID === "string") pkg.SPDXID = spdxId(pkg.SPDXID);
-}
-
-const nativeDepsPath = (await walk(join(bundleRoot, "payload", "native", "win-x64"))).find((path) => path.endsWith(".deps.json"));
-if (!nativeDepsPath) throw new Error("Published .NET dependency manifest was not found");
-const nativeDeps = JSON.parse(await readFile(nativeDepsPath, "utf8"));
-const existingPackageIds = new Set(base.packages.map((item) => item.SPDXID));
-for (const [library, metadata] of Object.entries(nativeDeps.libraries ?? {})) {
-  if (metadata.type !== "package") continue;
-  const slash = library.lastIndexOf("/");
-  if (slash <= 0) continue;
-  const name = library.slice(0, slash);
-  const version = library.slice(slash + 1);
-  const id = `SPDXRef-Package-nuget-${spdxId(name)}-${spdxId(version)}`;
-  if (existingPackageIds.has(id)) continue;
-  existingPackageIds.add(id);
-  base.packages.push({
-    name,
-    SPDXID: id,
-    versionInfo: version,
-    downloadLocation: "NOASSERTION",
-    filesAnalyzed: false,
-    licenseDeclared: "NOASSERTION",
-    licenseConcluded: "NOASSERTION",
-    copyrightText: "NOASSERTION",
-    externalRefs: [{ referenceCategory: "PACKAGE-MANAGER", referenceType: "purl", referenceLocator: `pkg:nuget/${encodeURIComponent(name)}@${version}` }],
-  });
-}
-
-const nodePath = join(bundleRoot, "payload", "runtime", "node", "node.exe");
-const nodeVersion = JSON.parse(await readFile(join(bundleRoot, "payload", "integrity", "runtime-integrity.json"), "utf8")).nodeVersion;
-const nodePackageId = `SPDXRef-Package-node-${spdxId(nodeVersion)}`;
-base.packages.push({
-  name: "Node.js",
-  SPDXID: nodePackageId,
-  versionInfo: nodeVersion,
-  downloadLocation: `https://nodejs.org/dist/v${nodeVersion}/`,
-  filesAnalyzed: false,
-  licenseDeclared: "MIT",
-  licenseConcluded: "NOASSERTION",
-  copyrightText: "NOASSERTION",
-  externalRefs: [{ referenceCategory: "PACKAGE-MANAGER", referenceType: "purl", referenceLocator: `pkg:generic/node@${nodeVersion}` }],
-});
-
-const files = [];
-const fileRelationships = [];
+const releaseFiles = [];
 for (const path of (await walk(bundleRoot)).sort()) {
   if (resolve(path) === outputPath) continue;
+  const fileName = relative(bundleRoot, path).replaceAll("\\", "/");
   const bytes = await readFile(path);
   const digest = sha256(bytes);
-  const id = `SPDXRef-File-${digest}`;
-  files.push({ fileName: relative(bundleRoot, path).replaceAll("\\", "/"), SPDXID: id, checksums: [{ algorithm: "SHA256", checksumValue: digest }], licenseConcluded: "NOASSERTION", copyrightText: "NOASSERTION" });
-  fileRelationships.push({ spdxElementId: mainPackage.SPDXID, relationshipType: "CONTAINS", relatedSpdxElement: id });
+  let file = existingFiles.get(fileName);
+  if (!file) {
+    file = { fileName, SPDXID: `SPDXRef-File-${sha256(Buffer.from(`${fileName}\0${digest}`))}`, checksums: [{ algorithm: "SHA256", checksumValue: digest }], licenseConcluded: "NOASSERTION", copyrightText: "NOASSERTION" };
+    existingFiles.set(fileName, file);
+  } else if (!Array.isArray(file.checksums) || !file.checksums.some((item) => item.algorithm === "SHA256" && item.checksumValue === digest)) {
+    file.checksums = [{ algorithm: "SHA256", checksumValue: digest }, ...(file.checksums ?? []).filter((item) => item.algorithm !== "SHA256")];
+  }
+  releaseFiles.push(file);
+  relate(mainId, "CONTAINS", file.SPDXID);
 }
-if (!(await stat(nodePath)).isFile()) throw new Error("Bundled Node.js executable is missing");
+for (const pkg of base.packages) if (pkg.SPDXID !== mainId) relate(mainId, "DEPENDS_ON", pkg.SPDXID);
 
 base.spdxVersion = "SPDX-2.3";
 base.dataLicense = "CC0-1.0";
 base.name = `${packageJson.name}@${packageJson.version}-windows-release`;
 base.documentNamespace = `https://spdx.local/${packageJson.name}/${sha256(await readFile(join(repositoryRoot, "package-lock.json")))}`;
-base.creationInfo = { created: "2000-01-01T00:00:00.000Z", creators: ["Tool: premiere-pro-full-mcp/scripts/generate-release-sbom.mjs", "Tool: npm/cli"] };
-base.files = files;
-base.relationships = [
-  ...(base.relationships ?? []).filter((item) => item.relationshipType !== "CONTAINS"),
-  ...base.packages.filter((item) => item.SPDXID !== mainPackage.SPDXID).map((item) => ({ spdxElementId: mainPackage.SPDXID, relationshipType: "DEPENDS_ON", relatedSpdxElement: item.SPDXID })),
-  ...fileRelationships,
-];
-mainPackage.packageVerificationCode = { packageVerificationCodeValue: sha256(Buffer.from(files.map((item) => item.checksums[0].checksumValue).sort().join(""))) };
+base.creationInfo = { created: "2000-01-01T00:00:00.000Z", creators: ["Tool: anchore/syft", "Tool: premiere-pro-full-mcp/scripts/generate-release-sbom.mjs"] };
+base.files = [...existingFiles.values()];
+base.relationships = relationships;
+mainPackage.packageVerificationCode = { packageVerificationCodeValue: sha256(Buffer.from(releaseFiles.map((item) => item.checksums.find((checksum) => checksum.algorithm === "SHA256").checksumValue).sort().join(""))) };
 await writeFile(outputPath, `${JSON.stringify(base, null, 2)}\n`, "utf8");
-console.log(`Release SPDX SBOM: ${basename(outputPath)} (${base.packages.length} packages, ${files.length} files)`);
+console.log(`Release SPDX SBOM: ${basename(outputPath)} (${base.packages.length} packages, ${releaseFiles.length} release files, ${base.files.length} cataloged files)`);
