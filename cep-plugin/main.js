@@ -17,6 +17,7 @@
   // command directory would let a legacy process win the leader lease.
   var directory = path.join(localAppData, "PremiereMCP", "cep-public-v1");
   var helper = path.join(localAppData, "PremiereMCP", "bin", "PremiereMcp.WindowsUiAgent.exe");
+  var sessionHmacKey = loadSessionHmacKey();
   var busy = false;
   var hostEvalBusy = false;
   var MAX_BYTES = 1024 * 1024;
@@ -115,16 +116,25 @@
     return buffer.toString("base64").replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
   }
 
+  function loadSessionHmacKey() {
+    var result = childProcess.spawnSync(helper, ["--hmac", "cep-hmac", "session-key", "premiere"], { encoding: "utf8", windowsHide: true, timeout: 30000, maxBuffer: 4096 });
+    var encoded = String(result.stdout || "").trim();
+    if (result.error || result.status !== 0 || !/^[A-Za-z0-9_-]{43}$/.test(encoded)) throw new Error("CEP session key broker rejected the caller");
+    var padded = encoded.replace(/-/g, "+").replace(/_/g, "/") + "=";
+    var key = Buffer.from(padded, "base64");
+    if (key.length !== 32) throw new Error("CEP session key has an invalid length");
+    return key;
+  }
+
   function sign(value) {
-    var result = childProcess.spawnSync(helper, ["--hmac", "cep-hmac", "sign", "premiere"], { input: canonical(value), encoding: "utf8", windowsHide: true, timeout: 10000, maxBuffer: 4096 });
-    if (result.error || result.status !== 0 || !/^[A-Za-z0-9_-]{43}$/.test(String(result.stdout || "").trim())) throw new Error("CEP signing broker rejected the caller");
-    return String(result.stdout).trim();
+    return base64url(crypto.createHmac("sha256", sessionHmacKey).update(canonical(value), "utf8").digest());
   }
 
   function verify(value, signature) {
     if (typeof signature !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(signature)) return false;
-    var result = childProcess.spawnSync(helper, ["--hmac", "cep-hmac", "verify", "premiere", signature], { input: canonical(value), encoding: "utf8", windowsHide: true, timeout: 10000, maxBuffer: 4096 });
-    return !result.error && result.status === 0;
+    var expected = Buffer.from(sign(value), "ascii");
+    var provided = Buffer.from(signature, "ascii");
+    return expected.length === provided.length && crypto.timingSafeEqual(expected, provided);
   }
 
   function withoutSignature(value) {
