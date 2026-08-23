@@ -1,10 +1,12 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const lock = JSON.parse(await readFile(resolve(root, "package-lock.json"), "utf8"));
+const lockText = await readFile(resolve(root, "package-lock.json"), "utf8");
+const lock = JSON.parse(lockText);
 
 function packageName(path, metadata) {
   if (metadata.name) return metadata.name;
@@ -50,7 +52,10 @@ const commandArguments = process.platform === "win32"
 const sbom = execFileSync(command, commandArguments, {
   cwd: root, encoding: "utf8", windowsHide: true, maxBuffer: 32 * 1024 * 1024,
 });
-JSON.parse(sbom);
-await writeFile(resolve(root, "SBOM.spdx.json"), `${sbom.trimEnd()}\n`, "utf8");
+const normalizedSbom = JSON.parse(sbom);
+const lockHash = createHash("sha256").update(lockText).digest("hex");
+normalizedSbom.documentNamespace = `https://spdx.local/premiere-pro-2026-local-mcp/${lockHash}`;
+normalizedSbom.creationInfo.created = "2026-08-23T00:00:00.000Z";
+await writeFile(resolve(root, "SBOM.spdx.json"), `${JSON.stringify(normalizedSbom, null, 2)}\n`, "utf8");
 
 process.stdout.write(`${JSON.stringify({ ok: true, packages: unique.length, outputs: ["THIRD-PARTY-NOTICES.md", "SBOM.spdx.json"] })}\n`);
