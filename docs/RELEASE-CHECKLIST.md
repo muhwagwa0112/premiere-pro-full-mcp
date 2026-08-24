@@ -14,8 +14,9 @@
 - [x] `ZXPSignCmd -verify` accepts the bundled CEP directory, and it loads with `PlayerDebugMode=0` on a clean Premiere restart.
 - [ ] The CCX is packaged through Adobe UXP Developer Tool (not `Build-Ccx.ps1`) and installed through Creative Cloud Desktop; the panel is visible at minimum, docked, floating, and scaled layouts.
   Adobe UPIA 8.5.0.13 now installs the UDT-produced v0.3.0 CCX and lists it as enabled for
-  Premiere Pro 26.3.2. Adobe UDT IPC opened the exact installed plug-in, and the floating panel
-  exposed every primary control in a 340x326 outer / 324x287 client window at 96 DPI, with an exact
+  Premiere Pro 26.3.2. Premiere's UXP menu opened the exact installed plug-in; it automatically
+  established the token-free local session and exposed its Connect retry control in a 340x326 outer
+  / 324x287 client window at 96 DPI, with an exact
   320x260 nested UXP content view matching the manifest minimum. The retained comparison is
   `docs/evidence/ccx-install-layout-v0.3.0.json`. Docked and non-100% Windows-scale observations
   remain required before this gate can be checked.

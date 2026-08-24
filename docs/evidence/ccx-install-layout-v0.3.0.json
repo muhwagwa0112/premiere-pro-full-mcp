@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "recordedAt": "2026-08-24T20:33:49.5969159+09:00",
+  "recordedAt": "2026-08-24T22:24:00+09:00",
   "releaseVersion": "0.3.0",
   "host": {
     "application": "Adobe Premiere Pro",
@@ -17,14 +17,14 @@
   },
   "ccx": {
     "name": "premiere-pro-full-mcp-v0.3.0.ccx",
-    "sha256": "a958fa4d52f8248e68612b1fabf32ec9faa63da77496f0a9dc30bc18d5685c2f",
+    "sha256": "a503fe6c0fd70c2ba9703925638ae05031c2bd76cc911547a3ccad2e58dcb38d",
     "entryCount": 6,
     "installedFilesEqual": true,
     "files": [
       {
         "path": "manifest.json",
-        "size": 778,
-        "sha256": "498784ce715a7d519d31d3d1e4e52ebecb1f0be9a98e66846632aeeab0327b1a"
+        "size": 744,
+        "sha256": "a4b513f6d3d914834d1ab51043cbb5c871e9b75e5c770e6b4dd3337a9d052246"
       },
       {
         "path": "api-catalog.cjs",
@@ -33,13 +33,13 @@
       },
       {
         "path": "index.html",
-        "size": 2987,
-        "sha256": "9e241f7367eaef6139c54bb1bb11ff7370bfbdf5b91e0376e84b487d46f8d411"
+        "size": 2131,
+        "sha256": "7a4f042c6394fa61dbf259918da739f9e70323ed2c4af3764e46e776cc6b69f3"
       },
       {
         "path": "main.cjs",
-        "size": 62640,
-        "sha256": "df6dc36650384ab39999defb9f9ee99ddcbb0ca3a6d95f42f1bfbd9f00dfa1f9"
+        "size": 60122,
+        "sha256": "178e068a5d256bc011d1553e268cd53b86da4ef7fd75189be370469fab64ea76"
       },
       {
         "path": "main.js",
@@ -48,8 +48,8 @@
       },
       {
         "path": "README.md",
-        "size": 754,
-        "sha256": "6fe87267696aeaae272c0e5dc80397aec6c098ca9859a7c4bf7286c7b8f9e4f2"
+        "size": 724,
+        "sha256": "90afb17d1ace27ef68768479a8d9541317d741d4f0c2e96b8ded396ee49e0104"
       }
     ]
   },
@@ -67,12 +67,18 @@
       "height": 260
     },
     "primaryControlsObserved": [
-      "port",
-      "token",
-      "pair",
       "connect",
       "panel-tab"
-    ]
+    ],
+    "connection": {
+      "mode": "automatic-localhost-with-one-click-retry",
+      "endpoint": "ws://localhost:17777/uxp",
+      "sharedToken": false,
+      "available": true,
+      "hostVersion": "26.3.2",
+      "hostSessionId": "11aea1ec-bf82-4db1-a77f-11cce576c97c",
+      "capabilityFingerprint": "3ad423e187ccb155afd139a8181bdc3093de357fb183d7505b4a00e1e3c3b17e"
+    }
   },
   "gates": {
     "installation": "passed",
