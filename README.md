@@ -39,7 +39,7 @@ Requirements: Windows 10/11 x64, Premiere Pro 26.3 or later, Creative Cloud Desk
 
    The installer verifies every packaged file, installs only in the current user profile, registers `premiere_pro_full_mcp` with Codex, and opens the bundled CCX.
 3. Approve the independent-plugin warning in Creative Cloud Desktop. Restart Premiere, then open **Window > UXP Plugins > Premiere Pro Full MCP**.
-4. On first use, click **Pair with installed helper…** and select `%LOCALAPPDATA%\PremiereMCP\app\runtime-bootstrap.json`. UXP remembers only the file permission; the session token is not stored in the CCX.
+4. Click **Connect** in the panel. The installed local bridge is fixed to `localhost:17777`; no token, file picker, or pairing step is required.
 5. Restart Codex and call the host/capability inspection tools. Run Doctor if the bridge is not connected:
 
    ```powershell
@@ -68,7 +68,7 @@ The executables and PowerShell scripts are not Authenticode-signed. Windows may 
 # Download and install the newest authenticated GitHub release
 powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\PremiereMCP\app\tools\Update.ps1"
 
-# Recoverable removal; pairing/workspace data is preserved
+# Recoverable removal; workspace data is preserved
 powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\PremiereMCP\app\tools\Uninstall.ps1"
 ```
 
@@ -82,7 +82,7 @@ Updates reject signature, repository, tag, name, size, digest, prerelease, and d
 - An authorized sequence overwrite moves the original to a verified backup, renders to an operation-scoped temporary file, verifies a stable non-empty digest, and commits without replacing an existing path. Any unproven restore or commit keeps a durable, output-specific reconciliation journal and blocks a new operation ID from reusing that target.
 - Interactive R2/R3 operations use short-lived, scope-bound, single-use exact-plan approvals and an independent trusted Windows dialog. Enrolled unattended modes use Trust Profile authorization and never invoke that dialog.
 - Raw ExtendScript, arbitrary QE/object paths, raw UI selectors/clicks, shell commands, and credential extraction are not public MCP operations.
-- Listeners bind to localhost, CEP envelopes are HMAC authenticated through a DPAPI CurrentUser broker, and release artifacts never contain runtime bootstrap material.
+- Listeners bind to localhost. The one-click UXP bridge intentionally has no shared secret and therefore does not treat another process under the same Windows account as an adversary; capability/fingerprint handshakes, session/route binding, operation approval, Trust Profiles, the UI named-pipe token, and CEP HMAC remain enforced.
 - Filesystem work is confined to explicitly approved canonical roots and rejects reparse-point escapes.
 - No telemetry is collected. Logs and ledgers exclude prompts, arguments, results, tokens, project paths, media names, and personal identifiers.
 
@@ -124,7 +124,7 @@ Release builds require a clean Git worktree and the dedicated private signing ke
    ```
 
 3. Creative Cloud Desktop에서 독립 플러그인 설치 경고를 승인합니다. Premiere를 재시작한 뒤 **창 > UXP 플러그인 > Premiere Pro Full MCP**를 엽니다.
-4. 첫 실행 때 **Pair with installed helper…**를 누르고 `%LOCALAPPDATA%\PremiereMCP\app\runtime-bootstrap.json`을 선택합니다. CCX에는 세션 토큰이 포함되지 않습니다.
+4. 패널에서 **Connect**를 누릅니다. 설치된 로컬 브리지는 `localhost:17777`에 고정되어 있으며 토큰 입력, 파일 선택, 페어링 단계가 없습니다.
 5. Codex를 재시작합니다. 연결되지 않으면 다음 Doctor를 실행합니다.
 
    ```powershell

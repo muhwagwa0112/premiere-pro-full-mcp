@@ -151,7 +151,7 @@ public sealed class McpLauncherTests
     }
 
     [Fact]
-    public void CreatesDefaultWorkspaceAndInjectsDistinctDpapiBackedTokens()
+    public void CreatesDefaultWorkspaceAndInjectsDpapiBackedUiToken()
     {
         var localAppData = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         string? createdDirectory = null;
@@ -163,7 +163,7 @@ public sealed class McpLauncherTests
             name =>
             {
                 requestedSecrets.Add(name);
-                return name.Contains("uxp", StringComparison.Ordinal) ? new string('A', 64) : new string('B', 64);
+                return new string('B', 64);
             },
             localAppData,
             path => createdDirectory = path);
@@ -171,11 +171,10 @@ public sealed class McpLauncherTests
         var childEnvironment = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         configuration.ApplyTo(childEnvironment);
 
-        Assert.Equal(2, requestedSecrets.Distinct(StringComparer.Ordinal).Count());
-        Assert.NotEqual(configuration.UxpToken, configuration.UiToken);
+        Assert.Equal(new[] { McpLauncher.UiTokenSecretName }, requestedSecrets);
         Assert.Equal(Path.Combine(localAppData, "PremiereMCP", "workspace"), createdDirectory);
         Assert.Equal(createdDirectory, childEnvironment["PREMIERE_MCP_APPROVED_ROOTS"]);
-        Assert.Equal(configuration.UxpToken, childEnvironment["PREMIERE_MCP_UXP_TOKEN"]);
+        Assert.False(childEnvironment.ContainsKey("PREMIERE_MCP_UXP_TOKEN"));
         Assert.Equal(configuration.UiToken, childEnvironment["PREMIERE_MCP_UI_TOKEN"]);
         Assert.Equal("PremiereMcpUi", childEnvironment["PREMIERE_MCP_UI_PIPE"]);
     }
@@ -192,7 +191,7 @@ public sealed class McpLauncherTests
 
         var configuration = McpRuntimeConfiguration.Create(
             inherited,
-            name => name.Contains("uxp", StringComparison.Ordinal) ? new string('C', 64) : new string('D', 64),
+            _ => new string('D', 64),
             Path.GetTempPath(),
             _ => createCalls++);
 
@@ -202,12 +201,11 @@ public sealed class McpLauncherTests
     }
 
     [Fact]
-    public void RejectsSharedBridgeToken()
+    public void RejectsInvalidUiBridgeToken()
     {
-        var token = new string('E', 64);
         Assert.Throws<CryptographicException>(() => McpRuntimeConfiguration.Create(
             new Dictionary<string, string?>(),
-            _ => token,
+            _ => "too-short",
             Path.GetTempPath(),
             _ => { }));
     }
@@ -222,7 +220,7 @@ public sealed class McpLauncherTests
 
         Assert.Throws<InvalidDataException>(() => McpRuntimeConfiguration.Create(
             inherited,
-            name => name.Contains("uxp", StringComparison.Ordinal) ? new string('F', 64) : new string('0', 64),
+            _ => new string('0', 64),
             Path.GetTempPath(),
             _ => { }));
     }
@@ -236,6 +234,7 @@ public sealed class McpLauncherTests
             ["NODE_OPTIONS"] = @"--require C:\attacker\preload.cjs",
             ["NODE_PATH"] = @"C:\attacker\modules",
             ["PREMIERE_MCP_SECRET_HELPER"] = @"C:\attacker\helper.exe",
+            ["PREMIERE_MCP_UXP_TOKEN"] = new string('X', 64),
             ["LOCALAPPDATA"] = @"C:\attacker\local",
             ["PREMIERE_MCP_CEP_DIR"] = @"C:\attacker\queue"
         };
@@ -245,16 +244,9 @@ public sealed class McpLauncherTests
         Assert.False(inherited.ContainsKey("NODE_OPTIONS"));
         Assert.False(inherited.ContainsKey("NODE_PATH"));
         Assert.False(inherited.ContainsKey("PREMIERE_MCP_SECRET_HELPER"));
+        Assert.False(inherited.ContainsKey("PREMIERE_MCP_UXP_TOKEN"));
         Assert.Equal(Path.GetFullPath(trustedLocalAppData), inherited["LOCALAPPDATA"]);
         Assert.Equal(Path.Combine(Path.GetFullPath(trustedLocalAppData), "PremiereMCP", "cep-public-v1"), inherited["PREMIERE_MCP_CEP_DIR"]);
-    }
-
-    [Fact]
-    public void UxpBootstrapTargetIsFixedUnderTheCurrentUserApplicationRoot()
-    {
-        var localBase = Path.Combine(Path.GetTempPath(), $"ppmcp-local-{Guid.NewGuid():N}");
-        Assert.Equal(Path.Combine(Path.GetFullPath(localBase), "app", "runtime-bootstrap.json"), UxpBootstrapProvisioner.ResolveTarget(localBase));
-        Assert.Throws<ArgumentException>(() => UxpBootstrapProvisioner.ResolveTarget(""));
     }
 
     [Fact]

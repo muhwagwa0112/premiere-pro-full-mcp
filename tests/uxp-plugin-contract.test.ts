@@ -3,9 +3,10 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 describe("UXP bridge deployment contract", () => {
-  it("keeps network permission constrained to the authenticated localhost broker", async () => {
+  it("keeps the token-free bridge constrained to localhost and removes file-system permission", async () => {
     const manifest = JSON.parse(await readFile(resolve("uxp-plugin/manifest.json"), "utf8"));
     expect(manifest.requiredPermissions.network.domains).toEqual(["ws://localhost/"]);
+    expect(manifest.requiredPermissions.localFileSystem).toBeUndefined();
   });
 
   it("creates short-lived Adobe Action objects inside executeTransaction", async () => {
@@ -46,11 +47,15 @@ describe("UXP bridge deployment contract", () => {
     expect(source).not.toContain("querySelectorAll");
   });
 
-  it("accepts the host file picker's documented single file and defensive array result", async () => {
+  it("connects with one button and no token or bootstrap pairing path", async () => {
     const source = await readFile(resolve("uxp-plugin/main.cjs"), "utf8");
-    expect(source).toContain("Array.isArray(selection) ? selection[0] : selection");
-    expect(source).toContain('status("Validating installed helper…")');
-    expect(source).toContain("createPersistentToken(file)");
+    expect(source).toContain('new WebSocket("ws://localhost:17777/uxp")');
+    expect(source).toContain('type: "connect", protocolVersion: 2');
+    expect(source).toContain('document.getElementById("connect").addEventListener("click", connect)');
+    expect(source).not.toContain("runtime-bootstrap.json");
+    expect(source).not.toContain("createPersistentToken");
+    expect(source).not.toContain('document.getElementById("token")');
+    expect(source).not.toContain("BOOTSTRAP_PERMISSION_KEY");
   });
 
   it("registers the installed panel lifecycle with the manifest entrypoint id", async () => {

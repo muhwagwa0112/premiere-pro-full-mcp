@@ -29,8 +29,8 @@ const transport = new StdioClientTransport({
   stderr: "pipe",
   env: {
     ...process.env,
-    // The installed panel is paired to the release bootstrap on 17777. Tests that
-    // need isolation can still override this port explicitly.
+    // The installed panel uses the fixed localhost bridge on 17777. Tests that need
+    // isolation can still override the server port explicitly.
     PREMIERE_MCP_UXP_PORT: process.env.PREMIERE_MCP_VALIDATION_UXP_PORT || "17777",
     PREMIERE_MCP_UI_PIPE: process.env.PREMIERE_MCP_VALIDATION_UI_PIPE || `PremiereMcpUi.Validation.${process.pid}`,
   },
@@ -52,7 +52,7 @@ async function waitForUxp(timeout = 40_000) {
     if (capabilities.backends?.uxp?.available === true) return;
     await new Promise((resolve) => setTimeout(resolve, 1_000));
   }
-  throw new Error("Authenticated UXP panel did not reconnect before validation planning");
+  throw new Error("Local UXP panel did not reconnect before validation planning");
 }
 
 async function preview(label, actionId, args, requireUxp = true) {

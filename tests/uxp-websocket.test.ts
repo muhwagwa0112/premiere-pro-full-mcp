@@ -14,16 +14,16 @@ afterEach(async () => {
 });
 
 describe("UXP websocket bridge", () => {
-  it("requires authentication and declared capabilities", async () => {
+  it("starts without a token and requires a valid local handshake with declared capabilities", async () => {
     const port = 23000 + Math.floor(Math.random() * 5000);
-    const token = "test-token-with-more-than-24-characters";
-    const adapter = new UxpWebSocketAdapter(token, port);
+    const adapter = new UxpWebSocketAdapter(port);
     adapters.push(adapter);
     await adapter.start();
+    expect((await adapter.availability()).available).toBe(false);
     const socket = new WebSocket(`ws://127.0.0.1:${port}/uxp`);
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
     const catalog = await loadAdobeApiCatalog();
-    socket.send(JSON.stringify({ type: "auth", protocolVersion: 1, token, hostVersion: "26.3.2", capabilities: ["host.inspect"], apiFingerprint: catalog.fingerprint }));
+    socket.send(JSON.stringify({ type: "connect", protocolVersion: 2, hostVersion: "26.3.2", capabilities: ["host.inspect"], apiFingerprint: catalog.fingerprint }));
     await new Promise<void>((resolve) => socket.once("message", () => resolve()));
     expect((await adapter.availability()).available).toBe(true);
     const unsupported = await adapter.execute({ protocolVersion: 1, requestId: crypto.randomUUID(), operation: "project.save", args: {} });
@@ -34,7 +34,7 @@ describe("UXP websocket bridge", () => {
 
   it("rejects browser origins before accepting a websocket", async () => {
     const port = 28000 + Math.floor(Math.random() * 2000);
-    const adapter = new UxpWebSocketAdapter("test-token-with-more-than-24-characters", port);
+    const adapter = new UxpWebSocketAdapter(port);
     adapters.push(adapter);
     await adapter.start();
     const socket = new WebSocket(`ws://127.0.0.1:${port}/uxp`, { origin: "https://attacker.example" });
@@ -46,16 +46,15 @@ describe("UXP websocket bridge", () => {
     expect(status).toBe(403);
   });
 
-  it("accepts Premiere UXP's exact file origin while still requiring authentication", async () => {
+  it("accepts Premiere UXP's exact file origin with the token-free local handshake", async () => {
     const port = 30001 + Math.floor(Math.random() * 2000);
-    const token = "test-token-with-more-than-24-characters";
-    const adapter = new UxpWebSocketAdapter(token, port);
+    const adapter = new UxpWebSocketAdapter(port);
     adapters.push(adapter);
     await adapter.start();
     const socket = new WebSocket(`ws://127.0.0.1:${port}/uxp`, { origin: "file://" });
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
     const catalog = await loadAdobeApiCatalog();
-    socket.send(JSON.stringify({ type: "auth", protocolVersion: 1, token, hostVersion: "26.3.2", capabilities: ["host.inspect"], apiFingerprint: catalog.fingerprint }));
+    socket.send(JSON.stringify({ type: "connect", protocolVersion: 2, hostVersion: "26.3.2", capabilities: ["host.inspect"], apiFingerprint: catalog.fingerprint }));
     await new Promise<void>((resolve) => socket.once("message", () => resolve()));
     expect((await adapter.availability()).available).toBe(true);
     socket.close();
@@ -67,14 +66,13 @@ describe("UXP websocket bridge", () => {
     const outputPath = join(directory, "existing.mp4");
     await writeFile(outputPath, "existing", "utf8");
     const port = 32001 + Math.floor(Math.random() * 2000);
-    const token = "test-token-with-more-than-24-characters";
-    const adapter = new UxpWebSocketAdapter(token, port);
+    const adapter = new UxpWebSocketAdapter(port);
     adapters.push(adapter);
     await adapter.start();
     const socket = new WebSocket(`ws://127.0.0.1:${port}/uxp`);
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
     const catalog = await loadAdobeApiCatalog();
-    socket.send(JSON.stringify({ type: "auth", protocolVersion: 1, token, hostVersion: "26.3.2", capabilities: ["export.sequence"], apiFingerprint: catalog.fingerprint }));
+    socket.send(JSON.stringify({ type: "connect", protocolVersion: 2, hostVersion: "26.3.2", capabilities: ["export.sequence"], apiFingerprint: catalog.fingerprint }));
     await new Promise<void>((resolve) => socket.once("message", () => resolve()));
     const response = await adapter.execute({ protocolVersion: 1, requestId: crypto.randomUUID(), operation: "export.sequence", args: { outputPath, presetPath: join(directory, "preset.epr"), overwrite: false } });
     expect(response.ok).toBe(false);
@@ -82,19 +80,18 @@ describe("UXP websocket bridge", () => {
     socket.close();
   });
 
-  it("verifies a newly created stable sequence file after authenticated dispatch", async () => {
+  it("verifies a newly created stable sequence file after local UXP dispatch", async () => {
     const directory = await mkdtemp(join(tmpdir(), "ppmcp-uxp-export-"));
     temporaryDirectories.push(directory);
     const outputPath = join(directory, "created.mp4");
     const port = 34001 + Math.floor(Math.random() * 1000);
-    const token = "test-token-with-more-than-24-characters";
-    const adapter = new UxpWebSocketAdapter(token, port);
+    const adapter = new UxpWebSocketAdapter(port);
     adapters.push(adapter);
     await adapter.start();
     const socket = new WebSocket(`ws://127.0.0.1:${port}/uxp`);
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
     const catalog = await loadAdobeApiCatalog();
-    socket.send(JSON.stringify({ type: "auth", protocolVersion: 1, token, hostVersion: "26.3.2", capabilities: ["export.sequence"], apiFingerprint: catalog.fingerprint }));
+    socket.send(JSON.stringify({ type: "connect", protocolVersion: 2, hostVersion: "26.3.2", capabilities: ["export.sequence"], apiFingerprint: catalog.fingerprint }));
     await new Promise<void>((resolve) => socket.once("message", () => resolve()));
     const command = new Promise<Record<string, unknown>>((resolve) => socket.once("message", (data) => resolve(JSON.parse(data.toString()))));
     const requestId = crypto.randomUUID();
@@ -108,4 +105,30 @@ describe("UXP websocket bridge", () => {
     expect(response.verification?.outcome).toBe("verified");
     socket.close();
   }, 20_000);
+
+  it("rejects the removed token-auth protocol instead of accepting an ambiguous legacy client", async () => {
+    const port = 35001 + Math.floor(Math.random() * 1000);
+    const adapter = new UxpWebSocketAdapter(port);
+    adapters.push(adapter);
+    await adapter.start();
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/uxp`);
+    await new Promise<void>((resolve) => socket.once("open", () => resolve()));
+    socket.send(JSON.stringify({ type: "auth", protocolVersion: 1, token: "legacy-token", hostVersion: "26.3.2", capabilities: ["host.inspect"], apiFingerprint: "0".repeat(64) }));
+    const code = await new Promise<number>((resolve) => socket.once("close", resolve));
+    expect(code).toBe(1008);
+    expect((await adapter.availability()).available).toBe(false);
+  });
+
+  it("rejects a token-free client whose Adobe API catalog fingerprint does not match", async () => {
+    const port = 36001 + Math.floor(Math.random() * 1000);
+    const adapter = new UxpWebSocketAdapter(port);
+    adapters.push(adapter);
+    await adapter.start();
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/uxp`);
+    await new Promise<void>((resolve) => socket.once("open", () => resolve()));
+    socket.send(JSON.stringify({ type: "connect", protocolVersion: 2, hostVersion: "26.3.2", capabilities: ["host.inspect"], apiFingerprint: "0".repeat(64) }));
+    const code = await new Promise<number>((resolve) => socket.once("close", resolve));
+    expect(code).toBe(1008);
+    expect((await adapter.availability()).available).toBe(false);
+  });
 });

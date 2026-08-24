@@ -10,7 +10,6 @@ namespace PremiereMcp.WindowsUiAgent;
 
 internal static class McpLauncher
 {
-    internal const string UxpTokenSecretName = "uxp-bridge-token";
     internal const string UiTokenSecretName = "ui-bridge-token";
 
     internal static int Run(string entrypoint)
@@ -67,6 +66,7 @@ internal static class McpLauncher
         environment.Remove("NODE_OPTIONS");
         environment.Remove("NODE_PATH");
         environment.Remove("PREMIERE_MCP_SECRET_HELPER");
+        environment.Remove("PREMIERE_MCP_UXP_TOKEN");
         RemoveInheritedAutomationBoundary(environment);
         environment["LOCALAPPDATA"] = trustedLocalAppData;
         environment["PREMIERE_MCP_CEP_DIR"] = Path.Combine(trustedLocalAppData, "PremiereMCP", "cep-public-v1");
@@ -274,7 +274,6 @@ internal sealed class JobObjectLifetime : IDisposable
 }
 
 public sealed record McpRuntimeConfiguration(
-    string UxpToken,
     string UiToken,
     string ApprovedRoots,
     string UiPipeName)
@@ -290,14 +289,8 @@ public sealed record McpRuntimeConfiguration(
         ArgumentException.ThrowIfNullOrWhiteSpace(localApplicationData);
         ArgumentNullException.ThrowIfNull(createDirectory);
 
-        var uxpToken = secretProvider(McpLauncher.UxpTokenSecretName);
         var uiToken = secretProvider(McpLauncher.UiTokenSecretName);
-        ValidateToken(uxpToken, "UXP");
         ValidateToken(uiToken, "UI");
-        if (TokenComparer.EqualsFixedTime(uxpToken, uiToken))
-        {
-            throw new CryptographicException("UXP and UI bridge tokens must be distinct.");
-        }
 
         var approvedRoots = GetValue(inheritedEnvironment, "PREMIERE_MCP_APPROVED_ROOTS");
         if (string.IsNullOrWhiteSpace(approvedRoots))
@@ -314,13 +307,12 @@ public sealed record McpRuntimeConfiguration(
             throw new InvalidDataException("PREMIERE_MCP_UI_PIPE contains invalid characters or is too long.");
         }
 
-        return new McpRuntimeConfiguration(uxpToken, uiToken, approvedRoots, pipeName);
+        return new McpRuntimeConfiguration(uiToken, approvedRoots, pipeName);
     }
 
     public void ApplyTo(IDictionary<string, string?> environment)
     {
         ArgumentNullException.ThrowIfNull(environment);
-        environment["PREMIERE_MCP_UXP_TOKEN"] = UxpToken;
         environment["PREMIERE_MCP_UI_TOKEN"] = UiToken;
         environment["PREMIERE_MCP_APPROVED_ROOTS"] = ApprovedRoots;
         environment["PREMIERE_MCP_UI_PIPE"] = UiPipeName;

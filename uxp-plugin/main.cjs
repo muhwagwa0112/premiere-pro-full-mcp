@@ -18,7 +18,7 @@ const callbackEvents = [];
 const sessionPrefix = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 let handleCounter = 0;
 let socket = null;
-let authenticatedSessionId = null;
+let connectedSessionId = null;
 let reconnectTimer = null;
 let liveProbe = { status: "not_run", availableRoots: 0, unavailableRoots: [], probedRootMembers: 0, unavailableRootMembers: [] };
 
@@ -527,7 +527,7 @@ async function execute(operation, args, expectedRevision) {
   const context = await activeContext();
   const beforeRevision = await snapshotRevision(context.project, context.sequence);
   if (expectedRevision && expectedRevision !== beforeRevision) throw Object.assign(new Error("Project state changed after the request was prepared"), { code: "UXP_STALE_REVISION" });
-  if (operation === "host.inspect") return { beforeRevision, afterRevision: beforeRevision, verification: { outcome: "verified", method: "authenticated UXP handshake" }, result: { hostName: uxp.host.name, hostVersion: uxp.host.version, uxpVersion: uxp.versions && uxp.versions.uxp || null, projectOpen: !!context.project, sequenceOpen: !!context.sequence } };
+  if (operation === "host.inspect") return { beforeRevision, afterRevision: beforeRevision, verification: { outcome: "verified", method: "local UXP handshake" }, result: { hostName: uxp.host.name, hostVersion: uxp.host.version, uxpVersion: uxp.versions && uxp.versions.uxp || null, projectOpen: !!context.project, sequenceOpen: !!context.sequence } };
   if (operation === "project.inspect") {
     if (!context.project) return { beforeRevision, afterRevision: beforeRevision, verification: { outcome: "verified", method: "UXP host snapshot" }, result: { project: null, sequences: [] } };
     const sequences = Array.from(await context.project.getSequences() || []).slice(0, 256).map((sequence) => ({ guid: String(sequence.guid || ""), name: String(sequence.name || "") }));
@@ -732,7 +732,7 @@ async function execute(operation, args, expectedRevision) {
     const exportPromise = encoder.exportSequence(context.sequence, ppro.Constants.ExportType.IMMEDIATELY, outputPath, presetPath, true);
     if (exportPromise === false) throw Object.assign(new Error("Premiere did not accept sequence export"), { code: "UXP_SEQUENCE_EXPORT_NOT_ACCEPTED" });
     // Premiere 26.3.2 can finish writing a valid file while this host Promise
-    // remains pending. Do not block the authenticated bridge on that Promise;
+    // remains pending. Do not block the local bridge on that Promise;
     // the Node side proves a new, stable output file before reporting success.
     Promise.resolve(exportPromise).catch(() => {});
     return { beforeRevision, afterRevision: beforeRevision, verification: { outcome: "committed_unverified", method: "EncoderManager.exportSequence dispatch accepted; server verifies a changed stable output file" }, createdFiles: [{ name: outputPath, verified: false }], result: { initiated: true, outputPath } };
@@ -756,39 +756,35 @@ async function handleCommand(message) {
 function validateCheckpointBinding(message) {
   const binding = message && message.routeBinding;
   if (!message || typeof message.planHash !== "string" || !/^sha256:[a-f0-9]{64}$/.test(message.planHash)) throw Object.assign(new Error("Checkpoint requires an exact execution plan hash"), { code: "UXP_CHECKPOINT_PLAN_HASH_REQUIRED" });
-  if (!binding || binding.backend !== "uxp" || binding.hostVersion !== uxp.host.version || binding.hostSessionId !== authenticatedSessionId || binding.capabilityFingerprint !== API_CATALOG.fingerprint) throw Object.assign(new Error("Checkpoint route binding no longer matches this UXP host session"), { code: "UXP_CHECKPOINT_ROUTE_BINDING_DRIFT" });
+  if (!binding || binding.backend !== "uxp" || binding.hostVersion !== uxp.host.version || binding.hostSessionId !== connectedSessionId || binding.capabilityFingerprint !== API_CATALOG.fingerprint) throw Object.assign(new Error("Checkpoint route binding no longer matches this UXP host session"), { code: "UXP_CHECKPOINT_ROUTE_BINDING_DRIFT" });
   const internal = message.args && message.args.checkpoint;
   if (!internal || (internal.phase !== "inspect" && internal.phase !== "save") || internal.planHash !== message.planHash || JSON.stringify(internal.routeBinding) !== JSON.stringify(binding)) throw Object.assign(new Error("Checkpoint internal route binding or phase does not match the execution request"), { code: "UXP_CHECKPOINT_BINDING_MISMATCH" });
 }
 
 function connect() {
-  const port = Number(document.getElementById("port").value);
-  const token = document.getElementById("token").value;
-  if (!Number.isInteger(port) || port < 1025 || port > 65535) return status("Port must be between 1025 and 65535", "error");
-  if (token.length < 24) return status("Token must contain at least 24 characters", "error");
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
   }
   if (socket) socket.close();
   status("Connecting…");
-  const candidate = new WebSocket(`ws://localhost:${port}/uxp`);
+  const candidate = new WebSocket("ws://localhost:17777/uxp");
   socket = candidate;
   candidate.addEventListener("open", () => {
     if (socket !== candidate) return;
     liveProbe = probeCatalog();
-    candidate.send(JSON.stringify({ type: "auth", protocolVersion: 1, token, hostVersion: uxp.host.version, uxpVersion: uxp.versions && uxp.versions.uxp || "unknown", capabilities: CAPABILITIES, apiFingerprint: API_CATALOG.fingerprint, apiCounts: API_CATALOG.counts, apiProbe: liveProbe }));
+    candidate.send(JSON.stringify({ type: "connect", protocolVersion: 2, hostVersion: uxp.host.version, uxpVersion: uxp.versions && uxp.versions.uxp || "unknown", capabilities: CAPABILITIES, apiFingerprint: API_CATALOG.fingerprint, apiCounts: API_CATALOG.counts, apiProbe: liveProbe }));
   });
   candidate.addEventListener("message", (event) => {
     if (socket !== candidate) return;
     let message;
     try { message = JSON.parse(event.data); } catch (_) { return; }
-    if (message.type === "authenticated") { authenticatedSessionId = typeof message.sessionId === "string" ? message.sessionId : null; status(`Connected\nPremiere ${uxp.host.version}\n${API_CATALOG.counts.members} generated API members`, "connected"); }
+    if (message.type === "connected" && message.protocolVersion === 2) { connectedSessionId = typeof message.sessionId === "string" ? message.sessionId : null; status(`Connected\nPremiere ${uxp.host.version}\n${API_CATALOG.counts.members} generated API members`, "connected"); }
     else if (message.type === "command") void handleCommand(message);
   });
   candidate.addEventListener("close", () => {
     if (socket !== candidate) return;
-    authenticatedSessionId = null;
+    connectedSessionId = null;
     for (const subscription of subscriptions.values()) {
       try {
         if (subscription.target) ppro.EventManager.removeEventListener(subscription.target, subscription.eventName, subscription.handler);
@@ -806,60 +802,8 @@ function connect() {
     }, 2000);
   });
   candidate.addEventListener("error", () => {
-    if (socket === candidate) status("Connection failed. Retrying the authenticated local MCP server…", "error");
+    if (socket === candidate) status("Connection failed. Retrying the local MCP server…", "error");
   });
 }
 
 document.getElementById("connect").addEventListener("click", connect);
-
-const BOOTSTRAP_PERMISSION_KEY = "premiere-mcp-bootstrap-file-v1";
-
-function validateBootstrap(bootstrap) {
-  if (bootstrap.version !== 1 || !Number.isInteger(bootstrap.port) || bootstrap.port < 1025 || bootstrap.port > 65535 || typeof bootstrap.token !== "string" || bootstrap.token.length < 24) {
-    throw new Error("Provisioned bootstrap is invalid");
-  }
-  return bootstrap;
-}
-
-async function applyBootstrapFile(file) {
-  if (!file || file.name !== "runtime-bootstrap.json") throw new Error("Select the installed runtime-bootstrap.json file");
-  const bootstrap = validateBootstrap(JSON.parse(await file.read()));
-  const permission = await uxp.storage.localFileSystem.createPersistentToken(file);
-  localStorage.setItem(BOOTSTRAP_PERMISSION_KEY, permission);
-  document.getElementById("port").value = String(bootstrap.port);
-  document.getElementById("token").value = bootstrap.token;
-  connect();
-}
-
-document.getElementById("pair").addEventListener("click", async () => {
-  try {
-    status("Select the installed runtime-bootstrap.json file…");
-    const selection = await uxp.storage.localFileSystem.getFileForOpening({ types: ["json"], allowMultiple: false });
-    const file = Array.isArray(selection) ? selection[0] : selection;
-    if (!file) {
-      status("Disconnected — select Pair to connect.");
-      return;
-    }
-    status("Validating installed helper…");
-    await applyBootstrapFile(file);
-  } catch (error) {
-    status(error && error.message || "Pairing failed", "error");
-  }
-});
-
-async function connectFromBootstrap() {
-  try {
-    const permission = localStorage.getItem(BOOTSTRAP_PERMISSION_KEY);
-    if (!permission) throw new Error("Not paired");
-    const bootstrapFile = await uxp.storage.localFileSystem.getEntryForPersistentToken(permission);
-    const bootstrap = validateBootstrap(JSON.parse(await bootstrapFile.read()));
-    document.getElementById("port").value = String(bootstrap.port);
-    document.getElementById("token").value = bootstrap.token;
-    connect();
-  } catch (_) {
-    localStorage.removeItem(BOOTSTRAP_PERMISSION_KEY);
-    status("Disconnected — select Pair to connect.");
-  }
-}
-
-void connectFromBootstrap();

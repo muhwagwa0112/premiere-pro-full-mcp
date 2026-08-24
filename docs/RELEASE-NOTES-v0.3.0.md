@@ -16,17 +16,19 @@ v0.3.0 is the current Windows release of the capability-gated Premiere Pro 26.3 
   post-production, collaboration, service, third-party, and native boundaries.
 - One implemented-unverified inspection/delivery workflow with durable checkpoint evidence before
   and after export. Other unavailable workflows remain plan-only or blocked.
+- One-click UXP connection to the fixed localhost bridge, with no user token, file picker, or pairing
+  bootstrap. The existing capability/fingerprint handshake and operation authorization remain enforced.
 
 ## Validation
 
-- 33 TypeScript test files / 191 tests passed.
-- 37 Windows UI agent tests passed.
+- 33 TypeScript test files / 193 tests passed.
+- 36 Windows UI agent tests passed.
 - Release security tests passed ZIP traversal, package-attribute, symlink/reparse, and detached
   signature-tamper rejection.
 - Support/feature registry checks, 761-member UXP plan validation, disposable fixture planning, and
   MCP smoke passed.
 - The installed v0.3 runtime passed CEP/QE, named-pipe UI transport, interactive project
-  create/import/sequence/save, authenticated UXP frame and sequence export, and 761-member live
+  create/import/sequence/save, local UXP frame and sequence export, and 761-member live
   catalog validation on Premiere Pro 26.3.2. The live ledger retained the 281-success baseline and
   recorded 31 read-only calls as explicit fail-closed outcomes.
 

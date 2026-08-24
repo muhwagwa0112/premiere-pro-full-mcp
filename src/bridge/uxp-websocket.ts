@@ -1,4 +1,4 @@
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { stat } from "node:fs/promises";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { IncomingMessage } from "node:http";
@@ -6,10 +6,9 @@ import type { BackendAdapter, BackendProbe, BridgeRequest, BridgeResponse, Dispa
 import { hasValidEffectiveRequestBinding, routeBindingFromProbe, sameRouteBinding } from "../security/execution-plan.js";
 import { loadAdobeApiCatalog } from "../adobe-api-catalog.js";
 
-interface AuthMessage {
-  type: "auth";
-  protocolVersion: 1;
-  token: string;
+interface ConnectMessage {
+  type: "connect";
+  protocolVersion: 2;
   hostVersion: string;
   uxpVersion?: string;
   capabilities: string[];
@@ -27,12 +26,6 @@ interface PendingRequest {
   timer: NodeJS.Timeout;
   request: BridgeRequest;
   outputBaseline: FileSnapshot | null;
-}
-
-function constantTimeEqual(left: string, right: string): boolean {
-  const a = Buffer.from(left);
-  const b = Buffer.from(right);
-  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 async function fileSnapshot(path: string): Promise<FileSnapshot | null> {
@@ -62,7 +55,6 @@ async function waitForChangedStableFile(path: string, baseline: FileSnapshot | n
 
 export class UxpWebSocketAdapter implements BackendAdapter {
   readonly backend = "uxp" as const;
-  readonly #token: string | null;
   readonly #port: number;
   readonly #pending = new Map<string, PendingRequest>();
   #server: WebSocketServer | null = null;
@@ -72,16 +64,15 @@ export class UxpWebSocketAdapter implements BackendAdapter {
   #sequenceExportInFlight: string | null = null;
   #capabilities = new Set<string>();
   #apiFingerprint: string | null = null;
-  readonly #unauthenticated = new Set<WebSocket>();
-  readonly #failedAuthByAddress = new Map<string, number[]>();
+  readonly #pendingConnections = new Set<WebSocket>();
+  readonly #failedHandshakesByAddress = new Map<string, number[]>();
 
-  constructor(token = process.env.PREMIERE_MCP_UXP_TOKEN ?? null, port = Number.parseInt(process.env.PREMIERE_MCP_UXP_PORT ?? "17777", 10)) {
-    this.#token = token && token.length >= 24 ? token : null;
+  constructor(port = Number.parseInt(process.env.PREMIERE_MCP_UXP_PORT ?? "17777", 10)) {
     this.#port = Number.isInteger(port) && port > 1024 && port < 65536 ? port : 17777;
   }
 
   async start(): Promise<void> {
-    if (!this.#token || this.#server) return;
+    if (this.#server) return;
     this.#apiFingerprint = (await loadAdobeApiCatalog()).fingerprint;
     await new Promise<void>((resolve, reject) => {
       const server = new WebSocketServer({
@@ -100,9 +91,8 @@ export class UxpWebSocketAdapter implements BackendAdapter {
 
   async probe(): Promise<BackendProbe> {
     const base = { backend: this.backend, operations: [...this.#capabilities].sort() } as const;
-    if (!this.#token) return { ...base, available: false, reason: "PREMIERE_MCP_UXP_TOKEN is not configured with at least 24 characters" };
     if (!this.#server) return { ...base, available: false, reason: "UXP listener is not started" };
-    if (!this.#socket || this.#socket.readyState !== this.#socket.OPEN) return { ...base, available: false, reason: "Authenticated Premiere UXP panel is not connected" };
+    if (!this.#socket || this.#socket.readyState !== this.#socket.OPEN) return { ...base, available: false, reason: "Premiere UXP panel is not connected to the local bridge" };
     return {
       ...base,
       available: true,
@@ -114,8 +104,8 @@ export class UxpWebSocketAdapter implements BackendAdapter {
 
   async supports(operation: string, _context: Record<string, unknown>): Promise<SupportDecision> {
     return this.#capabilities.has(operation)
-      ? { supported: true, state: "implemented_unverified", requiredState: ["authenticated UXP session"] }
-      : { supported: false, state: "unsupported", reason: `Authenticated UXP host did not advertise ${operation}` };
+      ? { supported: true, state: "implemented_unverified", requiredState: ["connected local UXP session"] }
+      : { supported: false, state: "unsupported", reason: `Connected UXP host did not advertise ${operation}` };
   }
 
   async availability(): Promise<{ available: boolean; reason?: string; hostVersion?: string }> {
@@ -177,24 +167,24 @@ export class UxpWebSocketAdapter implements BackendAdapter {
     this.#socket = null;
     if (this.#server) await new Promise<void>((resolve) => this.#server?.close(() => resolve()));
     this.#server = null;
-    this.#unauthenticated.clear();
-    this.#failedAuthByAddress.clear();
+    this.#pendingConnections.clear();
+    this.#failedHandshakesByAddress.clear();
   }
 
   private handleConnection(socket: WebSocket, request: IncomingMessage): void {
     const address = request.socket.remoteAddress ?? "unknown";
     const now = Date.now();
-    const recentFailures = (this.#failedAuthByAddress.get(address) ?? []).filter((timestamp) => now - timestamp < 60_000);
-    this.#failedAuthByAddress.set(address, recentFailures);
-    if (this.#unauthenticated.size >= 4 || recentFailures.length >= 8) {
-      socket.close(1013, "Authentication rate limit exceeded");
+    const recentFailures = (this.#failedHandshakesByAddress.get(address) ?? []).filter((timestamp) => now - timestamp < 60_000);
+    this.#failedHandshakesByAddress.set(address, recentFailures);
+    if (this.#pendingConnections.size >= 4 || recentFailures.length >= 8) {
+      socket.close(1013, "Connection handshake rate limit exceeded");
       return;
     }
-    this.#unauthenticated.add(socket);
-    let authenticated = false;
-    const authTimer = setTimeout(() => {
-      this.#unauthenticated.delete(socket);
-      socket.close(1008, "Authentication required");
+    this.#pendingConnections.add(socket);
+    let connected = false;
+    const connectTimer = setTimeout(() => {
+      this.#pendingConnections.delete(socket);
+      socket.close(1008, "Connection handshake required");
     }, 5_000);
     socket.on("message", async (data) => {
       const messageBytes = Array.isArray(data) ? data.reduce((total, item) => total + item.byteLength, 0) : data.byteLength;
@@ -209,32 +199,32 @@ export class UxpWebSocketAdapter implements BackendAdapter {
         socket.close(1003, "Invalid JSON");
         return;
       }
-      if (!authenticated) {
-        const auth = message as Partial<AuthMessage>;
-        if (auth.type !== "auth" || auth.protocolVersion !== 1 || typeof auth.token !== "string" || !this.#token || !constantTimeEqual(auth.token, this.#token)) {
+      if (!connected) {
+        const hello = message as Partial<ConnectMessage>;
+        if (hello.type !== "connect" || hello.protocolVersion !== 2) {
           recentFailures.push(Date.now());
-          this.#failedAuthByAddress.set(address, recentFailures);
-          this.#unauthenticated.delete(socket);
-          socket.close(1008, "Authentication failed");
+          this.#failedHandshakesByAddress.set(address, recentFailures);
+          this.#pendingConnections.delete(socket);
+          socket.close(1008, "Unsupported connection handshake");
           return;
         }
-        if (!Array.isArray(auth.capabilities) || typeof auth.hostVersion !== "string" || typeof auth.apiFingerprint !== "string") {
+        if (!Array.isArray(hello.capabilities) || hello.capabilities.length > 1024 || !hello.capabilities.every((item) => typeof item === "string" && item.length > 0 && item.length <= 128) || typeof hello.hostVersion !== "string" || hello.hostVersion.length > 64 || typeof hello.apiFingerprint !== "string") {
           socket.close(1008, "Invalid capability handshake");
           return;
         }
-        if (!this.#apiFingerprint || auth.apiFingerprint !== this.#apiFingerprint) {
+        if (!this.#apiFingerprint || hello.apiFingerprint !== this.#apiFingerprint) {
           socket.close(1008, "Adobe API catalog fingerprint mismatch");
           return;
         }
-        authenticated = true;
-        clearTimeout(authTimer);
-        this.#unauthenticated.delete(socket);
-        this.#socket?.close(1012, "Superseded by a new authenticated panel");
+        connected = true;
+        clearTimeout(connectTimer);
+        this.#pendingConnections.delete(socket);
+        this.#socket?.close(1012, "Superseded by a new local panel connection");
         this.#socket = socket;
-        this.#hostVersion = auth.hostVersion;
-        this.#capabilities = new Set(auth.capabilities.filter((item): item is string => typeof item === "string"));
+        this.#hostVersion = hello.hostVersion;
+        this.#capabilities = new Set(hello.capabilities);
         this.#hostSessionId = randomUUID();
-        socket.send(JSON.stringify({ type: "authenticated", protocolVersion: 1, sessionId: this.#hostSessionId }));
+        socket.send(JSON.stringify({ type: "connected", protocolVersion: 2, sessionId: this.#hostSessionId }));
         return;
       }
       const response = message as BridgeResponse & { type?: string };
@@ -256,14 +246,14 @@ export class UxpWebSocketAdapter implements BackendAdapter {
           const bytes = await waitForChangedStableFile(outputPath, pending.outputBaseline, isSequence ? 30 * 60_000 : 5_000, isSequence ? 20 : 1);
           resolved = bytes === null
             ? this.failure(response.requestId, "UXP_EXPORT_FILE_NOT_VERIFIED", "Premiere accepted export but no changed stable output file was observed", false, "accepted")
-            : { ...resolved, createdFiles: [{ name: outputPath, verified: true }], verification: { outcome: "verified", method: `Authenticated Premiere export dispatch and changed stable file readback (${bytes} bytes)` } };
+            : { ...resolved, createdFiles: [{ name: outputPath, verified: true }], verification: { outcome: "verified", method: `Local Premiere UXP dispatch and changed stable file readback (${bytes} bytes)` } };
         }
       }
       pending.resolve(resolved);
     });
     socket.on("close", () => {
-      clearTimeout(authTimer);
-      this.#unauthenticated.delete(socket);
+      clearTimeout(connectTimer);
+      this.#pendingConnections.delete(socket);
       if (socket !== this.#socket) return;
       this.#socket = null;
       this.#hostVersion = null;

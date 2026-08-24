@@ -219,22 +219,6 @@ internal static class Program
                 return 5;
             }
         }
-        if (args is ["--provision-uxp"])
-        {
-            try
-            {
-                BrokerSecurity.AssertServerEntryIntegrity(BrokerSecurity.AuthorizedServerEntry);
-                var path = UxpBootstrapProvisioner.Provision();
-                Console.Out.WriteLine($"Provisioned authenticated UXP bootstrap: {path}");
-                return 0;
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"UXP bootstrap provisioning failed: {ex.Message}");
-                return 7;
-            }
-        }
-
         var token = Environment.GetEnvironmentVariable("PREMIERE_MCP_UI_TOKEN");
         if (string.IsNullOrWhiteSpace(token) || token.Length < 24)
         {

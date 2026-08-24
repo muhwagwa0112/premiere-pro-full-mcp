@@ -5,7 +5,11 @@ Supported security fixes are published for the latest `v0.3.x` release. Report v
 This server is local-only. Do not expose its UXP listener, CEP queue, or UI-agent pipe beyond
 the current Windows user session.
 
-- Keep UXP and UI tokens out of source, MCP configuration arguments, logs, and support bundles.
+- Keep UI named-pipe tokens out of source, MCP configuration arguments, logs, and support bundles.
+- The UXP panel deliberately uses a token-free one-click handshake on `127.0.0.1:17777`. Origin checks,
+  catalog fingerprint/capability validation, session UUIDs, route binding, payload limits, and operation
+  authorization remain enforced, but they are not process identity. Another process running as the same
+  Windows user can reach or impersonate this local UXP channel and is outside this protocol boundary.
 - CEP, approval, lease, and Trust Profile material is DPAPI CurrentUser-protected at rest. After full executable,
   signature, ancestry, and command-line verification, the broker releases each required key once
   into the memory of the integrity-pinned MCP entrypoint or authorized Premiere CEP renderer.

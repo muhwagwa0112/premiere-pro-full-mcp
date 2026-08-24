@@ -13,12 +13,13 @@ describe("UXP panel minimum layout", () => {
     expect(panel.minimumSize).toEqual({ width: 320, height: 260 });
     expect(html).toContain("height:100vh");
     expect(html).toMatch(/\.panel \{[^}]*position:absolute;[^}]*display:block;/);
-    expect(html).toMatch(/input \{[^}]*display:block;[^}]*margin:0;/);
+    expect(html).toMatch(/button \{[^}]*display:block;[^}]*width:100%;/);
     expect(html).toContain('<script defer src="./main.js"></script>');
     expect(html).toContain('id="premiere-mcp-panel"');
     expect(html).not.toContain("display:grid");
-    for (const id of ["port", "token", "pair", "connect", "status"]) {
+    for (const id of ["connect", "status"]) {
       expect(html).toContain(`id="${id}"`);
     }
+    for (const removedId of ["port", "token", "pair"]) expect(html).not.toContain(`id="${removedId}"`);
   });
 });

@@ -16,7 +16,6 @@
     }
   ],
   "requiredPermissions": {
-    "localFileSystem": "request",
     "network": { "domains": ["ws://localhost/"] }
   }
 }

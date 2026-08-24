@@ -175,7 +175,6 @@ try {
     }
     Write-PpMcpJsonAtomic -Path (Join-Path $resolvedInstallRoot 'app\current.json') -Value $current
     New-Item -ItemType Directory -Path (Join-Path $resolvedInstallRoot 'workspace') -Force | Out-Null
-    Invoke-PpMcpCommand -FilePath $launcher -Arguments @('--provision-uxp') -FailureMessage 'Native UXP bootstrap provisioning failed'
     if (-not $SkipCodexRegistration) {
         if ($codexConfigPath -and (Test-Path -LiteralPath $codexConfigPath -PathType Leaf)) { Copy-Item -LiteralPath $codexConfigPath -Destination $codexConfigBackup -Force; $hadCodexConfig = $true }
         Set-PpMcpCodexRegistration -Launcher $launcher -Bundle $bundle -InstallRoot $resolvedInstallRoot -AutomationMode $AutomationMode -TrustProfileId $TrustProfileId

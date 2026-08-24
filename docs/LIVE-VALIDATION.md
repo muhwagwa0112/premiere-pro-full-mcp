@@ -8,7 +8,7 @@ media was used.
 
 ## v0.3 release gates
 
-- `npm run check` covers bridge syntax, TypeScript, 33 Vitest files / 191 tests, and the bundle build.
+- `npm run check` covers bridge syntax, TypeScript, 33 Vitest files / 193 tests, and the bundle build.
 - The native Windows agent has 37 tests. The generated support matrix contains 51 public actions and
   the broader feature registry contains 150 records.
 - The plan and live UXP ledgers account for all 761 generated members. The live catalog fingerprint
@@ -28,13 +28,13 @@ media was used.
   registered semantic controls in this host state, so it proves transport fail-closed behavior and
   does not establish broad UI automation coverage.
 - The exact installed v0.3 UXP source was developer-loaded with Adobe UXP Developer Tool. It
-  authenticated over the manifest-constrained localhost WebSocket and reported 761 members,
+  connected over the manifest-constrained localhost WebSocket handshake and reported 761 members,
   91 containers, 69 roots, and fingerprint
   `3ad423e187ccb155afd139a8181bdc3093de357fb183d7505b4a00e1e3c3b17e`.
 - Interactive exact-plan approvals retained the same `operationId`, `planHash`, route, session, and
   effective request from preview through apply. Project creation, media import, and sequence creation
   succeeded through the typed CEP path. Frame export, sequence export, and project save succeeded
-  through authenticated UXP. Premiere readback confirmed project GUID
+  through the local UXP bridge. Premiere readback confirmed project GUID
   `2d5a8727-5613-4592-8537-3291d5f3c720` and sequence GUID
   `ae351990-ac38-40ab-8649-df0836253613`.
 - The saved project was 12,386 bytes with SHA-256
