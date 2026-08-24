@@ -25,10 +25,10 @@
   with no separate floating panel window. The retained comparison is
   `docs/evidence/ccx-install-layout-v0.3.0.json`.
 - [x] A release build without `-CcxPath`, with a development ZIP renamed to `.ccx`, or with a mismatched CCX filename/identity fails before staging or publishing.
-- [ ] The signed release ZIP, CCX, SBOM, notices, hashes, manifest, and signature pass `Verify-Release.ps1`.
+- [x] The signed release ZIP, CCX, SBOM, notices, hashes, manifest, and signature pass `Verify-Release.ps1`.
 - [x] Tampered signature, extra ZIP file, path escape, reparse point, case collision, downgrade, and partial-install rollback tests reject safely.
 - [x] Independent security audit has no open Critical/High issue and no exploitable Medium issue.
-- [ ] Independent completion review confirms no unsupported publication or live-host claim.
+- [x] Independent completion review confirms no unsupported publication or live-host claim.
 - [x] The release notes, README, install/deployment/migration/troubleshooting guides, generated
   matrices, SBOM, notices, and packaged copies all describe the same version and evidence boundary.
 
