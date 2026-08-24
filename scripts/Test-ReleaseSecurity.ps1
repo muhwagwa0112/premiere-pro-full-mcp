@@ -167,11 +167,23 @@ try {
                 New-Item -ItemType Directory -Path $target -Force | Out-Null
                 [System.IO.File]::WriteAllText((Join-Path $target 'original.marker'), $target, (New-Object System.Text.UTF8Encoding($false)))
             }
+            # Interactive installs no longer execute the native launcher now that the
+            # legacy UXP token/bootstrap provisioning step has been removed. Exercise
+            # the same post-activation rollback boundary through the supported Trust
+            # Profile enrollment path, where the deliberately substituted launcher
+            # must fail after all release targets have been activated.
+            $rollbackTrustProfile = Join-Path $releaseTestRoot 'rollback-trust-profile.json'
+            [System.IO.File]::WriteAllText(
+                $rollbackTrustProfile,
+                '{"schemaVersion":1,"profileId":"rollback-test","mode":"trusted_unattended"}',
+                (New-Object System.Text.UTF8Encoding($false)))
+            $rollbackLog = Join-Path $releaseTestRoot 'rollback.log'
             $ErrorActionPreference = 'Continue'
-            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $rollbackBundle 'Install.ps1') -InstallRoot $rollbackInstallRoot -CepInstallRoot $rollbackCepRoot -PackagePath $rollbackBundle -SkipCodexRegistration -SkipCcxLaunch *> (Join-Path $releaseTestRoot 'rollback.log')
+            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $rollbackBundle 'Install.ps1') -InstallRoot $rollbackInstallRoot -CepInstallRoot $rollbackCepRoot -PackagePath $rollbackBundle -AutomationMode trusted_unattended -TrustProfilePath $rollbackTrustProfile -SkipCodexRegistration -SkipCcxLaunch *> $rollbackLog
             $rollbackExitCode = $LASTEXITCODE
             $ErrorActionPreference = $previousErrorActionPreference
             if ($rollbackExitCode -eq 0) { throw 'The forced partial installation unexpectedly succeeded.' }
+            if ((Get-Content -LiteralPath $rollbackLog -Raw) -notmatch 'Trust profile enrollment failed') { throw 'The rollback probe did not reach the post-activation Trust Profile enrollment boundary.' }
             foreach ($target in $rollbackTargets) {
                 if (-not (Test-Path -LiteralPath (Join-Path $target 'original.marker') -PathType Leaf)) { throw "Partial-install rollback did not restore: $target" }
             }
