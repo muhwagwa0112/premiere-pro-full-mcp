@@ -8,6 +8,7 @@ import { UxpWebSocketAdapter } from "../src/bridge/uxp-websocket.js";
 import { loadAdobeApiCatalog } from "../src/adobe-api-catalog.js";
 
 const AUTH_FILE_NAME = "premiere-mcp-bridge-key-v1";
+const UXP_PLUGIN_ID = "com.codex.premiere-pro-full-mcp";
 const adapters: UxpWebSocketAdapter[] = [];
 const temporaryDirectories: string[] = [];
 
@@ -35,7 +36,7 @@ async function testAdapter(port: number): Promise<{ adapter: UxpWebSocketAdapter
 }
 
 async function createAuthFile(authRoot: string): Promise<{ authFilePath: string; secret: string }> {
-  const authFilePath = join(authRoot, "26", "External", "bdec7f40", "PluginData", AUTH_FILE_NAME);
+  const authFilePath = join(authRoot, "26", "External", UXP_PLUGIN_ID, "PluginData", AUTH_FILE_NAME);
   const secret = randomBytes(32).toString("hex");
   await mkdir(dirname(authFilePath), { recursive: true });
   await writeFile(authFilePath, secret, "utf8");
@@ -129,6 +130,21 @@ describe("UXP websocket bridge", () => {
     await new Promise<void>((resolve) => socket.once("open", resolve));
     const catalog = await loadAdobeApiCatalog();
     socket.send(JSON.stringify({ type: "hello", protocolVersion: 3, authFilePath: outsidePath, clientNonce: randomBytes(32).toString("hex"), apiFingerprint: catalog.fingerprint }));
+    const code = await new Promise<number>((resolve) => socket.once("close", resolve));
+    expect(code).toBe(1008);
+    expect((await adapter.availability()).available).toBe(false);
+  });
+
+  it("rejects an authentication file owned by another UXP plug-in", async () => {
+    const port = 31501 + Math.floor(Math.random() * 400);
+    const { adapter, authRoot } = await testAdapter(port);
+    const authFilePath = join(authRoot, "26", "External", "com.example.other-plugin", "PluginData", AUTH_FILE_NAME);
+    await mkdir(dirname(authFilePath), { recursive: true });
+    await writeFile(authFilePath, randomBytes(32).toString("hex"), "utf8");
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/uxp`, { origin: "file://" });
+    await new Promise<void>((resolve) => socket.once("open", resolve));
+    const catalog = await loadAdobeApiCatalog();
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 3, authFilePath, clientNonce: randomBytes(32).toString("hex"), apiFingerprint: catalog.fingerprint }));
     const code = await new Promise<number>((resolve) => socket.once("close", resolve));
     expect(code).toBe(1008);
     expect((await adapter.availability()).available).toBe(false);

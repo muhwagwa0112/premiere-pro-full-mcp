@@ -27,6 +27,7 @@ interface ConnectMessage {
 }
 
 const AUTH_FILE_NAME = "premiere-mcp-bridge-key-v1";
+const UXP_PLUGIN_ID = "com.codex.premiere-pro-full-mcp";
 
 function authenticationTranscript(role: "client" | "server", clientNonce: string, serverNonce: string, apiFingerprint: string): string {
   return `premiere-mcp-uxp-v3\n${role}\n${clientNonce}\n${serverNonce}\n${apiFingerprint}`;
@@ -336,7 +337,7 @@ export class UxpWebSocketAdapter implements BackendAdapter {
     const relativeCandidate = relative(this.#authRoot, candidate);
     if (!relativeCandidate || relativeCandidate === ".." || relativeCandidate.startsWith(`..${sep}`) || isAbsolute(relativeCandidate)) throw new Error("UXP authentication path escapes the current user profile");
     const parts = relativeCandidate.split(/[\\/]/);
-    if (parts.length !== 5 || !/^\d+$/.test(parts[0] ?? "") || parts[1] !== "External" || !/^[a-f0-9]{8,64}$/i.test(parts[2] ?? "") || parts[3] !== "PluginData" || parts[4] !== AUTH_FILE_NAME) throw new Error("UXP authentication path is not plugin-scoped");
+    if (parts.length !== 5 || !/^\d+$/.test(parts[0] ?? "") || parts[1] !== "External" || parts[2] !== UXP_PLUGIN_ID || parts[3] !== "PluginData" || parts[4] !== AUTH_FILE_NAME) throw new Error("UXP authentication path is not scoped to the Premiere Pro Full MCP plug-in");
     const [rootPath, filePath] = await Promise.all([realpath(this.#authRoot), realpath(candidate)]);
     const relativeReal = relative(rootPath, filePath);
     if (!relativeReal || relativeReal === ".." || relativeReal.startsWith(`..${sep}`) || isAbsolute(relativeReal)) throw new Error("UXP authentication file resolves outside the current user profile");

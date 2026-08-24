@@ -8,7 +8,7 @@ media was used.
 
 ## v0.3 release gates
 
-- `npm run check` covers bridge syntax, TypeScript, 33 Vitest files / 200 tests, and the bundle build.
+- `npm run check` covers bridge syntax, TypeScript, 33 Vitest files / 201 tests, and the bundle build.
 - The native Windows agent has 36 tests. The generated support matrix contains 51 public actions and
   the broader feature registry contains 150 records.
 - The plan and live UXP ledgers account for all 761 generated members. The live catalog fingerprint
