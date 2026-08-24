@@ -20,7 +20,7 @@ describe("UXP websocket bridge", () => {
     adapters.push(adapter);
     await adapter.start();
     expect((await adapter.availability()).available).toBe(false);
-    const socket = new WebSocket(`ws://127.0.0.1:${port}/uxp`);
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/uxp`, { origin: "file://" });
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
     const catalog = await loadAdobeApiCatalog();
     socket.send(JSON.stringify({ type: "connect", protocolVersion: 2, hostVersion: "26.3.2", capabilities: ["host.inspect"], apiFingerprint: catalog.fingerprint }));
@@ -46,6 +46,25 @@ describe("UXP websocket bridge", () => {
     expect(status).toBe(403);
   });
 
+  it.each([
+    ["missing", undefined],
+    ["opaque", "null"],
+    ["unrelated UXP plug-in", "uxp://other-plugin"],
+  ])("rejects a %s origin before the token-free handshake", async (_label, origin) => {
+    const port = 29001 + Math.floor(Math.random() * 900);
+    const adapter = new UxpWebSocketAdapter(port);
+    adapters.push(adapter);
+    await adapter.start();
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/uxp`, origin ? { origin } : undefined);
+    socket.on("error", () => {});
+    const status = await new Promise<number>((resolve) => socket.once("unexpected-response", (_request, response) => {
+      response.resume();
+      resolve(response.statusCode ?? 0);
+    }));
+    expect(status).toBe(403);
+    expect((await adapter.availability()).available).toBe(false);
+  });
+
   it("accepts Premiere UXP's exact file origin with the token-free local handshake", async () => {
     const port = 30001 + Math.floor(Math.random() * 2000);
     const adapter = new UxpWebSocketAdapter(port);
@@ -69,7 +88,7 @@ describe("UXP websocket bridge", () => {
     const adapter = new UxpWebSocketAdapter(port);
     adapters.push(adapter);
     await adapter.start();
-    const socket = new WebSocket(`ws://127.0.0.1:${port}/uxp`);
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/uxp`, { origin: "file://" });
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
     const catalog = await loadAdobeApiCatalog();
     socket.send(JSON.stringify({ type: "connect", protocolVersion: 2, hostVersion: "26.3.2", capabilities: ["export.sequence"], apiFingerprint: catalog.fingerprint }));
@@ -88,7 +107,7 @@ describe("UXP websocket bridge", () => {
     const adapter = new UxpWebSocketAdapter(port);
     adapters.push(adapter);
     await adapter.start();
-    const socket = new WebSocket(`ws://127.0.0.1:${port}/uxp`);
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/uxp`, { origin: "file://" });
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
     const catalog = await loadAdobeApiCatalog();
     socket.send(JSON.stringify({ type: "connect", protocolVersion: 2, hostVersion: "26.3.2", capabilities: ["export.sequence"], apiFingerprint: catalog.fingerprint }));
@@ -111,7 +130,7 @@ describe("UXP websocket bridge", () => {
     const adapter = new UxpWebSocketAdapter(port);
     adapters.push(adapter);
     await adapter.start();
-    const socket = new WebSocket(`ws://127.0.0.1:${port}/uxp`);
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/uxp`, { origin: "file://" });
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
     socket.send(JSON.stringify({ type: "auth", protocolVersion: 1, token: "legacy-token", hostVersion: "26.3.2", capabilities: ["host.inspect"], apiFingerprint: "0".repeat(64) }));
     const code = await new Promise<number>((resolve) => socket.once("close", resolve));
@@ -124,7 +143,7 @@ describe("UXP websocket bridge", () => {
     const adapter = new UxpWebSocketAdapter(port);
     adapters.push(adapter);
     await adapter.start();
-    const socket = new WebSocket(`ws://127.0.0.1:${port}/uxp`);
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/uxp`, { origin: "file://" });
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
     socket.send(JSON.stringify({ type: "connect", protocolVersion: 2, hostVersion: "26.3.2", capabilities: ["host.inspect"], apiFingerprint: "0".repeat(64) }));
     const code = await new Promise<number>((resolve) => socket.once("close", resolve));

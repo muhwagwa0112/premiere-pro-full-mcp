@@ -6,7 +6,7 @@
 - [ ] MIT license, Ko-fi link, Funding configuration, security policy, issue forms, and current release links are present.
 - [ ] Full-history and final-artifact secret/PII scan reports no credential, private key, personal path, project/media name, or personal email.
 - [ ] `npm audit --omit=dev --audit-level=high` and .NET transitive vulnerability checks pass.
-- [ ] `npm run check` passes all 33 Vitest files / 193 tests; the Windows UI agent passes all 36 tests.
+- [ ] `npm run check` passes all 33 Vitest files / 196 tests; the Windows UI agent passes all 36 tests.
 - [ ] Support and feature registry regeneration/checks pass for 51 public actions and 150 feature records.
 - [ ] MCP smoke, release-security tests, the 761-member UXP plan, and disposable fixture plan pass.
 - [x] The final live ledger contains all 761 UXP IDs and does not regress below 281 deterministic successes; failures remain explicit and fail closed.

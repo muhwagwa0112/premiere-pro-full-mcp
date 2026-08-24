@@ -21,7 +21,7 @@ v0.3.0 is the current Windows release of the capability-gated Premiere Pro 26.3 
 
 ## Validation
 
-- 33 TypeScript test files / 193 tests passed.
+- 33 TypeScript test files / 196 tests passed.
 - 36 Windows UI agent tests passed.
 - Release security tests passed ZIP traversal, package-attribute, symlink/reparse, and detached
   signature-tamper rejection.
