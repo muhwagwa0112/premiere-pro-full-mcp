@@ -82,6 +82,9 @@ try {
     & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $uninstall -InstallRoot $installRoot -CepInstallRoot $cepRoot -KeepCodexRegistration
     if ($LASTEXITCODE -ne 0) { throw 'Isolated uninstall failed.' }
     foreach ($removed in @((Join-Path $installRoot 'bin'), (Join-Path $installRoot 'bundle'), $cepRoot)) { if (Test-Path -LiteralPath $removed) { throw "Uninstall left an active runtime target: $removed" } }
+    $releaseSigningPrivateKey = if ($originalLocalAppData) { Join-Path $originalLocalAppData 'PremiereMCP\release-signing-private.xml' } else { '' }
+    & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $repoRoot 'scripts\Test-ReleaseSecurity.ps1') -ArchivePath $ArchivePath -ManifestPath $ManifestPath -SignaturePath $SignaturePath -PrivateKeyPath $releaseSigningPrivateKey -RequireReleaseArtifacts
+    if ($LASTEXITCODE -ne 0) { throw 'Release-boundary security tests failed.' }
     Write-Host "Release verification passed: $ArchivePath"
     Write-Host "Authenticated SHA-256: $(Get-PpMcpSha256 $ArchivePath)"
     Write-Host 'Tampered signature rejection: passed'
