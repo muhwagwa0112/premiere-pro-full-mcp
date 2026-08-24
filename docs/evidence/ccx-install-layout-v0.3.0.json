@@ -17,7 +17,7 @@
   },
   "ccx": {
     "name": "premiere-pro-full-mcp-v0.3.0.ccx",
-    "sha256": "1543860296f3bfbaa557eb278672249a034ccac52a9946824619e53433239ed4",
+    "sha256": "f2e1c3b4bb0523d02cc3e9755b8ab66bd0183194ab363a9e13af5fff6001fcca",
     "entryCount": 7,
     "installedFilesEqual": true,
     "files": [
@@ -53,8 +53,8 @@
       },
       {
         "path": "README.md",
-        "size": 724,
-        "sha256": "90afb17d1ace27ef68768479a8d9541317d741d4f0c2e96b8ded396ee49e0104"
+        "size": 878,
+        "sha256": "5e4fa9189c83d3abe17176aff0848ccfdd5d8513d2db2f3d163e0a6337c9be64"
       }
     ]
   },
