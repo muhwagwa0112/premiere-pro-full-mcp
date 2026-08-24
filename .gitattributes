@@ -1,0 +1,17 @@
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.zip binary
+*.ccx binary
+*.exe binary
+*.dll binary
+*.pdb binary
+*.woff binary
+*.woff2 binary
+
+# The CEP package marker and detached package metadata must retain exact bytes.
+cep-plugin/mimetype -text

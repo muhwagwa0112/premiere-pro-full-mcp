@@ -19,3 +19,11 @@ Delete the downloaded update files and retry. Do not bypass repository, tag, siz
 ## Reinstall or remove
 
 Run Update with local signed sidecars for a same-version recovery, or run the installed Uninstall script. Uninstall is recoverable and preserves workspace/operation data unless `-RemoveUserData` is explicitly supplied. Remove the CCX from Creative Cloud Desktop separately.
+
+## A durable job requires reconciliation
+
+Do not resume or manually repeat a step whose checkpoint, host dispatch, output commit, or ledger
+write has an unknown outcome. Inspect Premiere and any approved output path first. The job record is
+deliberately quarantined across restart and automatic redispatch is disabled. A crash-stale job-store
+quota lock is also never reaped automatically; recover it only after confirming no MCP process owns
+the store and preserving the protected journals for diagnosis.

@@ -1,17 +1,22 @@
 # Premiere Pro 26.3.2 live validation
 
-> Evidence provenance: the Premiere-host observations below are the v0.2 live baseline. The v0.3
-> unattended authorization, two-phase checkpoint, reconciliation quarantine, recoverable overwrite,
-> and cross-process effective-request binding changes have been validated by offline contract,
-> failure-injection, TypeScript, and native tests only. They have not yet been exercised against a
-> disposable live Premiere fixture, so v0.3 does not upgrade any live support claim on their basis.
+> Evidence provenance: the Premiere-host observations below are the v0.2 live baseline. The latest
+> v0.3 unattended authorization, two-phase/explicit checkpoints, durable jobs, reconciliation
+> quarantine, semantic actions, recoverable overwrite, connector boundaries, and cross-process
+> request binding have been validated by offline contract, failure-injection, TypeScript, and native
+> tests only. They have not yet been exercised against an enrolled disposable v0.3 live fixture, so
+> v0.3 does not upgrade any live support claim on their basis.
 
 ## v0.3 offline foundation gates
 
-- `npm run check`: bridge syntax, TypeScript, 25 Vitest files / 135 tests, and bundle build passed.
-- Native Windows agent: 36/36 tests passed from a working directory outside the repository.
-- Deterministic support matrix check passed for 45 public actions across five backends.
+- `npm run check`: bridge syntax, TypeScript, 33 Vitest files / 190 tests, and bundle build passed.
+- Native Windows agent: 37/37 tests passed from a working directory outside the repository.
+- Deterministic support matrix check passed for 51 public actions across five backends.
+- The generated broader feature registry contains 150 records with explicit contextual, unverified,
+  UI-adapter, entitlement, third-party, host-version, manual, and unsupported states.
 - Full-surface UXP plan-only validation accounted for 761/761 generated members without live mutation.
+- The disposable fixture plan and MCP smoke passed; live mutation correctly remained unavailable
+  without an enrolled `trusted_unattended` or `isolated_lab` profile.
 - Release security tests passed traversal, reparse/symlink, package-attribute, and signature-tamper
   rejection. Real signed-package installation, Codex registration, profile enrollment, and live
   Premiere execution were deliberately not performed by these offline gates.

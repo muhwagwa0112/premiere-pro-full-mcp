@@ -23,6 +23,10 @@ The supported public install starts from the versioned GitHub Release ZIP, not t
 5. Click **Pair with installed helper…** and select `%LOCALAPPDATA%\PremiereMCP\app\runtime-bootstrap.json`. The persistent UXP permission references that current-user ACL-protected file; no bootstrap is packaged in the CCX.
 6. Restart Codex and run the installed `Doctor.ps1 -CheckLive`.
 
+The release ZIP is the complete install source. Do not combine its installer with a CCX, bundle,
+generated registry, or native helper copied from another commit or version. The signed release
+manifest binds the ZIP, CCX, SBOM, notices, repository, tag, and exact source commit.
+
 The installer verifies that `MANIFEST.sha256` exactly describes every file. It rejects extra/missing files, duplicate case-insensitive paths, ADS-style names, path traversal, absolute paths, and reparse points. Installation is staged before activation and restored from a timestamped backup if activation or Codex registration fails.
 
 The native broker validates and DPAPI-protects the Trust Profile after the pinned launcher is
@@ -38,6 +42,19 @@ approved roots and action/capability grants narrow. Enrollment does not make DPA
 against another malicious process under the same Windows account.
 
 The public plugin ID is `com.codex.premiere-pro-full-mcp`; the Codex registration is `premiere_pro_full_mcp`. The CEP compatibility extension is installed for the current user as `com.codex.premiere-pro-full-mcp.cep`.
+
+## Verify the installed v0.3 runtime
+
+After installation, Doctor should report matching v0.3 native, bundle, UXP, CEP, and generated
+inventory identities. In Codex, use host/capability inspection before dispatching mutations. Durable
+compound work is exposed through `premiere_jobs`; inspect the planned DAG and its exact action order
+before execution. A job with an unknown dispatch or checkpoint outcome enters
+`reconciliation_required` and must not be manually replayed until host/output state is reconciled.
+
+The packaged plan-only fixture is non-mutating. Live fixture execution additionally requires an
+enrolled `trusted_unattended` or `isolated_lab` profile, an isolated Premiere host, explicit live
+flags, a unique OS-temporary workspace, and a disposable project. User projects are not valid
+fixture inputs.
 
 ## Manual UXP fallback
 

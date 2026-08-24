@@ -6,7 +6,9 @@
 - [ ] MIT license, Ko-fi link, Funding configuration, security policy, issue forms, and current release links are present.
 - [ ] Full-history and final-artifact secret/PII scan reports no credential, private key, personal path, project/media name, or personal email.
 - [ ] `npm audit --omit=dev --audit-level=high` and .NET transitive vulnerability checks pass.
-- [ ] `npm run check`, coverage, native tests, MCP/security smokes, and UXP full-surface validation pass.
+- [ ] `npm run check` passes all 33 Vitest files / 190 tests; the Windows UI agent passes all 37 tests.
+- [ ] Support and feature registry regeneration/checks pass for 51 public actions and 150 feature records.
+- [ ] MCP smoke, release-security tests, the 761-member UXP plan, and disposable fixture plan pass.
 - [ ] The final live ledger contains all 761 UXP IDs and does not regress below 281 deterministic successes; failures remain explicit and fail closed.
 - [ ] CEP heartbeat/QE, named-pipe UI, project read/edit/save, frame export, and sequence export pass on the installed release.
 - [ ] `ZXPSignCmd -verify` accepts the bundled CEP directory, and it loads with `PlayerDebugMode=0` on a clean Premiere restart.
@@ -16,6 +18,8 @@
 - [ ] Tampered signature, extra ZIP file, path escape, reparse point, case collision, downgrade, and partial-install rollback tests reject safely.
 - [ ] Independent security audit has no open Critical/High issue and no exploitable Medium issue.
 - [ ] Independent completion review confirms no unsupported publication or live-host claim.
+- [ ] The release notes, README, install/deployment/migration/troubleshooting guides, generated
+  matrices, SBOM, notices, and packaged copies all describe the same version and evidence boundary.
 
 ## Publication
 

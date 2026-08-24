@@ -24,6 +24,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Verify-Release.ps1
 
 `Build-Release.ps1` has no CCX fallback: `-CcxPath` is mandatory and is checked before release staging. `npm run uxp:dev-archive` creates only a non-installable `.zip` for source inspection/CI and refuses a `.ccx` output name. The release build also refuses a dirty worktree, mismatched private/public key, wrong repository, wrong CCX filename or identity, generated UXP bootstrap, or failed MCP/native build. The signed manifest binds the exact commit, repository, tag, version, platform, architecture, ZIP, CCX, SBOM, and notices. UDT provenance is a release-operator attestation; ZIP structure alone cannot prove which packager produced it.
 
+The current v0.3 payload also includes the generated 51-action backend support matrix, 150-entry
+feature registry, semantic-action and connector-boundary guides, durable-job runtime, and
+post-production fixture manifests. Regenerate both inventories and run their `--check` forms before
+packaging; never reuse generated files or a CCX from an earlier commit.
+
 ## Installation layout
 
 - `%LOCALAPPDATA%\PremiereMCP\bin` — active native launcher and broker
@@ -49,3 +54,8 @@ The updater is pinned to `muhwagwa0112/premiere-pro-full-mcp`. It downloads the 
 4. Complete independent security and completion review.
 5. Push the clean noreply-authored history, create `v0.3.0`, and upload every bound asset.
 6. Verify the repository and download from a logged-out browser and reinstall the downloaded ZIP.
+
+`Verify-Release.ps1` safely expands the final ZIP, validates every signed asset binding, compares the
+standalone and bundled CCX, performs an isolated installation and Doctor run, rejects a tampered
+signature, and exercises recoverable uninstall. A source-tree test pass does not replace this final
+artifact boundary test.

@@ -18,6 +18,12 @@ Premiere Pro Full MCP is a local, capability-gated MCP server for Adobe Premiere
 
 > This is an unofficial community project and is not affiliated with or endorsed by Adobe Inc. “Full” means the supported API surface is inventoried and routed; it does not mean every UI feature is scriptable in every host state.
 
+The v0.3 release adds durable `premiere_jobs` DAG execution, route-bound project checkpoints,
+typed semantic project/media/timeline actions, fixed-fingerprint UI adapters, a 150-entry feature
+registry, and explicit connector/native extension boundaries. Runtime evidence remains authoritative:
+catalog entries marked unverified, plan-only, entitlement-dependent, or unsupported are never
+promoted merely because they are inventoried. See the [v0.3 release notes](docs/RELEASE-NOTES-v0.3.0.md).
+
 ## English
 
 ### Quick start for Windows
@@ -82,6 +88,13 @@ Updates reject signature, repository, tag, name, size, digest, prerelease, and d
 
 The generated Adobe 26.3 inventory contains 69 roots and 761 callable members. The final live full-surface baseline matched all 761 IDs. Of 312 deterministic read-only calls attempted, 281 succeeded and 31 failed closed because the required method, root, or session handle was unavailable. Another 151 risk-bearing entries were preview-only and 298 context-dependent entries were skipped with explicit reasons. See [live validation](docs/LIVE-VALIDATION.md).
 
+The generated capability artifacts additionally contain 51 public semantic actions across five
+backend columns and 150 broader post-production/collaboration/native feature records. Compound work
+is planned through `premiere_jobs`; the implemented-unverified inspection/delivery workflow places
+verified durable checkpoints before and after export. See the [feature matrix](docs/FEATURE_MATRIX.md),
+[semantic action contract](docs/CORE_SEMANTIC_ACTIONS.md), and
+[post-production program](docs/POST_PRODUCTION_PROGRAM.md).
+
 ### Development
 
 Requirements: Node.js 20.19+ (Node 24 preferred), .NET 8 SDK, Premiere Pro 26.3+, and Adobe UXP Developer Tool.
@@ -129,6 +142,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 `
 ```
 
 프로필은 현재 Windows SID, 설치 제품과 런처 해시, Premiere 버전 범위, action/risk/capability, canonical approved roots에 결합되고 DPAPI CurrentUser로 보호됩니다. 신뢰 실행 중에는 작업별 MessageBox와 approval 파일이 0개이며, 허용 범위 밖 요청·변조·버전 불일치는 자동으로 interactive로 낮아지지 않고 차단됩니다. Interactive의 R2/R3 exact-plan 1회 승인은 그대로 유지됩니다.
+
+v0.3 최신본에는 durable `premiere_jobs` DAG, 전·후 프로젝트 체크포인트 증거,
+프로젝트/미디어/타임라인 semantic action, 고정 fingerprint UI adapter, 150개 기능 레지스트리가
+포함됩니다. 목록에 존재한다는 이유만으로 지원 상태를 올리지 않으며, 실호스트 증거가 없는 기능은
+`UNVERIFIED`, `PLAN_ONLY`, `ENTITLEMENT_BLOCKED`, `UNSUPPORTED` 상태를 유지합니다.
 
 CEP 호환 브리지는 Adobe ZXP 방식으로 별도 서명되어 있으며, 설치기는 CEP 개발자 모드를 활성화하지 않습니다. EXE와 PowerShell 스크립트에는 Authenticode 서명이 없으므로 게시된 SHA-256과 RSA 릴리스 서명을 확인해야 합니다.
 

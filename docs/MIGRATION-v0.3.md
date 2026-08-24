@@ -44,6 +44,14 @@ update changes the native launcher, provide the original profile JSON to `Update
 - Unknown checkpoint, dispatch, output, or ledger state becomes `reconciliation_required` and
   quarantines later mutations across restart.
 - Authorized overwrite uses a durable backup/temp/verification/no-clobber commit transaction.
+- Compound operations use protected `premiere_jobs` records. Resume skips only verified completed
+  steps; rollback requires explicit rollback requests, verified revisions, and host undo evidence.
+- Public raw UI catalog/invoke requests are replaced by fixed version/locale/fingerprint semantic
+  adapters. Callers must select a registered adapter contract rather than supply selectors.
+- Project/media/timeline semantic handles are bound to the current host session, project identity,
+  and state token. Handles persisted before a dependent mutation are rejected instead of guessed.
+- The full feature registry distinguishes contextual support, unverified handlers, UI adapters,
+  entitlements, third-party dependencies, and unsupported boundaries without upgrading live claims.
 
 There is no automatic migration that grants unattended authority. Existing installations stay
 interactive until a user explicitly enrolls a Trust Profile.

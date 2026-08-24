@@ -8,7 +8,18 @@ All notable changes to this project are documented here.
 - Bound authorization to canonical execution-plan hashes, process-scoped leases, exact backend session identity, and effective bridge arguments.
 - Added capability-aware per-operation routing with fallback only for explicit `not_dispatched` outcomes.
 - Added verified pre-mutation checkpoints, durable reconciliation quarantine, and recoverable sequence-overwrite transactions.
-- Corrected semantic backend claims and generated a deterministic 45-action × 5-backend support matrix without upgrading unverified runtime evidence.
+- Added a durable, protected `premiere_jobs` engine with bounded DAG plans, cancellation boundaries,
+  resume/rollback evidence requirements, restart reconciliation, and cross-process quota locking.
+- Added bounded semantic actions for explicit checkpoints, disposable-project close, Save As, relink,
+  proxy attachment, track mute, and clip insertion with exact post-dispatch verification.
+- Added fixed-version/fingerprint Windows UI semantic adapters and removed raw public UI invocation.
+- Added a deterministic 51-action × 5-backend support matrix and a 150-entry feature registry across
+  editing, post-production, collaboration, third-party, and native-extension domains.
+- Added the `post.inspect_delivery` durable workflow with verified checkpoint evidence before and
+  after export; all other unavailable workflows and entitlement-dependent operations remain
+  truthfully plan-only, unsupported, or blocked.
+- Added connector/native contract boundaries, disposable fixture planning, generated feature docs,
+  and release-package coverage for the new registries and guides.
 - Preserved the existing exact-plan interactive R2/R3 approval flow while making per-operation approval unreachable in enrolled unattended modes.
 
 ## 0.2.0 - 2026-08-23
