@@ -1,0 +1,492 @@
+{
+  "schemaVersion": 1,
+  "package": "premiere-pro-full-mcp-codex-work-package",
+  "repository": "muhwagwa0112/premiere-pro-full-mcp",
+  "baseline": {
+    "branch": "main",
+    "commit": "92ac689cfea1de1e5863a03cb1aecdec4c0f56d5",
+    "version": "0.2.0",
+    "host": "Adobe Premiere Pro 26.3.2 on Windows",
+    "uxpDeclarations": "@adobe/premierepro 26.3.0"
+  },
+  "target": {
+    "branch": "codex/v0.3-unattended-foundation",
+    "version": "0.3.0",
+    "primaryOutcome": "trusted_unattended mode has zero per-operation approval dialogs"
+  },
+  "phases": [
+    {
+      "id": "P0",
+      "title": "Unattended foundation and truthful routing",
+      "blocking": true,
+      "tasks": [
+        "P0-01",
+        "P0-02",
+        "P0-03",
+        "P0-04",
+        "P0-05",
+        "P0-06",
+        "P0-07",
+        "P0-08",
+        "P0-09"
+      ]
+    },
+    {
+      "id": "P1",
+      "title": "Job engine and core semantic editing",
+      "blocking": false,
+      "tasks": [
+        "P1-01",
+        "P1-02",
+        "P1-03",
+        "P1-04"
+      ]
+    },
+    {
+      "id": "P2",
+      "title": "Full Premiere feature coverage program",
+      "blocking": false,
+      "tasks": [
+        "P2-01",
+        "P2-02",
+        "P2-03"
+      ]
+    }
+  ],
+  "tasks": [
+    {
+      "id": "P0-01",
+      "title": "Repository baseline audit and generated support inventory",
+      "dependencies": [],
+      "risk": "high",
+      "files": [
+        "src/catalog.ts",
+        "src/bridge/*",
+        "uxp-plugin/main.cjs",
+        "cep-plugin/host.jsx",
+        "windows-ui-agent/*",
+        "generated/support-matrix.json"
+      ],
+      "summary": "Generate a machine-readable mapping from every semantic action to real backend handlers and evidence.",
+      "acceptanceCriteria": [
+        "Every action has per-backend support state",
+        "No implemented_unverified action lacks a handler",
+        "Generated matrix is deterministic"
+      ],
+      "tests": [
+        "npm run typecheck",
+        "npm test",
+        "new support-matrix parity test"
+      ],
+      "instructionFile": "tasks/P0-01.md"
+    },
+    {
+      "id": "P0-02",
+      "title": "Operation-aware backend capability negotiation",
+      "dependencies": [
+        "P0-01"
+      ],
+      "risk": "high",
+      "files": [
+        "src/contracts.ts",
+        "src/bridge/*.ts",
+        "src/operation-engine.ts"
+      ],
+      "summary": "Add probe/supports contracts and select only adapters that advertise the requested operation.",
+      "acceptanceCriteria": [
+        "Connected but unsupported adapters are skipped before dispatch",
+        "Route is fixed before authorization consumption",
+        "Runtime capabilities expose reason and host version"
+      ],
+      "tests": [
+        "npm run typecheck",
+        "npm test",
+        "connected-but-unsupported fallback tests"
+      ],
+      "instructionFile": "tasks/P0-02.md"
+    },
+    {
+      "id": "P0-03",
+      "title": "Dispatch-state protocol and safe fallback",
+      "dependencies": [
+        "P0-02"
+      ],
+      "risk": "high",
+      "files": [
+        "src/contracts.ts",
+        "src/operation-engine.ts",
+        "src/bridge/*.ts"
+      ],
+      "summary": "Distinguish not_dispatched, accepted, completed, and unknown outcomes.",
+      "acceptanceCriteria": [
+        "Only not_dispatched may fallback",
+        "Unknown outcome is non-retryable",
+        "No mutation is replayed after host acceptance"
+      ],
+      "tests": [
+        "npm run typecheck",
+        "npm test",
+        "failure-injection routing tests"
+      ],
+      "instructionFile": "tasks/P0-03.md"
+    },
+    {
+      "id": "P0-04",
+      "title": "Trust Profile and authorization policy engine",
+      "dependencies": [
+        "P0-01"
+      ],
+      "risk": "high",
+      "files": [
+        "src/security/*",
+        "windows-ui-agent/*",
+        "schemas/trust-profile.schema.json"
+      ],
+      "summary": "Implement interactive, trusted_unattended, and isolated_lab authorization modes.",
+      "acceptanceCriteria": [
+        "Profile is DPAPI-protected",
+        "Profile is bound to current user and install identity",
+        "Policy evaluates risk/actions/paths/overwrite/delete/cloud"
+      ],
+      "tests": [
+        "npm run typecheck",
+        "npm test",
+        "profile tamper and SID mismatch tests",
+        "dotnet tests"
+      ],
+      "instructionFile": "tasks/P0-04.md"
+    },
+    {
+      "id": "P0-05",
+      "title": "Remove per-operation approval dialog from unattended path",
+      "dependencies": [
+        "P0-04",
+        "P0-02"
+      ],
+      "risk": "high",
+      "files": [
+        "src/security/confirmation.ts",
+        "src/operation-engine.ts",
+        "windows-ui-agent/ApprovalBroker.cs",
+        "windows-ui-agent/Program.cs"
+      ],
+      "summary": "Bypass interactive approval records and MessageBox for authorized trusted_unattended plans while retaining interactive compatibility.",
+      "acceptanceCriteria": [
+        "Zero per-operation MessageBox in trusted_unattended",
+        "No pending approval files for unattended operations",
+        "Interactive one-shot approval still works"
+      ],
+      "tests": [
+        "npm run typecheck",
+        "npm test",
+        "unattended approval-zero tests",
+        "interactive regression tests",
+        "dotnet tests"
+      ],
+      "instructionFile": "tasks/P0-05.md"
+    },
+    {
+      "id": "P0-06",
+      "title": "Execution plan hash and process-scoped session lease",
+      "dependencies": [
+        "P0-03",
+        "P0-04"
+      ],
+      "risk": "high",
+      "files": [
+        "src/security/*",
+        "src/operation-engine.ts",
+        "windows-ui-agent/McpLauncher.cs",
+        "schemas/execution-plan.schema.json"
+      ],
+      "summary": "Bind authorization to exact plan, backend, host session, state token, verifier, and approved roots.",
+      "acceptanceCriteria": [
+        "Plan normalization is deterministic",
+        "Lease is process-scoped and expires",
+        "Backend or argument drift invalidates authorization"
+      ],
+      "tests": [
+        "npm run typecheck",
+        "npm test",
+        "plan hash canonicalization tests",
+        "expired lease tests",
+        "dotnet tests"
+      ],
+      "instructionFile": "tasks/P0-06.md"
+    },
+    {
+      "id": "P0-07",
+      "title": "Checkpoint, overwrite safety, and outcome reconciliation",
+      "dependencies": [
+        "P0-03",
+        "P0-06"
+      ],
+      "risk": "high",
+      "files": [
+        "src/workflows/*",
+        "src/operation-engine.ts",
+        "src/bridge/uxp-websocket.ts",
+        "src/ledger.ts"
+      ],
+      "summary": "Create project checkpoints and recoverable output replacement; stop jobs on unknown outcomes.",
+      "acceptanceCriteria": [
+        "Checkpoint before first mutation",
+        "Overwrite uses backup/temp/verify/atomic replace",
+        "Unknown outcome creates reconciliation-required record"
+      ],
+      "tests": [
+        "npm run typecheck",
+        "npm test",
+        "checkpoint tests",
+        "overwrite failure tests",
+        "unknown outcome tests"
+      ],
+      "instructionFile": "tasks/P0-07.md"
+    },
+    {
+      "id": "P0-08",
+      "title": "Fix semantic action/backend mismatches",
+      "dependencies": [
+        "P0-02",
+        "P0-03"
+      ],
+      "risk": "high",
+      "files": [
+        "src/catalog.ts",
+        "uxp-plugin/main.cjs",
+        "cep-plugin/host.jsx",
+        "src/bridge/local-adapter.ts",
+        "src/bridge/ui-named-pipe.ts"
+      ],
+      "summary": "Correct routing and status for all currently declared semantic actions; implement selected missing core handlers.",
+      "acceptanceCriteria": [
+        "project.create/open/media.import use real handlers",
+        "effects.catalog reaches local handler",
+        "export.sequence exposes valid fallback",
+        "Unimplemented actions report truthful status"
+      ],
+      "tests": [
+        "npm run typecheck",
+        "npm test",
+        "semantic action parity test"
+      ],
+      "instructionFile": "tasks/P0-08.md"
+    },
+    {
+      "id": "P0-09",
+      "title": "Documentation, security policy, installer and v0.3 release contract",
+      "dependencies": [
+        "P0-05",
+        "P0-06",
+        "P0-07",
+        "P0-08"
+      ],
+      "risk": "high",
+      "files": [
+        "README.md",
+        "SECURITY.md",
+        "docs/*",
+        "scripts/install/*",
+        "package.json",
+        "uxp-plugin/manifest.json"
+      ],
+      "summary": "Document unattended enrollment, migration, risks, support matrix, and release behavior.",
+      "acceptanceCriteria": [
+        "Version is 0.3.0 consistently",
+        "README no longer requires per-operation approval in unattended mode",
+        "SECURITY describes new trust boundary",
+        "Installer supports explicit automation mode"
+      ],
+      "tests": [
+        "npm run check",
+        "release packaging tests",
+        "PowerShell installer tests"
+      ],
+      "instructionFile": "tasks/P0-09.md"
+    },
+    {
+      "id": "P1-01",
+      "title": "Durable Premiere job engine",
+      "dependencies": [
+        "P0-09"
+      ],
+      "risk": "high",
+      "files": [
+        "src/workflows/*",
+        "src/server.ts",
+        "src/contracts.ts"
+      ],
+      "summary": "Add plan/execute/status/cancel/resume/rollback job lifecycle with DAG steps and checkpoints.",
+      "acceptanceCriteria": [
+        "Job persists step state",
+        "Resume skips verified completed steps",
+        "Cancellation boundary is explicit",
+        "Rollback is evidence-based"
+      ],
+      "tests": [
+        "npm run typecheck",
+        "npm test",
+        "job engine tests"
+      ],
+      "instructionFile": "tasks/P1-01.md"
+    },
+    {
+      "id": "P1-02",
+      "title": "Core project, media and timeline semantic actions",
+      "dependencies": [
+        "P1-01"
+      ],
+      "risk": "high",
+      "files": [
+        "src/features/*",
+        "uxp-plugin/main.cjs",
+        "cep-plugin/host.jsx",
+        "src/verifiers/*"
+      ],
+      "summary": "Implement typed project lifecycle, media relink/proxy, sequence, track and clip operations.",
+      "acceptanceCriteria": [
+        "Each action has typed schema",
+        "Each mutation has scoped state token and verifier",
+        "Disposable fixture tests exist"
+      ],
+      "tests": [
+        "npm run typecheck",
+        "npm test",
+        "live fixture tests when host exists"
+      ],
+      "instructionFile": "tasks/P1-02.md"
+    },
+    {
+      "id": "P1-03",
+      "title": "Live host fixture and evidence runner",
+      "dependencies": [
+        "P0-09"
+      ],
+      "risk": "high",
+      "files": [
+        "fixtures/*",
+        "e2e/live-host/*",
+        "scripts/*",
+        "src/evidence/*"
+      ],
+      "summary": "Create disposable fixture projects and evidence records for live mutation verification.",
+      "acceptanceCriteria": [
+        "No real user project is touched",
+        "Evidence includes host build and API fingerprint",
+        "Fixture restore is verified"
+      ],
+      "tests": [
+        "npm run validate:uxp-plan",
+        "new fixture plan tests",
+        "live run when available"
+      ],
+      "instructionFile": "tasks/P1-03.md"
+    },
+    {
+      "id": "P1-04",
+      "title": "Versioned UI semantic adapter registry",
+      "dependencies": [
+        "P0-08",
+        "P1-03"
+      ],
+      "risk": "high",
+      "files": [
+        "windows-ui-agent/*",
+        "src/bridge/ui-named-pipe.ts",
+        "src/features/ui/*"
+      ],
+      "summary": "Replace broad descendant traversal with versioned, targeted semantic adapters and postcondition verifiers.",
+      "acceptanceCriteria": [
+        "No arbitrary selector API",
+        "Targeted FindFirst/ancestor-chain lookup",
+        "Adapter is gated by host build/locale/fingerprint"
+      ],
+      "tests": [
+        "dotnet tests",
+        "UI adapter contract tests",
+        "live UI test when available"
+      ],
+      "instructionFile": "tasks/P1-04.md"
+    },
+    {
+      "id": "P2-01",
+      "title": "Complete Premiere feature registry",
+      "dependencies": [
+        "P1-02",
+        "P1-03"
+      ],
+      "risk": "high",
+      "files": [
+        "src/features/domains/*",
+        "generated/feature-registry.json",
+        "docs/FEATURE_MATRIX.md"
+      ],
+      "summary": "Register every user-facing Premiere feature family and classify its automation path and evidence state.",
+      "acceptanceCriteria": [
+        "No undocumented feature gap in the registry",
+        "Each item has backend/state/version/preconditions/verifier",
+        "Matrix generation is deterministic"
+      ],
+      "tests": [
+        "npm run typecheck",
+        "npm test",
+        "registry completeness tests"
+      ],
+      "instructionFile": "tasks/P2-01.md"
+    },
+    {
+      "id": "P2-02",
+      "title": "Effects, audio, text, captions, color and export program",
+      "dependencies": [
+        "P2-01"
+      ],
+      "risk": "high",
+      "files": [
+        "src/features/*",
+        "src/verifiers/*",
+        "uxp-plugin/main.cjs",
+        "cep-plugin/host.jsx",
+        "fixtures/*"
+      ],
+      "summary": "Implement remaining post-production domains in parallel workstreams.",
+      "acceptanceCriteria": [
+        "No feature marked verified without live or fixture evidence",
+        "Compound workflows use jobs and checkpoints",
+        "Entitlement-dependent functions fail truthfully"
+      ],
+      "tests": [
+        "npm run typecheck",
+        "npm test",
+        "domain fixture tests"
+      ],
+      "instructionFile": "tasks/P2-02.md"
+    },
+    {
+      "id": "P2-03",
+      "title": "Collaboration, cloud, third-party and hybrid plugin boundary",
+      "dependencies": [
+        "P2-01"
+      ],
+      "risk": "high",
+      "files": [
+        "src/features/collaboration/*",
+        "src/connectors/*",
+        "native/*",
+        "docs/*"
+      ],
+      "summary": "Add explicit service and native extension boundaries for Productions, Team Projects, Frame.io, Adobe services and third-party plugins.",
+      "acceptanceCriteria": [
+        "No credential extraction",
+        "Entitlement and plugin dependencies are explicit",
+        "Native operations are versioned and integrity-pinned"
+      ],
+      "tests": [
+        "npm run typecheck",
+        "npm test",
+        "connector boundary tests",
+        "native contract tests"
+      ],
+      "instructionFile": "tasks/P2-03.md"
+    }
+  ]
+}

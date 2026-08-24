@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Premiere MCP Execution Plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "planId",
+    "operationId",
+    "actionId",
+    "backend",
+    "risk",
+    "normalizedRequestDigest",
+    "preconditions",
+    "verification",
+    "planHash"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "planId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "operationId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "jobId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "actionId": {
+      "type": "string"
+    },
+    "backend": {
+      "enum": [
+        "local",
+        "uxp",
+        "cep",
+        "qe",
+        "ui",
+        "native",
+        "service"
+      ]
+    },
+    "hostVersion": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "hostSessionId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "capabilityFingerprint": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "risk": {
+      "enum": [
+        "R0",
+        "R1",
+        "R2",
+        "R3"
+      ]
+    },
+    "normalizedRequestDigest": {
+      "type": "string"
+    },
+    "approvedRootDigests": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "expectedStateToken": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "preconditions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "verification": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "checkpointRequired": {
+      "type": "boolean"
+    },
+    "planHash": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    }
+  }
+}

@@ -1,0 +1,6 @@
+리포지터리의 .codex-work/SCOPE_LOCK.md, AGENTS.md, CODEX_MASTER_PROMPT.md를 먼저 읽는다.
+TASK_MANIFEST.json의 dependency 순서대로 실제 구현한다.
+첫 목표는 v0.3.0 unattended foundation이다.
+trusted_unattended 모드의 작업별 승인 메시지 수는 반드시 0이어야 한다.
+MessageBox 자동 클릭 방식은 금지한다.
+계획만 작성하지 말고 코드, 테스트, 문서까지 수정한다.

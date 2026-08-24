@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/premiere-mcp/trust-profile.schema.json",
+  "title": "Premiere MCP Trust Profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "profileId",
+    "mode",
+    "riskCeiling",
+    "approvedRoots",
+    "capabilities",
+    "checkpoint"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "profileId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{3,64}$"
+    },
+    "mode": {
+      "enum": [
+        "interactive",
+        "trusted_unattended",
+        "isolated_lab"
+      ]
+    },
+    "premiereVersions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "riskCeiling": {
+      "enum": [
+        "R0",
+        "R1",
+        "R2",
+        "R3"
+      ]
+    },
+    "actionAllow": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [
+        "*"
+      ]
+    },
+    "actionDeny": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "approvedRoots": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 3
+      },
+      "minItems": 1
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "overwrite",
+        "delete",
+        "thirdPartyPluginUi",
+        "cloudPublish",
+        "cloudShare",
+        "purchase"
+      ],
+      "properties": {
+        "overwrite": {
+          "type": "boolean"
+        },
+        "delete": {
+          "type": "boolean"
+        },
+        "thirdPartyPluginUi": {
+          "type": "boolean"
+        },
+        "cloudPublish": {
+          "type": "boolean"
+        },
+        "cloudShare": {
+          "type": "boolean"
+        },
+        "purchase": {
+          "type": "boolean"
+        }
+      }
+    },
+    "checkpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "beforeFirstMutation",
+        "beforeNonUndoable",
+        "intervalOperations",
+        "retainCount"
+      ],
+      "properties": {
+        "beforeFirstMutation": {
+          "type": "boolean"
+        },
+        "beforeNonUndoable": {
+          "type": "boolean"
+        },
+        "intervalOperations": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "retainCount": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxOperations": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxRuntimeMinutes": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "unexpectedModalPolicy": {
+      "enum": [
+        "pause_and_report",
+        "fail",
+        "known_adapter_only"
+      ]
+    }
+  }
+}

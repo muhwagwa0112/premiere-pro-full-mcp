@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "profileId": "studio-unattended",
+  "mode": "trusted_unattended",
+  "premiereVersions": [
+    "26.3.*"
+  ],
+  "riskCeiling": "R3",
+  "actionAllow": [
+    "*"
+  ],
+  "actionDeny": [],
+  "approvedRoots": [
+    "D:\\PremiereAutomation"
+  ],
+  "capabilities": {
+    "overwrite": true,
+    "delete": true,
+    "thirdPartyPluginUi": true,
+    "cloudPublish": false,
+    "cloudShare": false,
+    "purchase": false
+  },
+  "checkpoint": {
+    "beforeFirstMutation": true,
+    "beforeNonUndoable": true,
+    "intervalOperations": 50,
+    "retainCount": 10
+  },
+  "limits": {
+    "maxOperations": 5000,
+    "maxRuntimeMinutes": 360
+  },
+  "unexpectedModalPolicy": "pause_and_report"
+}
