@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "recordedAt": "2026-08-25T00:09:49+09:00",
+  "recordedAt": "2026-08-25T00:32:34+09:00",
   "releaseVersion": "0.3.0",
   "host": {
     "application": "Adobe Premiere Pro",
@@ -17,7 +17,7 @@
   },
   "ccx": {
     "name": "premiere-pro-full-mcp-v0.3.0.ccx",
-    "sha256": "f2e1c3b4bb0523d02cc3e9755b8ab66bd0183194ab363a9e13af5fff6001fcca",
+    "sha256": "c61fc0bc3a5f1d431ef158e7471c7cd6b071496118bf45100a0dd3229f67b760",
     "entryCount": 7,
     "installedFilesEqual": true,
     "files": [
@@ -43,8 +43,8 @@
       },
       {
         "path": "main.cjs",
-        "size": 62740,
-        "sha256": "7d1256c00c7c55c7e4b7f25b7ab8e293988825d437a9249ed456717db101e1f7"
+        "size": 63044,
+        "sha256": "9d20c8e59b7561afac1c17835511a1cd1e9edba22f791016d5720f9267740dbd"
       },
       {
         "path": "main.js",
@@ -53,8 +53,8 @@
       },
       {
         "path": "README.md",
-        "size": 878,
-        "sha256": "5e4fa9189c83d3abe17176aff0848ccfdd5d8513d2db2f3d163e0a6337c9be64"
+        "size": 940,
+        "sha256": "b821197358945aecec04d36b7dc476474e06a6b0bc857083aa4c417125fc59b2"
       }
     ]
   },
@@ -80,10 +80,10 @@
       "endpoint": "ws://localhost:17777/uxp",
       "userManagedToken": false,
       "mutualAuthentication": "protocol-v3-hmac-per-user-uxp-storage",
-      "available": true,
-      "verificationStatus": "passed",
+      "available": false,
+      "verificationStatus": "pending-live-revalidation-after-acl-hardening",
       "hostVersion": "26.3.2",
-      "hostSessionId": "e21e3cd5-4259-4501-a51e-d9b5af20d771",
+      "lastPreHardeningHostSessionId": "e21e3cd5-4259-4501-a51e-d9b5af20d771",
       "capabilityFingerprint": "3ad423e187ccb155afd139a8181bdc3093de357fb183d7505b4a00e1e3c3b17e",
       "authenticationFile": {
         "scope": "current-user Adobe UXP plug-in storage",
