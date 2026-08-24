@@ -45,6 +45,22 @@ try {
     } finally { $stream.Dispose() }
     Expand-PpMcpSafeArchive -ArchivePath $udtCompatible -DestinationPath (Join-Path $temporaryRoot 'udt-expanded')
     if (-not (Test-Path -LiteralPath (Join-Path $temporaryRoot 'udt-expanded\manifest.json') -PathType Leaf)) { throw 'A valid UDT-style signed ExternalAttributes value was rejected.' }
+    Assert-PpMcpUdtCcxArchive -ArchivePath $udtCompatible
+
+    $renamedDevelopmentArchive = Join-Path $temporaryRoot 'renamed-development.ccx'
+    $stream = [System.IO.File]::Create($renamedDevelopmentArchive)
+    try {
+        $zip = New-Object System.IO.Compression.ZipArchive($stream, [System.IO.Compression.ZipArchiveMode]::Create, $false)
+        try {
+            $entry = $zip.CreateEntry('manifest.json')
+            $writer = New-Object System.IO.StreamWriter($entry.Open())
+            try { $writer.Write('{}') } finally { $writer.Dispose() }
+        } finally { $zip.Dispose() }
+    } finally { $stream.Dispose() }
+    $developmentArchiveRejected = $false
+    try { Assert-PpMcpUdtCcxArchive -ArchivePath $renamedDevelopmentArchive }
+    catch { $developmentArchiveRejected = $_.Exception.Message -match 'Adobe UDT regular-file attributes' }
+    if (-not $developmentArchiveRejected) { throw 'A development ZIP renamed to CCX was not rejected.' }
 
     $symlinkArchive = Join-Path $temporaryRoot 'symlink.zip'
     $stream = [System.IO.File]::Create($symlinkArchive)

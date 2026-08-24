@@ -22,6 +22,7 @@ if ([string]::IsNullOrWhiteSpace($CcxPath)) {
 $CcxPath = [System.IO.Path]::GetFullPath($CcxPath)
 if (-not (Test-Path -LiteralPath $CcxPath -PathType Leaf)) { throw "Adobe UDT CCX was not found: $CcxPath" }
 if ([System.IO.Path]::GetFileName($CcxPath) -ne "premiere-pro-full-mcp-v$version.ccx") { throw 'CCX filename does not match the release version.' }
+Assert-PpMcpUdtCcxArchive -ArchivePath $CcxPath
 $dirty = @(& git -C $repoRoot status --porcelain --untracked-files=all 2>$null)
 if ($LASTEXITCODE -ne 0 -or $dirty.Count -ne 0) { throw 'Public release builds require a clean Git worktree.' }
 $commit = [string](& git -C $repoRoot rev-parse HEAD 2>$null)
@@ -123,7 +124,7 @@ Copy-Item -LiteralPath (Join-Path $repoRoot 'THIRD-PARTY-LICENSES') -Destination
 $ccxZip = Join-Path $stagingRoot 'ccx-validation.zip'
 $ccxExpanded = Join-Path $stagingRoot 'ccx-validation'
 Copy-Item -LiteralPath $CcxPath -Destination $ccxZip -Force
-Expand-Archive -LiteralPath $ccxZip -DestinationPath $ccxExpanded -Force
+Expand-PpMcpSafeArchive -ArchivePath $ccxZip -DestinationPath $ccxExpanded
 $ccxManifest = Get-Content -LiteralPath (Join-Path $ccxExpanded 'manifest.json') -Raw | ConvertFrom-Json
 if ($ccxManifest.id -ne $script:PpMcpPluginId -or [string]$ccxManifest.version -ne $version -or $ccxManifest.host.app -ne 'premierepro') { throw 'CCX identity does not match this release.' }
 Copy-Item -LiteralPath $CcxPath -Destination (Join-Path $bundleRoot "premiere-pro-full-mcp-v$version.ccx") -Force

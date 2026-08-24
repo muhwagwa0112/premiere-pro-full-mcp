@@ -260,6 +260,29 @@ function Expand-PpMcpSafeArchive {
     [System.IO.Compression.ZipFile]::ExtractToDirectory($archive, $destination)
 }
 
+function Assert-PpMcpUdtCcxArchive {
+    param([Parameter(Mandatory = $true)][string]$ArchivePath)
+    Add-Type -AssemblyName System.IO.Compression
+    $archive = [System.IO.Path]::GetFullPath($ArchivePath)
+    if (-not (Test-Path -LiteralPath $archive -PathType Leaf)) { throw "Adobe UDT CCX was not found: $archive" }
+    $stream = [System.IO.File]::OpenRead($archive)
+    try {
+        try { $zip = New-Object System.IO.Compression.ZipArchive($stream, [System.IO.Compression.ZipArchiveMode]::Read, $false) }
+        catch { throw 'Adobe UDT CCX is not a readable ZIP archive.' }
+        try {
+            $files = @($zip.Entries | Where-Object { -not ([string]$_.FullName).EndsWith('/') })
+            if (-not $files.Count) { throw 'Adobe UDT CCX contains no files.' }
+            foreach ($entry in $files) {
+                $externalAttributes = [System.BitConverter]::ToUInt32([System.BitConverter]::GetBytes([int32]$entry.ExternalAttributes), 0)
+                $unixMode = ($externalAttributes -shr 16) -band 0xFFFF
+                if ($unixMode -ne 0x81A4) {
+                    throw "CCX entry is missing the pinned Adobe UDT regular-file attributes: $($entry.FullName)"
+                }
+            }
+        } finally { $zip.Dispose() }
+    } finally { $stream.Dispose() }
+}
+
 function Get-PpMcpCodexConfigPath {
     if ($env:CODEX_HOME) { return Join-Path $env:CODEX_HOME 'config.toml' }
     if (-not $env:USERPROFILE) { return $null }
