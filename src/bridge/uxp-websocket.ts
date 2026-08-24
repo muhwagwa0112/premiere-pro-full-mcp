@@ -1,12 +1,13 @@
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { homedir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { lstat, readFile, realpath, stat } from "node:fs/promises";
+import { lstat, realpath, stat } from "node:fs/promises";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { IncomingMessage } from "node:http";
 import type { BackendAdapter, BackendProbe, BridgeRequest, BridgeResponse, DispatchState, SupportDecision } from "../contracts.js";
 import { hasValidEffectiveRequestBinding, routeBindingFromProbe, sameRouteBinding } from "../security/execution-plan.js";
 import { loadAdobeApiCatalog } from "../adobe-api-catalog.js";
+import { brokerProvisionUxpAuthentication, type UxpAuthenticationIdentity } from "../security/hmac-broker.js";
 
 interface HelloMessage {
   type: "hello";
@@ -84,6 +85,7 @@ export class UxpWebSocketAdapter implements BackendAdapter {
   readonly backend = "uxp" as const;
   readonly #port: number;
   readonly #authRoot: string;
+  readonly #provisionAuthentication: () => Promise<UxpAuthenticationIdentity>;
   readonly #pending = new Map<string, PendingRequest>();
   #server: WebSocketServer | null = null;
   #socket: WebSocket | null = null;
@@ -94,14 +96,17 @@ export class UxpWebSocketAdapter implements BackendAdapter {
   #apiFingerprint: string | null = null;
   readonly #pendingConnections = new Set<WebSocket>();
   readonly #failedHandshakesByAddress = new Map<string, number[]>();
+  #authenticationIdentity: UxpAuthenticationIdentity | null = null;
 
-  constructor(port = Number.parseInt(process.env.PREMIERE_MCP_UXP_PORT ?? "17777", 10), authRoot = join(process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"), "Adobe", "UXP", "PluginsStorage", "PPRO")) {
+  constructor(port = Number.parseInt(process.env.PREMIERE_MCP_UXP_PORT ?? "17777", 10), authRoot = join(process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"), "Adobe", "UXP", "PluginsStorage", "PPRO"), provisionAuthentication: () => Promise<UxpAuthenticationIdentity> = brokerProvisionUxpAuthentication) {
     this.#port = Number.isInteger(port) && port > 1024 && port < 65536 ? port : 17777;
     this.#authRoot = resolve(authRoot);
+    this.#provisionAuthentication = provisionAuthentication;
   }
 
   async start(): Promise<void> {
     if (this.#server) return;
+    this.#authenticationIdentity = await this.#provisionAuthentication();
     this.#apiFingerprint = (await loadAdobeApiCatalog()).fingerprint;
     await new Promise<void>((resolve, reject) => {
       const server = new WebSocketServer({
@@ -343,9 +348,9 @@ export class UxpWebSocketAdapter implements BackendAdapter {
     if (!relativeReal || relativeReal === ".." || relativeReal.startsWith(`..${sep}`) || isAbsolute(relativeReal)) throw new Error("UXP authentication file resolves outside the current user profile");
     const metadata = await lstat(filePath);
     if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size !== 64) throw new Error("UXP authentication file is invalid");
-    const value = (await readFile(filePath, "utf8")).trim().toLowerCase();
-    if (!/^[a-f0-9]{64}$/.test(value)) throw new Error("UXP authentication secret is invalid");
-    return value;
+    const identity = this.#authenticationIdentity;
+    if (!identity || resolve(identity.authFilePath).toLowerCase() !== resolve(filePath).toLowerCase() || !/^[a-f0-9]{64}$/.test(identity.secret)) throw new Error("UXP authentication identity is not provisioned by the trusted broker");
+    return identity.secret;
   }
 
   private failure(requestId: string, code: string, message: string, retryable: boolean, dispatchState: DispatchState): BridgeResponse {

@@ -175,6 +175,9 @@ try {
     }
     Write-PpMcpJsonAtomic -Path (Join-Path $resolvedInstallRoot 'app\current.json') -Value $current
     New-Item -ItemType Directory -Path (Join-Path $resolvedInstallRoot 'workspace') -Force | Out-Null
+    if ($isActiveUserInstall) {
+        Invoke-PpMcpCommand -FilePath $launcher -Arguments @('--uxp-auth', 'provision') -FailureMessage 'Current-user UXP authentication provisioning failed'
+    }
     if (-not $SkipCodexRegistration) {
         if ($codexConfigPath -and (Test-Path -LiteralPath $codexConfigPath -PathType Leaf)) { Copy-Item -LiteralPath $codexConfigPath -Destination $codexConfigBackup -Force; $hadCodexConfig = $true }
         Set-PpMcpCodexRegistration -Launcher $launcher -Bundle $bundle -InstallRoot $resolvedInstallRoot -AutomationMode $AutomationMode -TrustProfileId $TrustProfileId

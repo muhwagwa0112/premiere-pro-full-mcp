@@ -11,6 +11,7 @@ const AUTH_FILE_NAME = "premiere-mcp-bridge-key-v1";
 const UXP_PLUGIN_ID = "com.codex.premiere-pro-full-mcp";
 const adapters: UxpWebSocketAdapter[] = [];
 const temporaryDirectories: string[] = [];
+const identities = new Map<string, { authFilePath: string; secret: string }>();
 
 function transcript(role: "client" | "server", clientNonce: string, serverNonce: string, fingerprint: string): string {
   return `premiere-mcp-uxp-v3\n${role}\n${clientNonce}\n${serverNonce}\n${fingerprint}`;
@@ -29,7 +30,9 @@ async function testAdapter(port: number): Promise<{ adapter: UxpWebSocketAdapter
   temporaryDirectories.push(directory);
   const authRoot = join(directory, "PPRO");
   await mkdir(authRoot, { recursive: true });
-  const adapter = new UxpWebSocketAdapter(port, authRoot);
+  const identity = await createAuthFile(authRoot);
+  identities.set(authRoot, identity);
+  const adapter = new UxpWebSocketAdapter(port, authRoot, async () => identity);
   adapters.push(adapter);
   await adapter.start();
   return { adapter, authRoot };
@@ -47,7 +50,7 @@ async function authenticatedSocket(port: number, authRoot: string, capabilities:
   const socket = new WebSocket(`ws://127.0.0.1:${port}/uxp`, { origin: "file://" });
   await new Promise<void>((resolve) => socket.once("open", () => resolve()));
   const catalog = await loadAdobeApiCatalog();
-  const { authFilePath, secret } = await createAuthFile(authRoot);
+  const { authFilePath, secret } = identities.get(authRoot) ?? (() => { throw new Error("Test UXP authentication identity is missing"); })();
   const clientNonce = randomBytes(32).toString("hex");
   socket.send(JSON.stringify({ type: "hello", protocolVersion: 3, authFilePath, clientNonce, apiFingerprint: catalog.fingerprint }));
   const challenge = await nextMessage(socket);
@@ -65,6 +68,7 @@ async function authenticatedSocket(port: number, authRoot: string, capabilities:
 afterEach(async () => {
   await Promise.all(adapters.splice(0).map((adapter) => adapter.close()));
   await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
+  identities.clear();
 });
 
 describe("UXP websocket bridge", () => {
@@ -153,7 +157,7 @@ describe("UXP websocket bridge", () => {
   it("rejects a client that cannot prove possession of the plugin-data key", async () => {
     const port = 32001 + Math.floor(Math.random() * 1000);
     const { adapter, authRoot } = await testAdapter(port);
-    const { authFilePath } = await createAuthFile(authRoot);
+    const { authFilePath } = identities.get(authRoot) ?? (() => { throw new Error("Test UXP authentication identity is missing"); })();
     const catalog = await loadAdobeApiCatalog();
     const clientNonce = randomBytes(32).toString("hex");
     const socket = new WebSocket(`ws://127.0.0.1:${port}/uxp`, { origin: "file://" });
@@ -216,7 +220,7 @@ describe("UXP websocket bridge", () => {
   it("rejects a client whose Adobe API catalog fingerprint does not match", async () => {
     const port = 36001 + Math.floor(Math.random() * 1000);
     const { adapter, authRoot } = await testAdapter(port);
-    const { authFilePath } = await createAuthFile(authRoot);
+    const { authFilePath } = identities.get(authRoot) ?? (() => { throw new Error("Test UXP authentication identity is missing"); })();
     const socket = new WebSocket(`ws://127.0.0.1:${port}/uxp`, { origin: "file://" });
     await new Promise<void>((resolve) => socket.once("open", resolve));
     socket.send(JSON.stringify({ type: "hello", protocolVersion: 3, authFilePath, clientNonce: randomBytes(32).toString("hex"), apiFingerprint: "0".repeat(64) }));

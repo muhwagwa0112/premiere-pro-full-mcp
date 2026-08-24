@@ -26,6 +26,8 @@ describe("bounded live bridge deadlines", () => {
     expect(broker).toContain('["--hmac", key, "session-key", "node-server"]');
     expect(broker).toContain('createHmac("sha256", await sessionKey(key))');
     expect(broker).toContain("timingSafeEqual(expected, provided)");
+    expect(broker).toContain('["--uxp-auth", "provision", "node-server"]');
+    expect(program).toContain('["--uxp-auth", "provision", "node-server"]');
     expect(program).toContain('["--hmac", "cep-hmac" or "approval-hmac", "session-key", "node-server"]');
   });
 });

@@ -56,6 +56,8 @@ describe("UXP bridge deployment contract", () => {
     expect(source).toContain('type: "connect", protocolVersion: 3');
     expect(source).toContain("localFileSystem.getDataFolder()");
     expect(source).toContain("localFileSystem.getNativePath(keyFile)");
+    expect(source).not.toContain("dataFolder.createFile(AUTH_FILE_NAME");
+    expect(source).toContain("Local authentication data changed");
     expect(source).toContain('message.sessionId !== connectedSessionId');
     expect(source).toContain('document.getElementById("connect").addEventListener("click", () => void connect())');
     expect(source).not.toContain("runtime-bootstrap.json");

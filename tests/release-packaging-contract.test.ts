@@ -81,6 +81,7 @@ describe("release packaging contract", () => {
     expect(install).toContain("The launcher identity changed; unattended mode requires -TrustProfilePath");
     expect(install).toContain("secrets\\uxp-bridge-token.dpapi");
     expect(install).toContain("app\\runtime-bootstrap.json");
+    expect(install).toContain("@('--uxp-auth', 'provision')");
   });
 
   test("Doctor diagnoses the token-free UXP listener and panel session", () => {

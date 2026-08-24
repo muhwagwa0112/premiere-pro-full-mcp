@@ -18,8 +18,10 @@ accepted; preview again to obtain the current route/session-bound approval.
 
 v0.3 removes the v0.2 user-managed UXP shared-token/bootstrap pairing flow. The installed panel now
 connects automatically to the fixed same-user localhost endpoint `ws://localhost:17777/uxp`; its
-**Connect** button is a one-click retry and no longer opens a token file picker. A per-user key created
-inside Adobe UXP plug-in storage performs a transparent protocol-v3 HMAC challenge in both directions.
+**Connect** button is a one-click retry and no longer opens a token file picker. The integrity-pinned
+native runtime provisions a per-user key inside Adobe UXP plug-in storage with inheritance disabled
+and a current-user/SYSTEM/Administrators-only ACL. The panel only reads it and performs a transparent
+protocol-v3 HMAC challenge in both directions.
 Do not copy forward or recreate
 `runtime-bootstrap.json`, `uxp-bridge-token.dpapi`, or `PREMIERE_MCP_UXP_TOKEN`.
 

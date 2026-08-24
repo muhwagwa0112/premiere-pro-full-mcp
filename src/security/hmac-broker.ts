@@ -4,6 +4,11 @@ import { join } from "node:path";
 
 type KeyName = "cep-hmac" | "approval-hmac" | "lease-hmac";
 
+export interface UxpAuthenticationIdentity {
+  authFilePath: string;
+  secret: string;
+}
+
 function installedHelper(): string {
   const localAppData = process.env.LOCALAPPDATA;
   if (!localAppData) throw new Error("The trusted launcher did not provide LOCALAPPDATA");
@@ -77,4 +82,16 @@ export async function brokerProtect(message: string): Promise<string> {
 export async function brokerUnprotect(ciphertext: string): Promise<string> {
   if (!/^[A-Za-z0-9+/=]+$/.test(ciphertext)) throw new Error("Protected approval payload is invalid");
   return (await invoke(["--protect", "approval-payload", "unprotect", "node-server"], ciphertext)).stdout;
+}
+
+export async function brokerProvisionUxpAuthentication(): Promise<UxpAuthenticationIdentity> {
+  const output = (await invoke(["--uxp-auth", "provision", "node-server"], "", 30_000)).stdout.trim();
+  let parsed: unknown;
+  try { parsed = JSON.parse(output); } catch { throw new Error("UXP authentication broker returned invalid JSON"); }
+  if (!parsed || typeof parsed !== "object") throw new Error("UXP authentication broker returned an invalid identity");
+  const identity = parsed as Partial<UxpAuthenticationIdentity>;
+  if (typeof identity.authFilePath !== "string" || !identity.authFilePath || typeof identity.secret !== "string" || !/^[a-f0-9]{64}$/.test(identity.secret)) {
+    throw new Error("UXP authentication broker returned an invalid identity");
+  }
+  return { authFilePath: identity.authFilePath, secret: identity.secret };
 }

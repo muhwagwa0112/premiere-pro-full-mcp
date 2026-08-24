@@ -39,7 +39,7 @@ Requirements: Windows 10/11 x64, Premiere Pro 26.3 or later, Creative Cloud Desk
 
    The installer verifies every packaged file, installs only in the current user profile, registers `premiere_pro_full_mcp` with Codex, and opens the bundled CCX.
 3. Approve the independent-plugin warning in Creative Cloud Desktop. Restart Premiere, then open **Window > UXP Plugins > Premiere Pro Full MCP**.
-4. The panel connects automatically to the installed bridge at `localhost:17777`; **Connect** retries it manually with one click. No token entry, file picker, or pairing step is required. A per-user key created inside Adobe UXP plug-in storage authenticates both ends automatically.
+4. The panel connects automatically to the installed bridge at `localhost:17777`; **Connect** retries it manually with one click. No token entry, file picker, or pairing step is required. The installed native runtime provisions a per-user key inside Adobe UXP plug-in storage and authenticates both ends automatically.
 5. Restart Codex and call the host/capability inspection tools. Run Doctor if the bridge is not connected:
 
    ```powershell
@@ -82,7 +82,7 @@ Updates reject signature, repository, tag, name, size, digest, prerelease, and d
 - An authorized sequence overwrite moves the original to a verified backup, renders to an operation-scoped temporary file, verifies a stable non-empty digest, and commits without replacing an existing path. Any unproven restore or commit keeps a durable, output-specific reconciliation journal and blocks a new operation ID from reusing that target.
 - Interactive R2/R3 operations use short-lived, scope-bound, single-use exact-plan approvals and an independent trusted Windows dialog. Enrolled unattended modes use Trust Profile authorization and never invoke that dialog.
 - Raw ExtendScript, arbitrary QE/object paths, raw UI selectors/clicks, shell commands, and credential extraction are not public MCP operations.
-- Listeners bind to localhost. The one-click UXP bridge performs automatic mutual HMAC authentication with a per-user key in Adobe UXP plug-in storage, validates the exact key path and `file://` Origin, and binds commands to the authenticated session. No user-managed token or pairing UI is exposed. Processes already running as the same Windows account remain outside the protocol boundary; operation approval, Trust Profiles, the UI named-pipe token, and CEP HMAC remain enforced.
+- Listeners bind to localhost. The one-click UXP bridge performs automatic mutual HMAC authentication with a per-user key provisioned by the integrity-pinned native helper in Adobe UXP plug-in storage. Its protected ACL permits only the current user, SYSTEM, and Administrators; the panel never creates the key. The bridge validates the exact path and `file://` Origin and binds commands to the authenticated session. No user-managed token or pairing UI is exposed. Processes already running as the same Windows account remain outside the protocol boundary; operation approval, Trust Profiles, the UI named-pipe token, and CEP HMAC remain enforced.
 - Filesystem work is confined to explicitly approved canonical roots and rejects reparse-point escapes.
 - No telemetry is collected. Logs and ledgers exclude prompts, arguments, results, tokens, project paths, media names, and personal identifiers.
 
@@ -124,7 +124,7 @@ Release builds require a clean Git worktree and the dedicated private signing ke
    ```
 
 3. Creative Cloud Desktop에서 독립 플러그인 설치 경고를 승인합니다. Premiere를 재시작한 뒤 **창 > UXP 플러그인 > Premiere Pro Full MCP**를 엽니다.
-4. 패널은 설치된 `localhost:17777` 브리지에 자동 연결되며, **Connect** 한 번으로 수동 재연결할 수 있습니다. 토큰 입력, 파일 선택, 페어링 단계가 없습니다. Adobe UXP 플러그인 저장소 안에 자동 생성되는 사용자별 키가 양쪽을 상호 인증합니다.
+4. 패널은 설치된 `localhost:17777` 브리지에 자동 연결되며, **Connect** 한 번으로 수동 재연결할 수 있습니다. 토큰 입력, 파일 선택, 페어링 단계가 없습니다. 설치된 네이티브 런타임이 Adobe UXP 플러그인 저장소 안에 사용자별 키를 안전하게 준비해 양쪽을 자동 상호 인증합니다.
 5. Codex를 재시작합니다. 연결되지 않으면 다음 Doctor를 실행합니다.
 
    ```powershell

@@ -3,6 +3,7 @@ using System.IO.Pipes;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 
 [assembly: InternalsVisibleTo("PremiereMcp.WindowsUiAgent.Tests")]
 
@@ -164,6 +165,35 @@ internal static class Program
                 return 0;
             }
             catch (Exception ex) { Console.Error.WriteLine($"Protection broker failed: {ex.Message}"); return 3; }
+        }
+        if (args is ["--uxp-auth", "provision"])
+        {
+            try
+            {
+                BrokerSecurity.AssertTrustedInstalledSelf();
+                _ = UxpAuthFileSecurity.Provision();
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"UXP authentication provisioning failed: {ex.Message}");
+                return 3;
+            }
+        }
+        if (args is ["--uxp-auth", "provision", "node-server"])
+        {
+            try
+            {
+                BrokerSecurity.AssertCaller("node-server");
+                var identity = UxpAuthFileSecurity.Provision();
+                Console.Out.Write(JsonSerializer.Serialize(new { authFilePath = identity.AuthFilePath, secret = identity.Secret }));
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"UXP authentication provisioning failed: {ex.Message}");
+                return 3;
+            }
         }
         if (args is ["--trust-profile", "read", "node-server", _])
         {

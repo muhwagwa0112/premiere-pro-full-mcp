@@ -17,13 +17,14 @@ v0.3.0 is the current Windows release of the capability-gated Premiere Pro 26.3 
 - One implemented-unverified inspection/delivery workflow with durable checkpoint evidence before
   and after export. Other unavailable workflows remain plan-only or blocked.
 - Automatic UXP connection to the fixed localhost bridge, with one-click manual retry and no user
-  token entry, file picker, or pairing bootstrap. A per-user key in Adobe UXP plug-in storage performs
-  protocol-v3 mutual HMAC authentication before session-bound commands are enabled.
+  token entry, file picker, or pairing bootstrap. The integrity-pinned native runtime provisions a
+  protected per-user key in Adobe UXP plug-in storage; protocol-v3 mutual HMAC authentication completes
+  before session-bound commands are enabled.
 
 ## Validation
 
 - 33 TypeScript test files / 201 tests passed.
-- 36 Windows UI agent tests passed.
+- 43 Windows UI agent tests passed.
 - The installed Premiere Pro 26.3.2 panel completed protocol-v3 mutual authentication; a legacy
   protocol-v2 client was rejected without displacing the authenticated panel session.
 - Release security tests passed ZIP traversal, package-attribute, symlink/reparse, and detached

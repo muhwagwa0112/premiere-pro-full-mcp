@@ -35,18 +35,12 @@ async function bridgeIdentity() {
   bridgeIdentityPromise = (async () => {
     const localFileSystem = uxp.storage.localFileSystem;
     const dataFolder = await localFileSystem.getDataFolder();
-    let keyFile;
-    try { keyFile = await dataFolder.getEntry(AUTH_FILE_NAME); }
-    catch (_) { keyFile = await dataFolder.createFile(AUTH_FILE_NAME, { overwrite: true }); }
-    let secret = "";
-    try { secret = String(await keyFile.read()).trim().toLowerCase(); } catch (_) { secret = ""; }
-    if (!/^[a-f0-9]{64}$/.test(secret)) {
-      secret = randomHex(32);
-      await keyFile.write(secret);
-    }
+    const keyFile = await dataFolder.getEntry(AUTH_FILE_NAME);
+    const secret = String(await keyFile.read()).trim().toLowerCase();
+    if (!/^[a-f0-9]{64}$/.test(secret)) throw new Error("Local authentication data is invalid");
     const authFilePath = localFileSystem.getNativePath(keyFile);
     if (typeof authFilePath !== "string" || !authFilePath) throw new Error("UXP authentication data path is unavailable");
-    return { authFilePath, secret };
+    return { authFilePath, secret, keyFile };
   })().catch((error) => {
     bridgeIdentityPromise = null;
     throw error;
@@ -826,12 +820,21 @@ async function connect() {
       if (authenticated) status(`Connected\nPremiere ${uxp.host.version}\n${API_CATALOG.counts.members} generated API members`, "connected");
     } else if (message.type === "command") {
       if (!authenticated || !connectedSessionId || message.sessionId !== connectedSessionId) { candidate.close(1008, "Authenticated session required"); return; }
-      void handleCommand(message);
+      void (async () => {
+        const currentSecret = String(await identity.keyFile.read()).trim().toLowerCase();
+        if (!constantTimeHexEqual(identity.secret, currentSecret)) {
+          bridgeIdentityPromise = null;
+          candidate.close(1008, "Local authentication data changed");
+          return;
+        }
+        await handleCommand(message);
+      })().catch(() => candidate.close(1008, "Local authentication data validation failed"));
     }
   });
   candidate.addEventListener("close", () => {
     if (socket !== candidate) return;
     connectedSessionId = null;
+    if (!authenticated) bridgeIdentityPromise = null;
     for (const subscription of subscriptions.values()) {
       try {
         if (subscription.target) ppro.EventManager.removeEventListener(subscription.target, subscription.eventName, subscription.handler);
