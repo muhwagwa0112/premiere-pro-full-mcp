@@ -14,6 +14,25 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -AutomationMod
 Existing R2/R3 clients still preview and approve one exact plan. Legacy v1 approval records are not
 accepted; preview again to obtain the current route/session-bound approval.
 
+## UXP connection migration
+
+v0.3 removes the v0.2 UXP shared-token/bootstrap pairing flow. The installed panel now connects
+automatically to the fixed same-user localhost endpoint `ws://localhost:17777/uxp`; its **Connect**
+button is a one-click retry and no longer opens a token file picker. Do not copy forward or recreate
+`runtime-bootstrap.json`, `uxp-bridge-token.dpapi`, or `PREMIERE_MCP_UXP_TOKEN`.
+
+After a successful v0.3 activation, the installer narrowly retires the exact legacy token file and
+any `app/runtime-bootstrap.json` copies in this product's timestamped backup archives. It does not
+accept either artifact as a fallback. The launcher also removes an inherited
+`PREMIERE_MCP_UXP_TOKEN` value before starting the MCP runtime.
+
+Removing the shared token does not remove the remaining security boundaries: the bridge stays bound
+to localhost, accepts Premiere Pro 26.3's exact `file://` WebSocket Origin, verifies the generated
+catalog fingerprint and capability set, and binds operation authorization to the current route and
+host session. CEP HMAC, the named-pipe UI token, Trust Profiles, approvals, and checkpoint policies
+are unchanged. This connection model is intended for a local single-user workstation; do not expose
+port 17777 or treat it as a remote-service authentication boundary.
+
 ## Enrolling trusted unattended execution
 
 Create a schema-v1 Trust Profile with the exact intended mode, action/risk/capability policy,
