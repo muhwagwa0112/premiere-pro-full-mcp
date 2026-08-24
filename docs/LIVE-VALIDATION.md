@@ -2,8 +2,9 @@
 
 Validated on Windows against the installed v0.3.0 runtime and Adobe Premiere Pro 26.3.2 on
 2026-08-24. The fixture used generated media, a dedicated preset, and a dedicated project under
-`%LOCALAPPDATA%\PremiereMCP\workspace\v0.3-release-20260824`. The project was saved and closed after
-validation. No user project or user media was used.
+`%LOCALAPPDATA%\PremiereMCP\workspace\v0.3-release-20260824`. The project was saved through MCP,
+read back, and then manually closed with Premiere's Close Project shortcut. No user project or user
+media was used.
 
 ## v0.3 release gates
 
