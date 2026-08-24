@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Text.Json;
 using Microsoft.Win32.SafeHandles;
 
 namespace PremiereMcp.WindowsUiAgent;
@@ -25,11 +26,15 @@ internal static class McpLauncher
             RedirectStandardError = true,
         };
         start.ArgumentList.Add(Path.GetFullPath(entrypoint));
+        var automation = LauncherAutomationConfiguration.Resolve(
+            start.Environment,
+            profileId => TrustProfileStore.CreateDefault().Read(profileId));
         var localApplicationData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         var premiereRoot = Path.Combine(localApplicationData, "PremiereMCP");
         foreach (var directory in new[] { premiereRoot, Path.Combine(premiereRoot, "approvals"), Path.Combine(premiereRoot, "cep-public-v1"), Path.Combine(premiereRoot, "workspace"), Path.Combine(premiereRoot, "secrets"), Path.Combine(premiereRoot, "trust-profiles") })
             SecretStore.EnsureCurrentUserDirectory(directory);
         HardenChildEnvironment(start.Environment, localApplicationData);
+        automation.ApplyTo(start.Environment);
 
         var runtime = McpRuntimeConfiguration.Create(
             start.Environment,
@@ -62,8 +67,76 @@ internal static class McpLauncher
         environment.Remove("NODE_OPTIONS");
         environment.Remove("NODE_PATH");
         environment.Remove("PREMIERE_MCP_SECRET_HELPER");
+        RemoveInheritedAutomationBoundary(environment);
         environment["LOCALAPPDATA"] = trustedLocalAppData;
         environment["PREMIERE_MCP_CEP_DIR"] = Path.Combine(trustedLocalAppData, "PremiereMCP", "cep-public-v1");
+    }
+
+    private static void RemoveInheritedAutomationBoundary(IDictionary<string, string?> environment)
+    {
+        var inheritedBoundaryNames = environment.Keys.Where(name =>
+            name.StartsWith("PREMIERE_MCP_", StringComparison.OrdinalIgnoreCase) &&
+            (name.Contains("AUTOMATION", StringComparison.OrdinalIgnoreCase) ||
+             name.Contains("PROFILE", StringComparison.OrdinalIgnoreCase) ||
+             name.Contains("LEASE", StringComparison.OrdinalIgnoreCase))).ToArray();
+        foreach (var name in inheritedBoundaryNames) environment.Remove(name);
+    }
+}
+
+internal sealed record LauncherAutomationConfiguration(string Mode, string? TrustProfileId)
+{
+    internal const string AutomationModeVariable = "PREMIERE_MCP_AUTOMATION_MODE";
+    internal const string TrustProfileIdVariable = "PREMIERE_MCP_TRUST_PROFILE_ID";
+
+    internal static LauncherAutomationConfiguration Resolve(
+        IDictionary<string, string?> inheritedEnvironment,
+        Func<string, string> profileReader)
+    {
+        ArgumentNullException.ThrowIfNull(inheritedEnvironment);
+        ArgumentNullException.ThrowIfNull(profileReader);
+
+        var mode = NormalizeMode(GetValue(inheritedEnvironment, AutomationModeVariable));
+        var profileId = GetValue(inheritedEnvironment, TrustProfileIdVariable)?.Trim();
+        if (mode == "interactive") return new LauncherAutomationConfiguration(mode, null);
+        if (string.IsNullOrWhiteSpace(profileId))
+            throw new InvalidDataException($"{mode} requires a trust profile ID.");
+
+        var profileJson = profileReader(profileId);
+        using var profile = JsonDocument.Parse(profileJson, new JsonDocumentOptions { MaxDepth = 32 });
+        if (!profile.RootElement.TryGetProperty("mode", out var profileModeValue) ||
+            profileModeValue.ValueKind != JsonValueKind.String)
+            throw new InvalidDataException("Trust profile mode is missing.");
+        var profileMode = NormalizeMode(profileModeValue.GetString());
+        if (!string.Equals(mode, profileMode, StringComparison.Ordinal))
+            throw new InvalidDataException("Requested automation mode does not match the protected trust profile.");
+        return new LauncherAutomationConfiguration(mode, profileId);
+    }
+
+    internal static string NormalizeMode(string? value)
+    {
+        if (value is null) return "interactive";
+        if (string.IsNullOrWhiteSpace(value)) throw new InvalidDataException("PREMIERE_MCP_AUTOMATION_MODE is invalid.");
+        return value.Trim().ToLowerInvariant() switch
+        {
+            "interactive" => "interactive",
+            "trusted_unattended" or "trustedunattended" => "trusted_unattended",
+            "isolated_lab" or "isolatedlab" => "isolated_lab",
+            _ => throw new InvalidDataException("PREMIERE_MCP_AUTOMATION_MODE is invalid.")
+        };
+    }
+
+    internal void ApplyTo(IDictionary<string, string?> environment)
+    {
+        ArgumentNullException.ThrowIfNull(environment);
+        environment[AutomationModeVariable] = Mode;
+        if (TrustProfileId is not null) environment[TrustProfileIdVariable] = TrustProfileId;
+    }
+
+    private static string? GetValue(IDictionary<string, string?> environment, string name)
+    {
+        if (environment.TryGetValue(name, out var value)) return value;
+        var match = environment.FirstOrDefault(pair => string.Equals(pair.Key, name, StringComparison.OrdinalIgnoreCase));
+        return match.Key is null ? null : match.Value;
     }
 }
 

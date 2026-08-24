@@ -4,12 +4,152 @@ using System.IO.Pipes;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Xunit;
 
 namespace PremiereMcp.WindowsUiAgent.Tests;
 
 public sealed class McpLauncherTests
 {
+    [Fact]
+    public void PublicDefaultAutomationModeIsInteractive()
+    {
+        var profileReads = 0;
+        var configuration = LauncherAutomationConfiguration.Resolve(
+            new Dictionary<string, string?>(),
+            _ => { profileReads++; return "{}"; });
+
+        var childEnvironment = new Dictionary<string, string?>();
+        configuration.ApplyTo(childEnvironment);
+
+        Assert.Equal("interactive", configuration.Mode);
+        Assert.Null(configuration.TrustProfileId);
+        Assert.Equal(0, profileReads);
+        Assert.Equal("interactive", childEnvironment[LauncherAutomationConfiguration.AutomationModeVariable]);
+        Assert.False(childEnvironment.ContainsKey(LauncherAutomationConfiguration.TrustProfileIdVariable));
+    }
+
+    [Fact]
+    public void TrustedAndLabModesRequireMatchingProtectedProfile()
+    {
+        var missingProfile = new Dictionary<string, string?>
+        {
+            [LauncherAutomationConfiguration.AutomationModeVariable] = "TrustedUnattended"
+        };
+        Assert.Throws<InvalidDataException>(() => LauncherAutomationConfiguration.Resolve(missingProfile, _ => "{}"));
+
+        var mismatch = new Dictionary<string, string?>
+        {
+            [LauncherAutomationConfiguration.AutomationModeVariable] = "TrustedUnattended",
+            [LauncherAutomationConfiguration.TrustProfileIdVariable] = "studio-profile"
+        };
+        Assert.Throws<InvalidDataException>(() => LauncherAutomationConfiguration.Resolve(
+            mismatch,
+            _ => "{\"mode\":\"isolated_lab\"}"));
+
+        var matched = LauncherAutomationConfiguration.Resolve(
+            mismatch,
+            _ => "{\"mode\":\"trusted_unattended\"}");
+        Assert.Equal("trusted_unattended", matched.Mode);
+        Assert.Equal("studio-profile", matched.TrustProfileId);
+
+        var isolatedLab = new Dictionary<string, string?>
+        {
+            [LauncherAutomationConfiguration.AutomationModeVariable] = "IsolatedLab",
+            [LauncherAutomationConfiguration.TrustProfileIdVariable] = "disposable-lab"
+        };
+        var labConfiguration = LauncherAutomationConfiguration.Resolve(
+            isolatedLab,
+            _ => "{\"mode\":\"isolated_lab\"}");
+        Assert.Equal("isolated_lab", labConfiguration.Mode);
+        Assert.Equal("disposable-lab", labConfiguration.TrustProfileId);
+    }
+
+    [Fact]
+    public void ScrubsInheritedAutomationProfileAndLeaseValuesBeforeNormalizedInjection()
+    {
+        var localAppData = Path.Combine(Path.GetTempPath(), "ppmcp-launcher-boundary");
+        var environment = new Dictionary<string, string?>
+        {
+            ["premiere_mcp_automation_mode"] = "TrustedUnattended",
+            ["PREMIERE_MCP_TRUST_PROFILE_ID"] = "studio-profile",
+            ["PREMIERE_MCP_TRUST_PROFILE_PATH"] = @"C:\attacker\profile.json",
+            ["PREMIERE_MCP_SESSION_LEASE"] = "forged-lease",
+            ["PREMIERE_MCP_LEASE_SECRET"] = "forged-secret"
+        };
+        var configuration = LauncherAutomationConfiguration.Resolve(
+            environment,
+            _ => "{\"mode\":\"trusted_unattended\"}");
+
+        McpLauncher.HardenChildEnvironment(environment, localAppData);
+        configuration.ApplyTo(environment);
+
+        Assert.Equal("trusted_unattended", environment[LauncherAutomationConfiguration.AutomationModeVariable]);
+        Assert.Equal("studio-profile", environment[LauncherAutomationConfiguration.TrustProfileIdVariable]);
+        Assert.DoesNotContain(environment.Keys, key => key.Contains("LEASE", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(environment.Keys, key => key.Equals("PREMIERE_MCP_TRUST_PROFILE_PATH", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [InlineData("trusted_unattended")]
+    [InlineData("isolated_lab")]
+    public void UnattendedModesCannotReachApprovalBrokerOrMessageBox(string mode)
+    {
+        Assert.False(Program.IsInteractiveApprovalMode(mode));
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            ApprovalBroker.Approve(Guid.NewGuid().ToString(), mode));
+
+        Assert.Contains("only in interactive mode", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void InvalidAutomationModeFailsClosedInsteadOfFallingBackToInteractive()
+    {
+        var inherited = new Dictionary<string, string?>
+        {
+            [LauncherAutomationConfiguration.AutomationModeVariable] = "unattended"
+        };
+
+        Assert.Throws<InvalidDataException>(() => LauncherAutomationConfiguration.Resolve(inherited, _ => "{}"));
+        inherited[LauncherAutomationConfiguration.AutomationModeVariable] = "   ";
+        Assert.Throws<InvalidDataException>(() => LauncherAutomationConfiguration.Resolve(inherited, _ => "{}"));
+    }
+
+    [Fact]
+    public void ApprovalBrokerAcceptsOnlyStrictVersionTwoPlanAndRoutePayload()
+    {
+        var approvalId = Guid.NewGuid().ToString();
+        var payload = JsonNode.Parse($$"""
+            {
+              "version":2,
+              "approvalId":"{{approvalId}}",
+              "state":"pending",
+              "operationId":"operation-1",
+              "actionId":"timeline.clip.move",
+              "planHash":"sha256:{{new string('a', 64)}}",
+              "route":{"backend":"uxp","hostVersion":"26.3","hostSessionId":"session-1","capabilityFingerprint":"fingerprint-1"},
+              "requestDigest":"{{new string('A', 43)}}",
+              "request":{"actionId":"timeline.clip.move","target":null,"args":{},"expectedRevision":null},
+              "summary":{"title":"Move clip","risk":"R2","mutatesProject":true,"undoable":true,"backend":"uxp"},
+              "issuedAt":1000,
+              "expiresAt":2000,
+              "approvedAt":null,
+              "nonce":"nonce-value"
+            }
+            """)!.AsObject();
+
+        ApprovalBroker.ValidateVersionTwoPayload(payload, approvalId);
+
+        payload["version"] = 1;
+        Assert.Throws<InvalidDataException>(() => ApprovalBroker.ValidateVersionTwoPayload(payload, approvalId));
+        payload["version"] = 2;
+        payload["unexpected"] = true;
+        Assert.Throws<InvalidDataException>(() => ApprovalBroker.ValidateVersionTwoPayload(payload, approvalId));
+        payload.Remove("unexpected");
+        payload["route"]!["backend"] = "ui-selector-bypass";
+        Assert.Throws<InvalidDataException>(() => ApprovalBroker.ValidateVersionTwoPayload(payload, approvalId));
+    }
+
     [Fact]
     public void CreatesDefaultWorkspaceAndInjectsDistinctDpapiBackedTokens()
     {

@@ -62,6 +62,20 @@ internal static class Program
                 return 3;
             }
         }
+        if (args is ["--hmac", "lease-hmac", "sign", "node-server"])
+        {
+            try
+            {
+                BrokerSecurity.AssertCaller("node-server");
+                Console.Out.Write(BrokerSecurity.Sign("lease-hmac", ReadBoundedStandardInput()));
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Lease HMAC broker failed: {ex.Message}");
+                return 3;
+            }
+        }
         if (args is ["--hmac", "cep-hmac", "session-key", "premiere"])
         {
             try
@@ -90,6 +104,20 @@ internal static class Program
                 return 3;
             }
         }
+        if (args is ["--hmac", "lease-hmac", "session-key", "node-server"])
+        {
+            try
+            {
+                BrokerSecurity.AssertCaller("node-server");
+                Console.Out.Write(BrokerSecurity.ExportSessionKey("lease-hmac"));
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Lease session key broker failed: {ex.Message}");
+                return 3;
+            }
+        }
         if (args is ["--hmac", "cep-hmac" or "approval-hmac", "verify", "node-server" or "premiere", _])
         {
             try
@@ -101,6 +129,19 @@ internal static class Program
             catch (Exception ex)
             {
                 Console.Error.WriteLine($"HMAC broker failed: {ex.Message}");
+                return 3;
+            }
+        }
+        if (args is ["--hmac", "lease-hmac", "verify", "node-server", _])
+        {
+            try
+            {
+                BrokerSecurity.AssertCaller("node-server");
+                return BrokerSecurity.Verify("lease-hmac", ReadBoundedStandardInput(), args[4]) ? 0 : 4;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Lease HMAC broker failed: {ex.Message}");
                 return 3;
             }
         }
@@ -164,8 +205,12 @@ internal static class Program
         {
             try
             {
+                var approvalMode = LauncherAutomationConfiguration.NormalizeMode(
+                    Environment.GetEnvironmentVariable(LauncherAutomationConfiguration.AutomationModeVariable));
+                if (!IsInteractiveApprovalMode(approvalMode))
+                    throw new InvalidOperationException("Per-operation approval is available only in interactive mode.");
                 BrokerSecurity.AssertTrustedInstalledSelf();
-                ApprovalBroker.Approve(args[2]);
+                ApprovalBroker.Approve(args[2], approvalMode);
                 return 0;
             }
             catch (Exception ex)
@@ -214,6 +259,9 @@ internal static class Program
         UiAgentHost.RunForeground(pipeName, dispatcher);
         return 0;
     }
+
+    internal static bool IsInteractiveApprovalMode(string normalizedAutomationMode) =>
+        string.Equals(normalizedAutomationMode, "interactive", StringComparison.Ordinal);
 
     private static string ReadBoundedStandardInput()
     {
