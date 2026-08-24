@@ -20,7 +20,7 @@ The supported public install starts from the versioned GitHub Release ZIP, not t
    `isolated_lab`. Interactive mode rejects profile arguments. An unattended first install
    requires `-TrustProfilePath`; an ID alone cannot enroll authority.
 4. Approve the CCX installation in Creative Cloud Desktop, restart Premiere, and open **Window > UXP Plugins > Premiere Pro Full MCP**.
-5. The panel connects automatically to the installed localhost bridge on port 17777; **Connect** retries it with one click. There is no token, file picker, or pairing step.
+5. The panel connects automatically to the installed localhost bridge on port 17777; **Connect** retries it with one click. There is no token entry, file picker, or pairing step. Mutual authentication uses a per-user key created automatically inside Adobe UXP plug-in storage.
 6. Restart Codex and run the installed `Doctor.ps1 -CheckLive`.
 
 The release ZIP is the complete install source. Do not combine its installer with a CCX, bundle,

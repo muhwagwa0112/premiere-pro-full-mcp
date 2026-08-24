@@ -39,7 +39,7 @@ packaging; never reuse generated files or a CCX from an earlier commit.
 - `%LOCALAPPDATA%\PremiereMCP\app\tools` — Doctor, Update, Uninstall, public release key, and CCX
 - `%APPDATA%\Adobe\CEP\extensions\com.codex.premiere-pro-full-mcp.cep` — Adobe ZXP-signed CEP/QE compatibility bridge; installer does not enable CEP developer mode
 
-Existing active targets are moved to timestamped backups before activation. Failure restores the previous targets and Codex configuration. The UXP panel uses a token-free localhost handshake; no runtime bootstrap or pairing file is generated or shipped.
+Existing active targets are moved to timestamped backups before activation. Failure restores the previous targets and Codex configuration. The UXP panel uses an automatic per-user mutual-authentication handshake; no user token, runtime bootstrap, or pairing file is generated or shipped.
 
 ## Update trust chain
 

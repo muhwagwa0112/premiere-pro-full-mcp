@@ -6,10 +6,12 @@ This server is local-only. Do not expose its UXP listener, CEP queue, or UI-agen
 the current Windows user session.
 
 - Keep UI named-pipe tokens out of source, MCP configuration arguments, logs, and support bundles.
-- The UXP panel deliberately uses a token-free one-click handshake on `127.0.0.1:17777`. Origin checks,
-  catalog fingerprint/capability validation, session UUIDs, route binding, payload limits, and operation
-  authorization remain enforced, but they are not process identity. Another process running as the same
-  Windows user can reach or impersonate this local UXP channel and is outside this protocol boundary.
+- The UXP panel uses a one-click, protocol-v3 handshake on `127.0.0.1:17777` with no user-managed
+  token or pairing UI. The panel creates a 256-bit key inside its Adobe UXP per-user data folder; the
+  bridge accepts only the canonical current-user plug-in-storage path and both peers prove the key by
+  HMAC over fresh nonces, catalog fingerprint, and session ID before commands are enabled. Exact Origin,
+  capability/fingerprint, session/route, payload, and operation-authorization checks also remain enforced.
+  This does not isolate mutually hostile processes already running as the same Windows user.
 - CEP, approval, lease, and Trust Profile material is DPAPI CurrentUser-protected at rest. After full executable,
   signature, ancestry, and command-line verification, the broker releases each required key once
   into the memory of the integrity-pinned MCP entrypoint or authorized Premiere CEP renderer.

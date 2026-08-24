@@ -1,18 +1,44 @@
-import { randomUUID } from "node:crypto";
-import { stat } from "node:fs/promises";
+import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { homedir } from "node:os";
+import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { lstat, readFile, realpath, stat } from "node:fs/promises";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { IncomingMessage } from "node:http";
 import type { BackendAdapter, BackendProbe, BridgeRequest, BridgeResponse, DispatchState, SupportDecision } from "../contracts.js";
 import { hasValidEffectiveRequestBinding, routeBindingFromProbe, sameRouteBinding } from "../security/execution-plan.js";
 import { loadAdobeApiCatalog } from "../adobe-api-catalog.js";
 
+interface HelloMessage {
+  type: "hello";
+  protocolVersion: 3;
+  authFilePath: string;
+  clientNonce: string;
+  apiFingerprint: string;
+}
+
 interface ConnectMessage {
   type: "connect";
-  protocolVersion: 2;
+  protocolVersion: 3;
+  clientProof: string;
   hostVersion: string;
   uxpVersion?: string;
   capabilities: string[];
   apiFingerprint: string;
+}
+
+const AUTH_FILE_NAME = "premiere-mcp-bridge-key-v1";
+
+function authenticationTranscript(role: "client" | "server", clientNonce: string, serverNonce: string, apiFingerprint: string): string {
+  return `premiere-mcp-uxp-v3\n${role}\n${clientNonce}\n${serverNonce}\n${apiFingerprint}`;
+}
+
+function authenticationProof(secret: string, role: "client" | "server", clientNonce: string, serverNonce: string, apiFingerprint: string): string {
+  return createHmac("sha256", Buffer.from(secret, "hex")).update(authenticationTranscript(role, clientNonce, serverNonce, apiFingerprint), "ascii").digest("hex");
+}
+
+function sameHex(left: string, right: string): boolean {
+  if (!/^[a-f0-9]{64}$/.test(left) || !/^[a-f0-9]{64}$/.test(right)) return false;
+  return timingSafeEqual(Buffer.from(left, "hex"), Buffer.from(right, "hex"));
 }
 
 interface FileSnapshot {
@@ -56,6 +82,7 @@ async function waitForChangedStableFile(path: string, baseline: FileSnapshot | n
 export class UxpWebSocketAdapter implements BackendAdapter {
   readonly backend = "uxp" as const;
   readonly #port: number;
+  readonly #authRoot: string;
   readonly #pending = new Map<string, PendingRequest>();
   #server: WebSocketServer | null = null;
   #socket: WebSocket | null = null;
@@ -67,8 +94,9 @@ export class UxpWebSocketAdapter implements BackendAdapter {
   readonly #pendingConnections = new Set<WebSocket>();
   readonly #failedHandshakesByAddress = new Map<string, number[]>();
 
-  constructor(port = Number.parseInt(process.env.PREMIERE_MCP_UXP_PORT ?? "17777", 10)) {
+  constructor(port = Number.parseInt(process.env.PREMIERE_MCP_UXP_PORT ?? "17777", 10), authRoot = join(process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"), "Adobe", "UXP", "PluginsStorage", "PPRO")) {
     this.#port = Number.isInteger(port) && port > 1024 && port < 65536 ? port : 17777;
+    this.#authRoot = resolve(authRoot);
   }
 
   async start(): Promise<void> {
@@ -145,7 +173,7 @@ export class UxpWebSocketAdapter implements BackendAdapter {
         }, timeoutMs);
         this.#pending.set(request.requestId, { resolve, reject, timer, request, outputBaseline });
         try {
-          this.#socket?.send(JSON.stringify({ type: "command", ...request }));
+          this.#socket?.send(JSON.stringify({ type: "command", ...request, sessionId: this.#hostSessionId }));
         } catch (error) {
           clearTimeout(timer);
           this.#pending.delete(request.requestId);
@@ -182,6 +210,9 @@ export class UxpWebSocketAdapter implements BackendAdapter {
     }
     this.#pendingConnections.add(socket);
     let connected = false;
+    let secret: string | null = null;
+    let clientNonce: string | null = null;
+    let serverNonce: string | null = null;
     const connectTimer = setTimeout(() => {
       this.#pendingConnections.delete(socket);
       socket.close(1008, "Connection handshake required");
@@ -200,19 +231,44 @@ export class UxpWebSocketAdapter implements BackendAdapter {
         return;
       }
       if (!connected) {
+        if (!secret) {
+          const hello = message as Partial<HelloMessage>;
+          if (hello.type !== "hello" || hello.protocolVersion !== 3 || typeof hello.authFilePath !== "string" || typeof hello.clientNonce !== "string" || !/^[a-f0-9]{64}$/.test(hello.clientNonce) || typeof hello.apiFingerprint !== "string") {
+            recentFailures.push(Date.now());
+            this.#failedHandshakesByAddress.set(address, recentFailures);
+            this.#pendingConnections.delete(socket);
+            socket.close(1008, "Unsupported authentication handshake");
+            return;
+          }
+          if (!this.#apiFingerprint || hello.apiFingerprint !== this.#apiFingerprint) {
+            socket.close(1008, "Adobe API catalog fingerprint mismatch");
+            return;
+          }
+          try { secret = await this.readPanelSecret(hello.authFilePath); }
+          catch {
+            recentFailures.push(Date.now());
+            this.#failedHandshakesByAddress.set(address, recentFailures);
+            socket.close(1008, "Automatic local authentication failed");
+            return;
+          }
+          clientNonce = hello.clientNonce;
+          serverNonce = randomBytes(32).toString("hex");
+          socket.send(JSON.stringify({ type: "challenge", protocolVersion: 3, serverNonce, serverProof: authenticationProof(secret, "server", clientNonce, serverNonce, this.#apiFingerprint) }));
+          return;
+        }
         const hello = message as Partial<ConnectMessage>;
-        if (hello.type !== "connect" || hello.protocolVersion !== 2) {
+        if (hello.type !== "connect" || hello.protocolVersion !== 3 || typeof hello.clientProof !== "string" || !clientNonce || !serverNonce || !this.#apiFingerprint || !sameHex(hello.clientProof, authenticationProof(secret, "client", clientNonce, serverNonce, this.#apiFingerprint))) {
           recentFailures.push(Date.now());
           this.#failedHandshakesByAddress.set(address, recentFailures);
           this.#pendingConnections.delete(socket);
-          socket.close(1008, "Unsupported connection handshake");
+          socket.close(1008, "Client authentication failed");
           return;
         }
         if (!Array.isArray(hello.capabilities) || hello.capabilities.length > 1024 || !hello.capabilities.every((item) => typeof item === "string" && item.length > 0 && item.length <= 128) || typeof hello.hostVersion !== "string" || hello.hostVersion.length > 64 || typeof hello.apiFingerprint !== "string") {
           socket.close(1008, "Invalid capability handshake");
           return;
         }
-        if (!this.#apiFingerprint || hello.apiFingerprint !== this.#apiFingerprint) {
+        if (hello.apiFingerprint !== this.#apiFingerprint) {
           socket.close(1008, "Adobe API catalog fingerprint mismatch");
           return;
         }
@@ -224,11 +280,11 @@ export class UxpWebSocketAdapter implements BackendAdapter {
         this.#hostVersion = hello.hostVersion;
         this.#capabilities = new Set(hello.capabilities);
         this.#hostSessionId = randomUUID();
-        socket.send(JSON.stringify({ type: "connected", protocolVersion: 2, sessionId: this.#hostSessionId }));
+        socket.send(JSON.stringify({ type: "connected", protocolVersion: 3, sessionId: this.#hostSessionId }));
         return;
       }
-      const response = message as BridgeResponse & { type?: string };
-      if (response.type !== "response" || response.protocolVersion !== 1 || typeof response.requestId !== "string" || typeof response.ok !== "boolean") return;
+      const response = message as BridgeResponse & { type?: string; sessionId?: string };
+      if (response.type !== "response" || response.protocolVersion !== 1 || response.sessionId !== this.#hostSessionId || typeof response.requestId !== "string" || typeof response.ok !== "boolean") return;
       const pending = this.#pending.get(response.requestId);
       if (!pending) return;
       clearTimeout(pending.timer);
@@ -272,6 +328,23 @@ export class UxpWebSocketAdapter implements BackendAdapter {
     // exact file origin below. Missing/opaque/general UXP origins are rejected
     // so browser content and unrelated plug-ins cannot claim the panel route.
     return origin === "file://";
+  }
+
+  private async readPanelSecret(authFilePath: string): Promise<string> {
+    if (!isAbsolute(authFilePath) || basename(authFilePath) !== AUTH_FILE_NAME || authFilePath.length > 1024) throw new Error("Invalid UXP authentication path");
+    const candidate = resolve(authFilePath);
+    const relativeCandidate = relative(this.#authRoot, candidate);
+    if (!relativeCandidate || relativeCandidate === ".." || relativeCandidate.startsWith(`..${sep}`) || isAbsolute(relativeCandidate)) throw new Error("UXP authentication path escapes the current user profile");
+    const parts = relativeCandidate.split(/[\\/]/);
+    if (parts.length !== 5 || !/^\d+$/.test(parts[0] ?? "") || parts[1] !== "External" || !/^[a-f0-9]{8,64}$/i.test(parts[2] ?? "") || parts[3] !== "PluginData" || parts[4] !== AUTH_FILE_NAME) throw new Error("UXP authentication path is not plugin-scoped");
+    const [rootPath, filePath] = await Promise.all([realpath(this.#authRoot), realpath(candidate)]);
+    const relativeReal = relative(rootPath, filePath);
+    if (!relativeReal || relativeReal === ".." || relativeReal.startsWith(`..${sep}`) || isAbsolute(relativeReal)) throw new Error("UXP authentication file resolves outside the current user profile");
+    const metadata = await lstat(filePath);
+    if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size !== 64) throw new Error("UXP authentication file is invalid");
+    const value = (await readFile(filePath, "utf8")).trim().toLowerCase();
+    if (!/^[a-f0-9]{64}$/.test(value)) throw new Error("UXP authentication secret is invalid");
+    return value;
   }
 
   private failure(requestId: string, code: string, message: string, retryable: boolean, dispatchState: DispatchState): BridgeResponse {

@@ -17,12 +17,12 @@ v0.3.0 is the current Windows release of the capability-gated Premiere Pro 26.3 
 - One implemented-unverified inspection/delivery workflow with durable checkpoint evidence before
   and after export. Other unavailable workflows remain plan-only or blocked.
 - Automatic UXP connection to the fixed localhost bridge, with one-click manual retry and no user
-  token, file picker, or pairing bootstrap. The existing capability/fingerprint handshake and
-  operation authorization remain enforced.
+  token entry, file picker, or pairing bootstrap. A per-user key in Adobe UXP plug-in storage performs
+  protocol-v3 mutual HMAC authentication before session-bound commands are enabled.
 
 ## Validation
 
-- 33 TypeScript test files / 197 tests passed.
+- 33 TypeScript test files / 200 tests passed.
 - 36 Windows UI agent tests passed.
 - Release security tests passed ZIP traversal, package-attribute, symlink/reparse, and detached
   signature-tamper rejection.
@@ -42,7 +42,7 @@ not inherit that evidence and retain their generated support states.
 
 The CCX was packaged with Adobe UXP Developer Tool and the same package passed UDT developer loading
 and installation through Adobe Unified Plugin Installer Agent 8.5.0.13. Premiere Pro 26.3.2 loaded
-the installed v0.3.0 plug-in, and all six installed files matched the CCX byte-for-byte by SHA-256.
+the installed v0.3.0 plug-in, and all seven installed files matched the CCX byte-for-byte by SHA-256.
 At 100% Windows scale, the floating packaged panel exposed every primary control at 340x326 outer /
 324x287 client pixels and 96 DPI, including an exact 320x260 nested UXP content view matching the
 manifest minimum. At 125% Windows scale, Premiere reported 120 DPI and the same installed panel

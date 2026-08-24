@@ -1,9 +1,11 @@
 import { readFile } from "node:fs/promises";
+import { createHmac } from "node:crypto";
+import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 describe("UXP bridge deployment contract", () => {
-  it("keeps the token-free bridge constrained to localhost and removes file-system permission", async () => {
+  it("keeps the no-picker bridge constrained to localhost and the plugin sandbox", async () => {
     const manifest = JSON.parse(await readFile(resolve("uxp-plugin/manifest.json"), "utf8"));
     expect(manifest.requiredPermissions.network.domains).toEqual(["ws://localhost/"]);
     expect(manifest.requiredPermissions.localFileSystem).toBeUndefined();
@@ -47,16 +49,34 @@ describe("UXP bridge deployment contract", () => {
     expect(source).not.toContain("querySelectorAll");
   });
 
-  it("connects with one button and no token or bootstrap pairing path", async () => {
+  it("connects with one button, automatic mutual authentication, and no user token or bootstrap picker", async () => {
     const source = await readFile(resolve("uxp-plugin/main.cjs"), "utf8");
     expect(source).toContain('new WebSocket("ws://localhost:17777/uxp")');
-    expect(source).toContain('type: "connect", protocolVersion: 2');
-    expect(source).toContain('document.getElementById("connect").addEventListener("click", connect)');
+    expect(source).toContain('type: "hello", protocolVersion: 3');
+    expect(source).toContain('type: "connect", protocolVersion: 3');
+    expect(source).toContain("localFileSystem.getDataFolder()");
+    expect(source).toContain("localFileSystem.getNativePath(keyFile)");
+    expect(source).toContain('message.sessionId !== connectedSessionId');
+    expect(source).toContain('document.getElementById("connect").addEventListener("click", () => void connect())');
     expect(source).not.toContain("runtime-bootstrap.json");
     expect(source).toContain("void connect();");
     expect(source).not.toContain("createPersistentToken");
     expect(source).not.toContain('document.getElementById("token")');
     expect(source).not.toContain("BOOTSTRAP_PERMISSION_KEY");
+  });
+
+  it("matches the automatic bridge HMAC to Node SHA-256", () => {
+    const localRequire = createRequire(import.meta.url);
+    const auth = localRequire("../uxp-plugin/auth.cjs") as {
+      authenticationTranscript: (role: string, clientNonce: string, serverNonce: string, fingerprint: string) => string;
+      hmacSha256Hex: (secret: string, transcript: string) => string;
+    };
+    const secret = "11".repeat(32);
+    const clientNonce = "22".repeat(32);
+    const serverNonce = "33".repeat(32);
+    const fingerprint = "44".repeat(32);
+    const transcript = auth.authenticationTranscript("server", clientNonce, serverNonce, fingerprint);
+    expect(auth.hmacSha256Hex(secret, transcript)).toBe(createHmac("sha256", Buffer.from(secret, "hex")).update(transcript, "ascii").digest("hex"));
   });
 
   it("registers the installed panel lifecycle with the manifest entrypoint id", async () => {

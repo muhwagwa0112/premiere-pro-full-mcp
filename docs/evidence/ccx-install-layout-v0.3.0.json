@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "recordedAt": "2026-08-24T23:15:06+09:00",
+  "recordedAt": "2026-08-24T23:56:46+09:00",
   "releaseVersion": "0.3.0",
   "host": {
     "application": "Adobe Premiere Pro",
@@ -17,8 +17,8 @@
   },
   "ccx": {
     "name": "premiere-pro-full-mcp-v0.3.0.ccx",
-    "sha256": "a503fe6c0fd70c2ba9703925638ae05031c2bd76cc911547a3ccad2e58dcb38d",
-    "entryCount": 6,
+    "sha256": "1543860296f3bfbaa557eb278672249a034ccac52a9946824619e53433239ed4",
+    "entryCount": 7,
     "installedFilesEqual": true,
     "files": [
       {
@@ -32,14 +32,19 @@
         "sha256": "c91de9ef23f0fef896d84c47da71a07083f50f998f7015923d3468d0fa2fdfaf"
       },
       {
+        "path": "auth.cjs",
+        "size": 5696,
+        "sha256": "891b3a09b6d9f1ffd91a656e3bccb6164603215b0c4393c1ee06ed806f7152a8"
+      },
+      {
         "path": "index.html",
         "size": 2131,
         "sha256": "7a4f042c6394fa61dbf259918da739f9e70323ed2c4af3764e46e776cc6b69f3"
       },
       {
         "path": "main.cjs",
-        "size": 60122,
-        "sha256": "178e068a5d256bc011d1553e268cd53b86da4ef7fd75189be370469fab64ea76"
+        "size": 62740,
+        "sha256": "7d1256c00c7c55c7e4b7f25b7ab8e293988825d437a9249ed456717db101e1f7"
       },
       {
         "path": "main.js",
@@ -73,10 +78,12 @@
     "connection": {
       "mode": "automatic-localhost-with-one-click-retry",
       "endpoint": "ws://localhost:17777/uxp",
-      "sharedToken": false,
-      "available": true,
+      "userManagedToken": false,
+      "mutualAuthentication": "protocol-v3-hmac-per-user-uxp-storage",
+      "available": false,
+      "verificationStatus": "pending-revalidation-after-authentication-upgrade",
       "hostVersion": "26.3.2",
-      "hostSessionId": "11aea1ec-bf82-4db1-a77f-11cce576c97c",
+      "lastPreUpgradeHostSessionId": "11aea1ec-bf82-4db1-a77f-11cce576c97c",
       "capabilityFingerprint": "3ad423e187ccb155afd139a8181bdc3093de357fb183d7505b4a00e1e3c3b17e"
     },
     "scaleObservations": [

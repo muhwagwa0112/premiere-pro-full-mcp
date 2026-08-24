@@ -1,6 +1,7 @@
 const ppro = require("premierepro");
 const uxp = require("uxp");
 const API_CATALOG = require("./api-catalog.cjs");
+const { AUTH_FILE_NAME, authenticationTranscript, constantTimeHexEqual, hmacSha256Hex, randomHex } = require("./auth.cjs");
 
 const CAPABILITIES = [
   "host.inspect", "project.inspect", "sequence.inspect", "project.save", "project.close_disposable", "project.checkpoint", "captions.inspect",
@@ -20,12 +21,37 @@ let handleCounter = 0;
 let socket = null;
 let connectedSessionId = null;
 let reconnectTimer = null;
+let bridgeIdentityPromise = null;
 let liveProbe = { status: "not_run", availableRoots: 0, unavailableRoots: [], probedRootMembers: 0, unavailableRootMembers: [] };
 
 function status(message, kind) {
   const element = document.getElementById("status");
   element.textContent = message;
   element.className = kind || "";
+}
+
+async function bridgeIdentity() {
+  if (bridgeIdentityPromise) return bridgeIdentityPromise;
+  bridgeIdentityPromise = (async () => {
+    const localFileSystem = uxp.storage.localFileSystem;
+    const dataFolder = await localFileSystem.getDataFolder();
+    let keyFile;
+    try { keyFile = await dataFolder.getEntry(AUTH_FILE_NAME); }
+    catch (_) { keyFile = await dataFolder.createFile(AUTH_FILE_NAME, { overwrite: true }); }
+    let secret = "";
+    try { secret = String(await keyFile.read()).trim().toLowerCase(); } catch (_) { secret = ""; }
+    if (!/^[a-f0-9]{64}$/.test(secret)) {
+      secret = randomHex(32);
+      await keyFile.write(secret);
+    }
+    const authFilePath = localFileSystem.getNativePath(keyFile);
+    if (typeof authFilePath !== "string" || !authFilePath) throw new Error("UXP authentication data path is unavailable");
+    return { authFilePath, secret };
+  })().catch((error) => {
+    bridgeIdentityPromise = null;
+    throw error;
+  });
+  return bridgeIdentityPromise;
 }
 
 function hash(input) {
@@ -741,7 +767,7 @@ async function execute(operation, args, expectedRevision) {
 }
 
 async function handleCommand(message) {
-  const response = { type: "response", protocolVersion: 1, requestId: message.requestId, ok: false, hostVersion: uxp.host.version };
+  const response = { type: "response", protocolVersion: 1, requestId: message.requestId, sessionId: connectedSessionId, ok: false, hostVersion: uxp.host.version };
   try {
     if (!CAPABILITIES.includes(message.operation)) throw Object.assign(new Error("Operation was not advertised"), { code: "UXP_CAPABILITY_UNAVAILABLE" });
     if (message.operation === "project.checkpoint") validateCheckpointBinding(message);
@@ -761,26 +787,47 @@ function validateCheckpointBinding(message) {
   if (!internal || (internal.phase !== "inspect" && internal.phase !== "save") || internal.planHash !== message.planHash || JSON.stringify(internal.routeBinding) !== JSON.stringify(binding)) throw Object.assign(new Error("Checkpoint internal route binding or phase does not match the execution request"), { code: "UXP_CHECKPOINT_BINDING_MISMATCH" });
 }
 
-function connect() {
+async function connect() {
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
   }
   if (socket) socket.close();
   status("Connecting…");
+  let identity;
+  try { identity = await bridgeIdentity(); }
+  catch (_) {
+    status("Local authentication setup failed. Retrying…", "error");
+    reconnectTimer = setTimeout(() => { reconnectTimer = null; void connect(); }, 2000);
+    return;
+  }
   const candidate = new WebSocket("ws://localhost:17777/uxp");
   socket = candidate;
+  const clientNonce = randomHex(32);
+  let serverNonce = null;
+  let authenticated = false;
   candidate.addEventListener("open", () => {
     if (socket !== candidate) return;
-    liveProbe = probeCatalog();
-    candidate.send(JSON.stringify({ type: "connect", protocolVersion: 2, hostVersion: uxp.host.version, uxpVersion: uxp.versions && uxp.versions.uxp || "unknown", capabilities: CAPABILITIES, apiFingerprint: API_CATALOG.fingerprint, apiCounts: API_CATALOG.counts, apiProbe: liveProbe }));
+    candidate.send(JSON.stringify({ type: "hello", protocolVersion: 3, authFilePath: identity.authFilePath, clientNonce, apiFingerprint: API_CATALOG.fingerprint }));
   });
   candidate.addEventListener("message", (event) => {
     if (socket !== candidate) return;
     let message;
     try { message = JSON.parse(event.data); } catch (_) { return; }
-    if (message.type === "connected" && message.protocolVersion === 2) { connectedSessionId = typeof message.sessionId === "string" ? message.sessionId : null; status(`Connected\nPremiere ${uxp.host.version}\n${API_CATALOG.counts.members} generated API members`, "connected"); }
-    else if (message.type === "command") void handleCommand(message);
+    if (message.type === "challenge" && message.protocolVersion === 3 && typeof message.serverNonce === "string" && typeof message.serverProof === "string") {
+      const expected = hmacSha256Hex(identity.secret, authenticationTranscript("server", clientNonce, message.serverNonce, API_CATALOG.fingerprint));
+      if (!constantTimeHexEqual(expected, message.serverProof)) { candidate.close(1008, "Local server authentication failed"); return; }
+      serverNonce = message.serverNonce;
+      liveProbe = probeCatalog();
+      candidate.send(JSON.stringify({ type: "connect", protocolVersion: 3, clientProof: hmacSha256Hex(identity.secret, authenticationTranscript("client", clientNonce, serverNonce, API_CATALOG.fingerprint)), hostVersion: uxp.host.version, uxpVersion: uxp.versions && uxp.versions.uxp || "unknown", capabilities: CAPABILITIES, apiFingerprint: API_CATALOG.fingerprint, apiCounts: API_CATALOG.counts, apiProbe: liveProbe }));
+    } else if (message.type === "connected" && message.protocolVersion === 3 && serverNonce) {
+      connectedSessionId = typeof message.sessionId === "string" ? message.sessionId : null;
+      authenticated = !!connectedSessionId;
+      if (authenticated) status(`Connected\nPremiere ${uxp.host.version}\n${API_CATALOG.counts.members} generated API members`, "connected");
+    } else if (message.type === "command") {
+      if (!authenticated || !connectedSessionId || message.sessionId !== connectedSessionId) { candidate.close(1008, "Authenticated session required"); return; }
+      void handleCommand(message);
+    }
   });
   candidate.addEventListener("close", () => {
     if (socket !== candidate) return;
@@ -806,5 +853,5 @@ function connect() {
   });
 }
 
-document.getElementById("connect").addEventListener("click", connect);
+document.getElementById("connect").addEventListener("click", () => void connect());
 void connect();

@@ -6,7 +6,7 @@
 - [x] MIT license, Ko-fi link, Funding configuration, security policy, issue forms, and current release links are present.
 - [x] Full-history and final-artifact secret/PII scan reports no credential, private key, personal path, project/media name, or personal email.
 - [x] `npm audit --omit=dev --audit-level=high` and .NET transitive vulnerability checks pass.
-- [x] `npm run check` passes all 33 Vitest files / 197 tests; the Windows UI agent passes all 36 tests.
+- [x] `npm run check` passes all 33 Vitest files / 200 tests; the Windows UI agent passes all 36 tests.
 - [x] Support and feature registry regeneration/checks pass for 51 public actions and 150 feature records.
 - [x] MCP smoke, release-security tests, the 761-member UXP plan, and disposable fixture plan pass.
 - [x] The final live ledger contains all 761 UXP IDs and does not regress below 281 deterministic successes; failures remain explicit and fail closed.
@@ -15,7 +15,7 @@
 - [x] The CCX is packaged through Adobe UXP Developer Tool (not `Build-Ccx.ps1`) and installed through Creative Cloud Desktop; the panel is visible at minimum, docked, floating, and scaled layouts.
   Adobe UPIA 8.5.0.13 now installs the UDT-produced v0.3.0 CCX and lists it as enabled for
   Premiere Pro 26.3.2. Premiere's UXP menu opened the exact installed plug-in; it automatically
-  established the token-free local session and exposed its Connect retry control in a 340x326 outer
+  established the automatic local session and exposed its Connect retry control in a 340x326 outer
   / 324x287 client window at 96 DPI, with an exact 320x260 nested UXP content view matching the
   manifest minimum. At 125% Windows scale, Premiere reported 120 DPI and the same installed panel
   retained its exact 320x260 content view with the retry control and named panel tab present. The

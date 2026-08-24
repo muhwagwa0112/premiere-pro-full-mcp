@@ -8,7 +8,7 @@ media was used.
 
 ## v0.3 release gates
 
-- `npm run check` covers bridge syntax, TypeScript, 33 Vitest files / 197 tests, and the bundle build.
+- `npm run check` covers bridge syntax, TypeScript, 33 Vitest files / 200 tests, and the bundle build.
 - The native Windows agent has 36 tests. The generated support matrix contains 51 public actions and
   the broader feature registry contains 150 records.
 - The plan and live UXP ledgers account for all 761 generated members. The live catalog fingerprint
@@ -28,8 +28,8 @@ media was used.
   registered semantic controls in this host state, so it proves transport fail-closed behavior and
   does not establish broad UI automation coverage.
 - The exact v0.3 UXP source was packaged with Adobe UXP Developer Tool and installed by Adobe UPIA.
-  Opening the installed panel established its token-free automatic connection over the exact
-  `file://` Origin allowlist and reported 761 members,
+  Opening the installed panel established its automatic connection over the exact `file://` Origin
+  allowlist and reported 761 members,
   91 containers, 69 roots, and fingerprint
   `3ad423e187ccb155afd139a8181bdc3093de357fb183d7505b4a00e1e3c3b17e`.
 - Interactive exact-plan approvals retained the same `operationId`, `planHash`, route, session, and
@@ -58,11 +58,11 @@ codes only; it does not record returned values, messages, absolute paths, or sec
 The UDT-produced v0.3.0 CCX passed manifest/identity validation and UDT developer loading. After the
 stale v0.2.0 installation was removed, Adobe Unified Plugin Installer Agent 8.5.0.13 installed the
 same CCX successfully and listed `Premiere Pro Full MCP Bridge` v0.3.0 as enabled for Premiere Pro
-26.3.2. All six installed files matched the CCX entries byte-for-byte by SHA-256. Adobe UDT IPC
+26.3.2. All seven installed files matched the CCX entries byte-for-byte by SHA-256. Adobe UDT IPC
 the Premiere **Window > UXP Plugins** menu opened that exact installed plug-in. Premiere's
 accessibility tree exposed the UXP panel, its Connect retry button, and the named panel tab. The MCP
 capability response reported `uxp.available: true`, host version 26.3.2, a live session ID, and the
-exact generated catalog fingerprint without a shared token. At 100% Windows scale, the floating
+exact generated catalog fingerprint without user token entry or pairing UI. At 100% Windows scale, the floating
 window measured 340x326 outer / 324x287 client pixels at 96 DPI. At 125% Windows scale, Premiere
 reported 120 DPI and the same installed panel measured 338x324 outer pixels with an exact 320x260
 nested UXP content view. The Connect retry control and named panel tab remained present at both
