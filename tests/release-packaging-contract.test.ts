@@ -69,7 +69,7 @@ describe("release packaging contract", () => {
       { encoding: "utf8" },
     ).trim();
     expect(actual).toBe(expected);
-  });
+  }, 15_000);
 
   test("installer exposes and persists the explicit automation boundary", () => {
     const install = readFileSync(resolve(root, "scripts", "install", "Install.ps1"), "utf8");

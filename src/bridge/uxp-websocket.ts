@@ -106,7 +106,11 @@ export class UxpWebSocketAdapter implements BackendAdapter {
 
   async start(): Promise<void> {
     if (this.#server) return;
-    this.#authenticationIdentity = await this.#provisionAuthentication();
+    const provisionedIdentity = await this.#provisionAuthentication();
+    this.#authenticationIdentity = {
+      ...provisionedIdentity,
+      authFilePath: await realpath(provisionedIdentity.authFilePath),
+    };
     this.#apiFingerprint = (await loadAdobeApiCatalog()).fingerprint;
     await new Promise<void>((resolve, reject) => {
       const server = new WebSocketServer({

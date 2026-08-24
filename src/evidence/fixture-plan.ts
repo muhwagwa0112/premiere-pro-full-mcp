@@ -125,8 +125,9 @@ export async function prepareDisposableFixture(input: { repositoryFixturesRoot: 
   if (!isWithin(fixturesRoot, source)) throw new Error("Fixture source resolves outside the repository fixtures directory");
   const fixtureDigest = await sha256File(source);
   const runId = input.runId ?? randomUUID();
-  const temporaryBase = resolve(tmpdir());
-  const workspace = await mkdtemp(join(temporaryBase, "premiere-mcp-live-fixture-"));
+  const temporaryBase = await realpath(resolve(tmpdir()));
+  const allocatedWorkspace = await mkdtemp(join(temporaryBase, "premiere-mcp-live-fixture-"));
+  const workspace = await realpath(allocatedWorkspace);
   if (!isWithin(temporaryBase, workspace)) throw new Error("Fixture workspace was not allocated below the OS temporary directory");
   const workingProject = join(workspace, `${runId}-working.prproj`);
   const restoreProject = join(workspace, `${runId}-restore.prproj`);
@@ -144,15 +145,17 @@ export async function prepareDisposableFixture(input: { repositoryFixturesRoot: 
 export async function allocateGeneratedFixture(input: { runId?: string; projectName: string }): Promise<UnsealedGeneratedFixture> {
   if (!/^[A-Za-z0-9._-]+\.prproj$/i.test(input.projectName)) throw new Error("Generated fixture project name must be a simple .prproj filename");
   const runId = input.runId ?? randomUUID();
-  const temporaryBase = resolve(tmpdir());
-  const workspace = await mkdtemp(join(temporaryBase, "premiere-mcp-live-fixture-"));
+  const temporaryBase = await realpath(resolve(tmpdir()));
+  const allocatedWorkspace = await mkdtemp(join(temporaryBase, "premiere-mcp-live-fixture-"));
+  const workspace = await realpath(allocatedWorkspace);
   if (!isWithin(temporaryBase, workspace)) throw new Error("Fixture workspace was not allocated below the OS temporary directory");
   return { runId, workspace, workingProject: join(workspace, `${runId}-working-${input.projectName}`), restoreProject: join(workspace, `${runId}-restore-${input.projectName}`) };
 }
 
 export async function sealGeneratedFixture(generated: UnsealedGeneratedFixture): Promise<PreparedFixture> {
   const workspace = await realpath(generated.workspace);
-  if (!isWithin(resolve(tmpdir()), workspace)) throw new Error("Generated fixture is not inside OS temporary storage");
+  const temporaryBase = await realpath(resolve(tmpdir()));
+  if (!isWithin(temporaryBase, workspace)) throw new Error("Generated fixture is not inside OS temporary storage");
   await assertRegularNonReparseFile(generated.workingProject);
   const fixtureDigest = await sha256File(generated.workingProject);
   try {
@@ -167,7 +170,7 @@ export async function sealGeneratedFixture(generated: UnsealedGeneratedFixture):
 
 export async function verifyPristineRestore(prepared: PreparedFixture): Promise<{ verified: true; fixtureDigest: string; restoredBytes: number }> {
   const workspace = await realpath(prepared.workspace);
-  const temporaryBase = resolve(tmpdir());
+  const temporaryBase = await realpath(resolve(tmpdir()));
   if (!isWithin(temporaryBase, workspace)) throw new Error("Restore project is not inside an OS-temporary fixture workspace");
   const restored = await realpath(prepared.restoreProject);
   if (!isWithin(workspace, restored) || basename(restored) !== basename(prepared.restoreProject)) throw new Error("Restore project escaped its fixture workspace");
@@ -177,8 +180,8 @@ export async function verifyPristineRestore(prepared: PreparedFixture): Promise<
 }
 
 export async function cleanupDisposableFixture(prepared: PreparedFixture): Promise<void> {
-  const temporaryBase = resolve(tmpdir());
-  const workspace = resolve(prepared.workspace);
+  const temporaryBase = await realpath(resolve(tmpdir()));
+  const workspace = await realpath(resolve(prepared.workspace));
   if (!isWithin(temporaryBase, workspace) || !basename(workspace).startsWith("premiere-mcp-live-fixture-")) throw new Error("Refusing to remove a non-fixture workspace");
   await rm(workspace, { recursive: true, force: true });
 }
