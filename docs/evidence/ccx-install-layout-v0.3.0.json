@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "recordedAt": "2026-08-24T23:04:00+09:00",
+  "recordedAt": "2026-08-24T23:15:06+09:00",
   "releaseVersion": "0.3.0",
   "host": {
     "application": "Adobe Premiere Pro",
@@ -95,13 +95,30 @@
         "uxpContent": { "width": 320, "height": 260 },
         "primaryControlsVisible": true
       }
-    ]
+    ],
+    "dockedObservation": {
+      "windowsScalePercent": 125,
+      "windowDpi": 120,
+      "topLevelPremiereWindowCount": 1,
+      "separateFloatingPanelWindow": false,
+      "accessibilityHierarchy": [
+        "TopLevelWindow",
+        "WorkspaceFrame",
+        "TabPanelContainer",
+        "dvauxpuiUXPPanel"
+      ],
+      "primaryControlsObserved": [
+        "connect",
+        "panel-tab"
+      ],
+      "panelTabObserved": "Premiere Pro Full MCP"
+    }
   },
   "gates": {
     "installation": "passed",
     "minimumContent": "passed",
     "floating": "passed",
-    "docked": "pending",
+    "docked": "passed",
     "non100PercentWindowsScale": "passed"
   }
 }

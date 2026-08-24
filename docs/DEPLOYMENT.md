@@ -22,7 +22,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Build-Release.ps1 
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Verify-Release.ps1
 ```
 
-`Build-Release.ps1` has no CCX fallback: `-CcxPath` is mandatory and is checked before release staging. `npm run uxp:dev-archive` creates only a non-installable `.zip` for source inspection/CI and refuses a `.ccx` output name. The release build also refuses a dirty worktree, mismatched private/public key, wrong repository, wrong CCX filename or identity, generated UXP bootstrap, or failed MCP/native build. The signed manifest binds the exact commit, repository, tag, version, platform, architecture, ZIP, CCX, SBOM, and notices. UDT provenance is a release-operator attestation; ZIP structure alone cannot prove which packager produced it.
+`Build-Release.ps1` has no CCX fallback: `-CcxPath` is mandatory and is checked before release staging. `npm run uxp:dev-archive` creates only a non-installable `.zip` for source inspection/CI and refuses a `.ccx` output name. The release build rejects a development ZIP renamed to `.ccx` unless every file retains the pinned regular-file attributes produced by the validated Adobe UDT package path. It also refuses a dirty worktree, mismatched private/public key, wrong repository, wrong CCX filename or identity, generated UXP bootstrap, or failed MCP/native build. The signed manifest binds the exact commit, repository, tag, version, platform, architecture, ZIP, CCX, SBOM, and notices. The UDT attribute check is a fail-closed packaging contract, while the retained UDT/UPIA installation evidence establishes the actual packager and installed identity.
 
 The current v0.3 payload also includes the generated 51-action backend support matrix, 150-entry
 feature registry, semantic-action and connector-boundary guides, durable-job runtime, and
@@ -53,6 +53,20 @@ The updater is pinned to `muhwagwa0112/premiere-pro-full-mcp`. It downloads the 
 4. Complete independent security and completion review.
 5. Push the clean noreply-authored history, create `v0.3.0`, and upload every bound asset.
 6. Verify the repository and download from a logged-out browser and reinstall the downloaded ZIP.
+
+Upload exactly these ten versioned files; never glob the `artifacts` directory, which may also hold
+older releases and local validation captures:
+
+1. `premiere-pro-full-mcp-v<version>-windows.zip`
+2. `premiere-pro-full-mcp-v<version>-windows.zip.sha256`
+3. `premiere-pro-full-mcp-v<version>-windows.zip.manifest.json`
+4. `premiere-pro-full-mcp-v<version>-windows.zip.manifest.json.sig`
+5. `premiere-pro-full-mcp-v<version>.ccx`
+6. `premiere-pro-full-mcp-v<version>.ccx.sha256`
+7. `premiere-pro-full-mcp-v<version>.spdx.json`
+8. `premiere-pro-full-mcp-v<version>.spdx.json.sha256`
+9. `premiere-pro-full-mcp-v<version>-third-party-notices.txt`
+10. `premiere-pro-full-mcp-v<version>-third-party-notices.txt.sha256`
 
 `Verify-Release.ps1` safely expands the final ZIP, validates every signed asset binding, runs the
 pinned Adobe `ZXPSignCmd -verify` against packaged and installed CEP directories, compares the

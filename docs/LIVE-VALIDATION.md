@@ -67,8 +67,11 @@ window measured 340x326 outer / 324x287 client pixels at 96 DPI. At 125% Windows
 reported 120 DPI and the same installed panel measured 338x324 outer pixels with an exact 320x260
 nested UXP content view. The Connect retry control and named panel tab remained present at both
 scales. The retained file-hash and window-geometry record is
-`docs/evidence/ccx-install-layout-v0.3.0.json`. A docked observation remains blocking, so the complete
-minimum/docked/floating/scaled layout gate is not yet claimed as successful.
+`docs/evidence/ccx-install-layout-v0.3.0.json`. At 125% scale, the same installed panel was then
+docked into Premiere's main workspace. The accessibility hierarchy placed `dvauxpuiUXPPanel` and
+its Connect retry button under the main `WorkspaceFrame` / `TabPanelContainer`, alongside the named
+`Premiere Pro Full MCP` tab, with no separate floating panel window. The complete
+minimum/docked/floating/scaled layout gate therefore passed.
 
 The live fixture above verifies only the listed interactive create/import/sequence/export/save paths.
 It does not promote trusted-unattended enrollment, durable jobs, checkpoint workflows, disposable

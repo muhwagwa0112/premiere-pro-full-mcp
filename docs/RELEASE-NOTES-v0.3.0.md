@@ -47,8 +47,10 @@ At 100% Windows scale, the floating packaged panel exposed every primary control
 324x287 client pixels and 96 DPI, including an exact 320x260 nested UXP content view matching the
 manifest minimum. At 125% Windows scale, Premiere reported 120 DPI and the same installed panel
 retained an exact 320x260 content view with the retry control and named panel tab present. The
-comparison is retained in `docs/evidence/ccx-install-layout-v0.3.0.json`. A docked observation remains
-required and is not represented as a passed release gate.
+comparison is retained in `docs/evidence/ccx-install-layout-v0.3.0.json`. At 125% scale, the panel
+was also docked into Premiere's main workspace; its panel element and retry control were nested
+under the main `WorkspaceFrame` / `TabPanelContainer` beside the named panel tab, and no separate
+floating panel window remained. The minimum/docked/floating/scaled layout gate passed.
 
 ## Assets
 
