@@ -18,12 +18,12 @@ internal static class UiaWorkerEntry
             var result = request.Operation switch
             {
                 "premiere.window.inspect" => automation.InspectWindow(),
-                "premiere.controls.catalog" => automation.CatalogControls(
-                    request.Args.Deserialize<ControlCatalogArgs>(UiaWorkerJson.Options)
-                    ?? throw new InvalidDataException("Catalog arguments are required.")),
-                "ui.control.invoke" => automation.InvokeControl(
-                    request.Args.Deserialize<ControlInvokeArgs>(UiaWorkerJson.Options)
-                    ?? throw new InvalidDataException("Invoke arguments are required.")),
+                "premiere.adapters.catalog" => automation.CatalogAdapters(
+                    request.Args.Deserialize<SemanticAdapterCatalogArgs>(UiaWorkerJson.Options)
+                    ?? throw new InvalidDataException("Semantic adapter catalog arguments are required.")),
+                "premiere.adapter.invoke" => automation.InvokeAdapter(
+                    request.Args.Deserialize<SemanticAdapterInvokeArgs>(UiaWorkerJson.Options)
+                    ?? throw new InvalidDataException("Semantic adapter invocation arguments are required.")),
                 _ => throw new InvalidDataException("UI worker operation is not allowlisted.")
             };
             response = UiaWorkerResponse.Success(result);
@@ -32,6 +32,7 @@ internal static class UiaWorkerEntry
         catch (PremiereNotForegroundException ex) { response = UiaWorkerResponse.Failure("premiere_not_foreground", ex.Message); }
         catch (ControlNotFoundException ex) { response = UiaWorkerResponse.Failure("control_not_found", ex.Message); }
         catch (ControlActionException ex) { response = UiaWorkerResponse.Failure("control_action_failed", ex.Message); }
+        catch (AutomationOperationException ex) { response = UiaWorkerResponse.Failure(ex.Code, ex.Message, ex.Retryable); }
         catch (Exception ex) when (ex is InvalidDataException or JsonException)
         {
             response = UiaWorkerResponse.Failure("worker_invalid_request", "UI worker request was invalid.");

@@ -1,12 +1,13 @@
 # Premiere MCP Windows UI Agent
 
-Local Windows-only fallback agent for Premiere Pro controls that are not exposed by UXP or ExtendScript. It intentionally exposes only three operations over a current-user-only named pipe:
+Local Windows-only fallback agent for Premiere Pro workflows that are not exposed by UXP or ExtendScript. It intentionally exposes only four operations over a current-user-only named pipe:
 
 - `health`
 - `premiere.window.inspect`
-- `ui.control.invoke`
+- `premiere.adapters.catalog`
+- `premiere.adapter.invoke`
 
-The agent does not accept arbitrary selectors, coordinates, clicks, scripts, or shell commands. Mutating control actions require Adobe Premiere Pro to be the foreground process. Targets must use an exact UI Automation `automationId` and allowlisted `controlType`; ambiguous matches are rejected.
+The agent does not accept arbitrary selectors, automation IDs, coordinates, clicks, scripts, or shell commands. Mutations name only a fixed adapter ID and version returned by `premiere.adapters.catalog`. Each adapter is compiled into the agent with an exact ancestor/target chain, allowed host build and locale, and a postcondition verifier. A mutation is rejected if the foreground window, host build, locale, targeted UI fingerprint, or postcondition differs.
 
 ## Build and run
 
@@ -32,13 +33,14 @@ Response:
 {"protocolVersion":1,"requestId":"r1","ok":true,"result":{"status":"ok"}}
 ```
 
-Semantic invocation example:
+Semantic adapter discovery and invocation:
 
 ```json
-{"protocolVersion":1,"requestId":"r2","token":"...","operation":"ui.control.invoke","args":{"automationId":"knownButtonId","controlType":"Button","action":"invoke"}}
+{"protocolVersion":1,"requestId":"r2","token":"...","operation":"premiere.adapters.catalog","args":{}}
+{"protocolVersion":1,"requestId":"r3","token":"...","operation":"premiere.adapter.invoke","args":{"adapterId":"premiere.workspace.editing","adapterVersion":1,"hostBuild":"26.3.2.1","locale":"ko-KR","uiFingerprint":"sha256:..."}}
 ```
 
-Allowed control types are `Button`, `MenuItem`, `CheckBox`, `RadioButton`, `ListItem`, and `TabItem`. Allowed actions are `invoke`, `toggle`, and `select`; the target must support the matching UI Automation pattern.
+There is no raw UI Automation catalog or generic invoke operation. The current registry uses targeted `FindFirst` lookups along a compiled ancestor chain and exposes only adapters that match the live foreground UI.
 
 Run tests with:
 

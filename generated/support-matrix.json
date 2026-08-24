@@ -897,6 +897,118 @@
       ]
     },
     {
+      "actionId": "media.proxy.attach",
+      "domain": "media",
+      "declaredSupport": "implemented_unverified",
+      "preferredBackends": [
+        "uxp"
+      ],
+      "backends": [
+        {
+          "backend": "local",
+          "declaredPreferred": false,
+          "handlerState": "not_implemented",
+          "handler": null,
+          "evidence": null,
+          "mismatches": []
+        },
+        {
+          "backend": "uxp",
+          "declaredPreferred": true,
+          "handlerState": "implemented_unverified",
+          "handler": "execute",
+          "evidence": {
+            "basis": "code_inspection",
+            "source": "uxp-plugin/main.cjs",
+            "sourceFragment": "if (operation === \"media.proxy.attach\")",
+            "liveEvidenceStatus": "not_run"
+          },
+          "mismatches": []
+        },
+        {
+          "backend": "cep",
+          "declaredPreferred": false,
+          "handlerState": "not_implemented",
+          "handler": null,
+          "evidence": null,
+          "mismatches": []
+        },
+        {
+          "backend": "qe",
+          "declaredPreferred": false,
+          "handlerState": "not_implemented",
+          "handler": null,
+          "evidence": null,
+          "mismatches": []
+        },
+        {
+          "backend": "ui",
+          "declaredPreferred": false,
+          "handlerState": "not_implemented",
+          "handler": null,
+          "evidence": null,
+          "mismatches": []
+        }
+      ],
+      "mismatches": []
+    },
+    {
+      "actionId": "media.relink",
+      "domain": "media",
+      "declaredSupport": "implemented_unverified",
+      "preferredBackends": [
+        "uxp"
+      ],
+      "backends": [
+        {
+          "backend": "local",
+          "declaredPreferred": false,
+          "handlerState": "not_implemented",
+          "handler": null,
+          "evidence": null,
+          "mismatches": []
+        },
+        {
+          "backend": "uxp",
+          "declaredPreferred": true,
+          "handlerState": "implemented_unverified",
+          "handler": "execute",
+          "evidence": {
+            "basis": "code_inspection",
+            "source": "uxp-plugin/main.cjs",
+            "sourceFragment": "if (operation === \"media.relink\")",
+            "liveEvidenceStatus": "not_run"
+          },
+          "mismatches": []
+        },
+        {
+          "backend": "cep",
+          "declaredPreferred": false,
+          "handlerState": "not_implemented",
+          "handler": null,
+          "evidence": null,
+          "mismatches": []
+        },
+        {
+          "backend": "qe",
+          "declaredPreferred": false,
+          "handlerState": "not_implemented",
+          "handler": null,
+          "evidence": null,
+          "mismatches": []
+        },
+        {
+          "backend": "ui",
+          "declaredPreferred": false,
+          "handlerState": "not_implemented",
+          "handler": null,
+          "evidence": null,
+          "mismatches": []
+        }
+      ],
+      "mismatches": []
+    },
+    {
       "actionId": "plugin.catalog",
       "domain": "plugins",
       "declaredSupport": "implemented_unverified",
@@ -1014,6 +1126,124 @@
       "mismatches": [
         "preferred_backend_without_handler"
       ]
+    },
+    {
+      "actionId": "project.checkpoint",
+      "domain": "project",
+      "declaredSupport": "implemented_unverified",
+      "preferredBackends": [
+        "uxp",
+        "cep"
+      ],
+      "backends": [
+        {
+          "backend": "local",
+          "declaredPreferred": false,
+          "handlerState": "not_implemented",
+          "handler": null,
+          "evidence": null,
+          "mismatches": []
+        },
+        {
+          "backend": "uxp",
+          "declaredPreferred": true,
+          "handlerState": "implemented_unverified",
+          "handler": "execute",
+          "evidence": {
+            "basis": "code_inspection",
+            "source": "uxp-plugin/main.cjs",
+            "sourceFragment": "if (operation === \"project.checkpoint\")",
+            "liveEvidenceStatus": "not_run"
+          },
+          "mismatches": []
+        },
+        {
+          "backend": "cep",
+          "declaredPreferred": true,
+          "handlerState": "implemented_unverified",
+          "handler": "PPMCP.dispatch",
+          "evidence": {
+            "basis": "code_inspection",
+            "source": "cep-plugin/host.jsx",
+            "sourceFragment": "\"project.checkpoint\"",
+            "liveEvidenceStatus": "not_run"
+          },
+          "mismatches": []
+        },
+        {
+          "backend": "qe",
+          "declaredPreferred": false,
+          "handlerState": "not_implemented",
+          "handler": null,
+          "evidence": null,
+          "mismatches": []
+        },
+        {
+          "backend": "ui",
+          "declaredPreferred": false,
+          "handlerState": "not_implemented",
+          "handler": null,
+          "evidence": null,
+          "mismatches": []
+        }
+      ],
+      "mismatches": []
+    },
+    {
+      "actionId": "project.close_disposable",
+      "domain": "project",
+      "declaredSupport": "implemented_unverified",
+      "preferredBackends": [
+        "uxp"
+      ],
+      "backends": [
+        {
+          "backend": "local",
+          "declaredPreferred": false,
+          "handlerState": "not_implemented",
+          "handler": null,
+          "evidence": null,
+          "mismatches": []
+        },
+        {
+          "backend": "uxp",
+          "declaredPreferred": true,
+          "handlerState": "implemented_unverified",
+          "handler": "execute",
+          "evidence": {
+            "basis": "code_inspection",
+            "source": "uxp-plugin/main.cjs",
+            "sourceFragment": "if (operation === \"project.close_disposable\")",
+            "liveEvidenceStatus": "not_run"
+          },
+          "mismatches": []
+        },
+        {
+          "backend": "cep",
+          "declaredPreferred": false,
+          "handlerState": "not_implemented",
+          "handler": null,
+          "evidence": null,
+          "mismatches": []
+        },
+        {
+          "backend": "qe",
+          "declaredPreferred": false,
+          "handlerState": "not_implemented",
+          "handler": null,
+          "evidence": null,
+          "mismatches": []
+        },
+        {
+          "backend": "ui",
+          "declaredPreferred": false,
+          "handlerState": "not_implemented",
+          "handler": null,
+          "evidence": null,
+          "mismatches": []
+        }
+      ],
+      "mismatches": []
     },
     {
       "actionId": "project.create",
@@ -1241,6 +1471,62 @@
             "basis": "code_inspection",
             "source": "cep-plugin/host.jsx",
             "sourceFragment": "\"project.save\"",
+            "liveEvidenceStatus": "not_run"
+          },
+          "mismatches": []
+        },
+        {
+          "backend": "qe",
+          "declaredPreferred": false,
+          "handlerState": "not_implemented",
+          "handler": null,
+          "evidence": null,
+          "mismatches": []
+        },
+        {
+          "backend": "ui",
+          "declaredPreferred": false,
+          "handlerState": "not_implemented",
+          "handler": null,
+          "evidence": null,
+          "mismatches": []
+        }
+      ],
+      "mismatches": []
+    },
+    {
+      "actionId": "project.save_as",
+      "domain": "project",
+      "declaredSupport": "implemented_unverified",
+      "preferredBackends": [
+        "cep"
+      ],
+      "backends": [
+        {
+          "backend": "local",
+          "declaredPreferred": false,
+          "handlerState": "not_implemented",
+          "handler": null,
+          "evidence": null,
+          "mismatches": []
+        },
+        {
+          "backend": "uxp",
+          "declaredPreferred": false,
+          "handlerState": "not_implemented",
+          "handler": null,
+          "evidence": null,
+          "mismatches": []
+        },
+        {
+          "backend": "cep",
+          "declaredPreferred": true,
+          "handlerState": "implemented_unverified",
+          "handler": "PPMCP.dispatch",
+          "evidence": {
+            "basis": "code_inspection",
+            "source": "cep-plugin/host.jsx",
+            "sourceFragment": "\"project.save_as\"",
             "liveEvidenceStatus": "not_run"
           },
           "mismatches": []
@@ -1553,10 +1839,9 @@
     {
       "actionId": "timeline.clip.insert",
       "domain": "timeline",
-      "declaredSupport": "unsupported",
+      "declaredSupport": "implemented_unverified",
       "preferredBackends": [
-        "uxp",
-        "cep"
+        "uxp"
       ],
       "backends": [
         {
@@ -1570,22 +1855,23 @@
         {
           "backend": "uxp",
           "declaredPreferred": true,
-          "handlerState": "not_implemented",
-          "handler": null,
-          "evidence": null,
-          "mismatches": [
-            "preferred_backend_without_handler"
-          ]
+          "handlerState": "implemented_unverified",
+          "handler": "execute",
+          "evidence": {
+            "basis": "code_inspection",
+            "source": "uxp-plugin/main.cjs",
+            "sourceFragment": "if (operation === \"timeline.clip.insert\")",
+            "liveEvidenceStatus": "not_run"
+          },
+          "mismatches": []
         },
         {
           "backend": "cep",
-          "declaredPreferred": true,
+          "declaredPreferred": false,
           "handlerState": "not_implemented",
           "handler": null,
           "evidence": null,
-          "mismatches": [
-            "preferred_backend_without_handler"
-          ]
+          "mismatches": []
         },
         {
           "backend": "qe",
@@ -1604,9 +1890,7 @@
           "mismatches": []
         }
       ],
-      "mismatches": [
-        "preferred_backend_without_handler"
-      ]
+      "mismatches": []
     },
     {
       "actionId": "timeline.ripple_delete",
@@ -1725,9 +2009,65 @@
       ]
     },
     {
-      "actionId": "ui.catalog",
+      "actionId": "timeline.track.set_mute",
+      "domain": "timeline",
+      "declaredSupport": "implemented_unverified",
+      "preferredBackends": [
+        "uxp"
+      ],
+      "backends": [
+        {
+          "backend": "local",
+          "declaredPreferred": false,
+          "handlerState": "not_implemented",
+          "handler": null,
+          "evidence": null,
+          "mismatches": []
+        },
+        {
+          "backend": "uxp",
+          "declaredPreferred": true,
+          "handlerState": "implemented_unverified",
+          "handler": "execute",
+          "evidence": {
+            "basis": "code_inspection",
+            "source": "uxp-plugin/main.cjs",
+            "sourceFragment": "if (operation === \"timeline.track.set_mute\")",
+            "liveEvidenceStatus": "not_run"
+          },
+          "mismatches": []
+        },
+        {
+          "backend": "cep",
+          "declaredPreferred": false,
+          "handlerState": "not_implemented",
+          "handler": null,
+          "evidence": null,
+          "mismatches": []
+        },
+        {
+          "backend": "qe",
+          "declaredPreferred": false,
+          "handlerState": "not_implemented",
+          "handler": null,
+          "evidence": null,
+          "mismatches": []
+        },
+        {
+          "backend": "ui",
+          "declaredPreferred": false,
+          "handlerState": "not_implemented",
+          "handler": null,
+          "evidence": null,
+          "mismatches": []
+        }
+      ],
+      "mismatches": []
+    },
+    {
+      "actionId": "ui.adapter.catalog",
       "domain": "api",
-      "declaredSupport": "ui_fallback",
+      "declaredSupport": "implemented_unverified",
       "preferredBackends": [
         "ui"
       ],
@@ -1772,7 +2112,7 @@
           "evidence": {
             "basis": "code_inspection",
             "source": "src/bridge/ui-named-pipe.ts",
-            "sourceFragment": "\"premiere.controls.catalog\"",
+            "sourceFragment": "\"premiere.adapters.catalog\"",
             "liveEvidenceStatus": "not_run"
           },
           "mismatches": []
@@ -1781,9 +2121,9 @@
       "mismatches": []
     },
     {
-      "actionId": "ui.invoke",
+      "actionId": "ui.adapter.invoke",
       "domain": "api",
-      "declaredSupport": "ui_fallback",
+      "declaredSupport": "implemented_unverified",
       "preferredBackends": [
         "ui"
       ],
@@ -1828,7 +2168,7 @@
           "evidence": {
             "basis": "code_inspection",
             "source": "src/bridge/ui-named-pipe.ts",
-            "sourceFragment": "\"ui.control.invoke\"",
+            "sourceFragment": "\"premiere.adapter.invoke\"",
             "liveEvidenceStatus": "not_run"
           },
           "mismatches": []
@@ -2633,9 +2973,9 @@
     }
   ],
   "summary": {
-    "actionCount": 45,
-    "backendCellCount": 225,
-    "implementedHandlerCount": 46,
-    "mismatchCount": 16
+    "actionCount": 51,
+    "backendCellCount": 255,
+    "implementedHandlerCount": 54,
+    "mismatchCount": 15
   }
 }

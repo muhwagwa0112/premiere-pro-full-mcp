@@ -251,6 +251,24 @@ PPMCP.dispatch = function (requestJson) {
       var saved = project.save();
       return PPMCP.success(request, beforeRevision, { saved: saved !== false }, "committed_unverified", "ExtendScript save return; filesystem write not independently verified");
     }
+    if (request.operation === "project.save_as") {
+      if (!project) return PPMCP.failure(request.requestId, "CEP_NO_ACTIVE_PROJECT", "No active project", false);
+      if (!request.args.path || typeof request.args.path !== "string") return PPMCP.failure(request.requestId, "CEP_INVALID_PATH", "path is required", false);
+      var requestedSaveAsPath = File(request.args.path).fsName;
+      var savedAsFile = File(requestedSaveAsPath);
+      if (savedAsFile.exists) return PPMCP.failure(request.requestId, "CEP_SAVE_AS_OUTPUT_EXISTS", "Save As refused to overwrite an existing project file", false);
+      var saveAsDispatched = false;
+      try {
+        saveAsDispatched = true;
+        var savedAs = project.saveAs(requestedSaveAsPath);
+        var savedAsProject = app.project;
+        var activeSaveAsPath = savedAsProject ? File(String(savedAsProject.path || "")).fsName : "";
+        if (savedAs === false || !savedAsProject || String(activeSaveAsPath).toLowerCase() !== String(requestedSaveAsPath).toLowerCase() || !savedAsFile.exists || Number(savedAsFile.length || 0) <= 0) return PPMCP.failure(request.requestId, "CEP_SAVE_AS_NOT_VERIFIED", "Premiere did not save and activate the exact requested non-empty project file", false);
+        return PPMCP.success(request, beforeRevision, { saved: true, pathVerified: true, bytes: Number(savedAsFile.length), projectPath: activeSaveAsPath }, "verified", "active project path and non-empty project file readback");
+      } catch (saveAsError) {
+        return PPMCP.failure(request.requestId, saveAsDispatched ? "CEP_SAVE_AS_NOT_VERIFIED" : "CEP_SAVE_AS_FAILED", String(saveAsError), false);
+      }
+    }
     if (request.operation === "project.checkpoint") {
       var checkpoint = request.args && request.args.checkpoint;
       if (!checkpoint || (checkpoint.phase !== "inspect" && checkpoint.phase !== "save") || typeof checkpoint.planHash !== "string" || !/^sha256:[a-f0-9]{64}$/.test(checkpoint.planHash) || request.planHash !== checkpoint.planHash || !request.routeBinding || !checkpoint.routeBinding || checkpoint.routeBinding.backend !== "cep" || request.routeBinding.backend !== checkpoint.routeBinding.backend || String(checkpoint.routeBinding.hostVersion || "") !== String(app.version || "unknown") || String(request.routeBinding.hostVersion || "") !== String(checkpoint.routeBinding.hostVersion || "") || String(request.routeBinding.hostSessionId || "") !== String(checkpoint.routeBinding.hostSessionId || "") || String(request.routeBinding.capabilityFingerprint || "") !== String(checkpoint.routeBinding.capabilityFingerprint || "")) return PPMCP.failure(request.requestId, "CEP_CHECKPOINT_ROUTE_BINDING_INVALID", "Checkpoint requires the exact CEP route binding, phase, and plan hash", false);

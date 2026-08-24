@@ -99,13 +99,13 @@ public static class JsonLineProtocol
 public sealed class RequestDispatcher
 {
     internal const string AgentVersion = "1.0.0";
-    private const string CapabilityFingerprintMaterial = "premiere-mcp-windows-ui|protocol:1|health|premiere.window.inspect|premiere.controls.catalog|ui.control.invoke";
+    private const string CapabilityFingerprintMaterial = "premiere-mcp-windows-ui|protocol:1|semantic-adapters:1|health|premiere.window.inspect|premiere.adapters.catalog|premiere.adapter.invoke";
     private static readonly HashSet<string> AllowedOperations = new(StringComparer.Ordinal)
     {
         "health",
         "premiere.window.inspect",
-        "premiere.controls.catalog",
-        "ui.control.invoke"
+        "premiere.adapters.catalog",
+        "premiere.adapter.invoke"
     };
 
     private readonly string _token;
@@ -153,7 +153,7 @@ public sealed class RequestDispatcher
             return ProtocolResponse.Failure(request.RequestId, "operation_not_allowed", "Operation is not allowlisted.");
         }
 
-        if (request.Operation == "ui.control.invoke")
+        if (request.Operation == "premiere.adapter.invoke")
         {
             try
             {
@@ -179,11 +179,12 @@ public sealed class RequestDispatcher
                     agentVersion = AgentVersion,
                     agentSessionId = _agentSessionId,
                     capabilityFingerprint = _capabilityFingerprint,
+                    semanticAdapterProtocol = 1,
                     mutatingOperationsRequirePremiereForeground = true
                 },
                 "premiere.window.inspect" => _automation.InspectWindow(),
-                "premiere.controls.catalog" => _automation.CatalogControls(ParseCatalogArgs(request.Args)),
-                "ui.control.invoke" => _automation.InvokeControl(ParseInvokeArgs(request.Args)),
+                "premiere.adapters.catalog" => _automation.CatalogAdapters(ParseCatalogArgs(request.Args)),
+                "premiere.adapter.invoke" => _automation.InvokeAdapter(ParseInvokeArgs(request.Args)),
                 _ => throw new InvalidOperationException("Unreachable operation.")
             };
             return ProtocolResponse.Success(request.RequestId, result);
@@ -225,7 +226,7 @@ public sealed class RequestDispatcher
             !string.Equals(route.HostSessionId, _agentSessionId, StringComparison.Ordinal) ||
             !string.Equals(route.CapabilityFingerprint, _capabilityFingerprint, StringComparison.Ordinal))
             return ProtocolResponse.Failure(request.RequestId, "route_binding_mismatch", "UI agent session or capability binding changed before mutation dispatch.", true);
-        if (!string.Equals(request.BoundOperation, "ui.invoke", StringComparison.Ordinal) ||
+        if (!string.Equals(request.BoundOperation, "ui.adapter.invoke", StringComparison.Ordinal) ||
             string.IsNullOrWhiteSpace(request.EffectiveRequestDigest) ||
             !IsPlanHash(request.EffectiveRequestDigest) ||
             !FixedTimeTextEquals(request.EffectiveRequestDigest, EffectiveRequestDigest(request)))
@@ -238,16 +239,21 @@ public sealed class RequestDispatcher
 
     private static string EffectiveRequestDigest(ProtocolRequest request)
     {
-        // ui.control.invoke has a strict four-string argument schema, so this
-        // reproduces the server's sorted-key canonical JSON without accepting
-        // a broader cross-process serialization surface.
-        var values = request.Args.EnumerateObject().ToDictionary(property => property.Name, property => property.Value.GetString(), StringComparer.Ordinal);
-        var args = "{" + string.Join(",", values.OrderBy(entry => entry.Key, StringComparer.Ordinal)
-            .Select(entry => JsonSerializer.Serialize(entry.Key) + ":" + JsonSerializer.Serialize(entry.Value))) + "}";
+        var args = CanonicalJson(request.Args);
         var expectedRevision = request.ExpectedRevision is null ? "null" : JsonSerializer.Serialize(request.ExpectedRevision);
-        var material = "{\"args\":" + args + ",\"expectedRevision\":" + expectedRevision + ",\"operation\":\"ui.invoke\"}";
+        var material = "{\"args\":" + args + ",\"expectedRevision\":" + expectedRevision + ",\"operation\":\"ui.adapter.invoke\"}";
         return "sha256:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(material))).ToLowerInvariant();
     }
+
+    private static string CanonicalJson(JsonElement value) => value.ValueKind switch
+    {
+        JsonValueKind.Object => "{" + string.Join(",", value.EnumerateObject().OrderBy(property => property.Name, StringComparer.Ordinal)
+            .Select(property => JsonSerializer.Serialize(property.Name) + ":" + CanonicalJson(property.Value))) + "}",
+        JsonValueKind.Array => "[" + string.Join(",", value.EnumerateArray().Select(CanonicalJson)) + "]",
+        JsonValueKind.String => JsonSerializer.Serialize(value.GetString()),
+        JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False or JsonValueKind.Null => value.GetRawText(),
+        _ => throw new RequestValidationException("args contains an unsupported JSON value.")
+    };
 
     private static bool FixedTimeTextEquals(string left, string right)
     {
@@ -256,7 +262,7 @@ public sealed class RequestDispatcher
         return leftBytes.Length == rightBytes.Length && CryptographicOperations.FixedTimeEquals(leftBytes, rightBytes);
     }
 
-    private static ControlInvokeArgs ParseInvokeArgs(JsonElement args)
+    private static SemanticAdapterInvokeArgs ParseInvokeArgs(JsonElement args)
     {
         if (args.ValueKind != JsonValueKind.Object)
         {
@@ -265,30 +271,30 @@ public sealed class RequestDispatcher
 
         var allowedProperties = new HashSet<string>(StringComparer.Ordinal)
         {
-            "capability", "automationId", "controlType", "action"
+            "adapterId", "adapterVersion", "hostBuild", "locale", "uiFingerprint"
         };
         if (args.EnumerateObject().Any(property => !allowedProperties.Contains(property.Name)))
         {
             throw new RequestValidationException("args contains a property that is not allowlisted.");
         }
 
-        var capability = RequiredString(args, "capability", 64);
-        if (capability.Length != 64 || capability.Any(character => !Uri.IsHexDigit(character))) throw new RequestValidationException("capability must be a 64-character hexadecimal value issued by ui.catalog.");
-        var automationId = RequiredString(args, "automationId", 256);
-        var controlType = RequiredString(args, "controlType", 64);
-        var action = RequiredString(args, "action", 64);
-        return new ControlInvokeArgs(capability.ToLowerInvariant(), automationId, controlType, action);
+        var adapterId = RequiredString(args, "adapterId", 128);
+        if (adapterId.Any(character => !(char.IsAsciiLetterOrDigit(character) || character is '.' or '_' or '-')))
+            throw new RequestValidationException("adapterId must be a registered semantic identifier.");
+        if (!args.TryGetProperty("adapterVersion", out var versionValue) || !versionValue.TryGetInt32(out var adapterVersion) || adapterVersion is < 1 or > 1000)
+            throw new RequestValidationException("adapterVersion must be an integer between 1 and 1000.");
+        var hostBuild = RequiredString(args, "hostBuild", 64);
+        var locale = RequiredString(args, "locale", 35);
+        var fingerprint = RequiredString(args, "uiFingerprint", 71);
+        if (!IsPlanHash(fingerprint)) throw new RequestValidationException("uiFingerprint must be a SHA-256 fingerprint issued by ui.adapter.catalog.");
+        return new SemanticAdapterInvokeArgs(adapterId, adapterVersion, hostBuild, locale, fingerprint.ToLowerInvariant());
     }
 
-    private static ControlCatalogArgs ParseCatalogArgs(JsonElement args)
+    private static SemanticAdapterCatalogArgs ParseCatalogArgs(JsonElement args)
     {
         if (args.ValueKind != JsonValueKind.Object) throw new RequestValidationException("args must be an object.");
-        var allowedProperties = new HashSet<string>(StringComparer.Ordinal) { "offset", "limit" };
-        if (args.EnumerateObject().Any(property => !allowedProperties.Contains(property.Name))) throw new RequestValidationException("args contains a property that is not allowlisted.");
-        var offset = args.TryGetProperty("offset", out var offsetValue) && offsetValue.TryGetInt32(out var parsedOffset) ? parsedOffset : 0;
-        var limit = args.TryGetProperty("limit", out var limitValue) && limitValue.TryGetInt32(out var parsedLimit) ? parsedLimit : 200;
-        if (offset < 0 || limit is < 1 or > 500) throw new RequestValidationException("offset must be non-negative and limit must be between 1 and 500.");
-        return new ControlCatalogArgs(offset, limit);
+        if (args.EnumerateObject().Any()) throw new RequestValidationException("ui.adapter.catalog does not accept selectors or discovery parameters.");
+        return new SemanticAdapterCatalogArgs();
     }
 
     private static string RequiredString(JsonElement args, string property, int maxLength)

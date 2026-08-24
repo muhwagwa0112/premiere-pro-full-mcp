@@ -34,9 +34,16 @@ describe("CEP bridge vendored-code boundary", () => {
   it("keeps bounded CEP/QE readiness separate from foreground UI probing", async () => {
     const liveProbe = await readFile(join(process.cwd(), "scripts", "live-host-probe.mjs"), "utf8");
     const uiProbe = await readFile(join(process.cwd(), "scripts", "ui-live-probe.mjs"), "utf8");
-    expect(liveProbe).not.toContain('call("ui.catalog"');
+    expect(liveProbe).not.toContain('call("ui.adapter.catalog"');
     expect(liveProbe).toContain('{ root: "qe", query: "project", offset: 0, limit: 20 }');
-    expect(uiProbe).toContain('actionId: "ui.catalog"');
+    expect(uiProbe).toContain('actionId: "ui.adapter.catalog"');
     expect(uiProbe).toContain('failClosed: true');
+  });
+
+  it("refuses Save As overwrite and quarantines any post-dispatch verification failure", async () => {
+    const source = await readFile(join(process.cwd(), "cep-plugin", "host.jsx"), "utf8");
+    expect(source).toContain('CEP_SAVE_AS_OUTPUT_EXISTS');
+    expect(source).toContain('savedAsFile.exists');
+    expect(source).toContain('saveAsDispatched ? "CEP_SAVE_AS_NOT_VERIFIED"');
   });
 });

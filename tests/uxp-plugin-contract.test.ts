@@ -23,6 +23,29 @@ describe("UXP bridge deployment contract", () => {
     expect(source).toContain('exportSequenceFrame(context.sequence, frameTime, filename, directory');
   });
 
+  it("uses session-scoped typed handles and readback for semantic mutations", async () => {
+    const source = await readFile(resolve("uxp-plugin/main.cjs"), "utf8");
+    for (const operation of ["project.close_disposable", "media.relink", "media.proxy.attach", "timeline.track.set_mute", "timeline.clip.insert"]) {
+      expect(source).toContain(`"${operation}"`);
+      expect(source).toContain(`if (operation === "${operation}")`);
+    }
+    expect(source).toContain("handleRecord(reference.$ref, reference.session)");
+    expect(source).toContain('semanticHandle(args && args.clip, "ClipProjectItem", activeProjectIdentity)');
+    expect(source).toContain('semanticHandle(args && args.sequence, "Sequence", activeProjectIdentity)');
+    expect(source).toContain("currentMaterial !== record.semanticStateMaterial");
+    expect(source).toContain("record.projectIdentity !== activeProjectIdentity");
+    expect(source).toContain("clip.getMediaFilePath()");
+    expect(source).toContain("clip.getProxyPath()");
+    expect(source).toContain("track.isMuted()");
+    expect(source).toContain("context.project.executeTransaction(function (compoundAction)");
+    expect(source).toMatch(/context\.project\.lockedAccess\(function \(\) \{[\s\S]*compoundAction\.addAction\(editor\.createInsertProjectItemAction/);
+    expect(source).toContain("videoTrack.getTrackItems(ppro.Constants.TrackItemType.CLIP, false)");
+    expect(source).toContain("closedProjectIdentityAbsent");
+    expect(source).toContain("savedBeforeClose !== true");
+    for (const code of ["UXP_RELINK_NOT_VERIFIED", "UXP_PROXY_NOT_VERIFIED", "UXP_TRACK_MUTE_NOT_VERIFIED", "UXP_INSERT_NOT_VERIFIED", "UXP_PROJECT_CLOSE_NOT_VERIFIED"]) expect(source).toContain(code);
+    expect(source).not.toContain("querySelectorAll");
+  });
+
   it("accepts the host file picker's documented single file and defensive array result", async () => {
     const source = await readFile(resolve("uxp-plugin/main.cjs"), "utf8");
     expect(source).toContain("Array.isArray(selection) ? selection[0] : selection");

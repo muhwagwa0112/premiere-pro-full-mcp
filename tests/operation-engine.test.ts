@@ -50,6 +50,39 @@ async function confirm(engine: OperationEngine, approvalDirectory: string, reque
 }
 
 describe("operation routing", () => {
+  it("blocks a scoped semantic mutation before probing when expectedRevision is missing", async () => {
+    const adapter = new FakeAdapter("uxp", true, success);
+    const { engine } = await engineWith([adapter]);
+    const result = await engine.execute({ actionId: "timeline.track.set_mute", args: { sequence: { $ref: "session-handle-1", type: "Sequence", session: "session-1234", stateToken: "semantic-v1-session-token" }, mediaType: "video", trackIndex: 0, muted: true } });
+    expect(result).toMatchObject({ status: "blocked", error: { code: "STATE_TOKEN_REQUIRED", retryable: false } });
+    expect(adapter.supportCalls).toEqual([]);
+    expect(adapter.calls).toEqual([]);
+  });
+
+  it("quarantines a completed semantic mutation whose postcondition result is malformed", async () => {
+    const adapter = new FakeAdapter("uxp", true, (request) => ({ protocolVersion: 1, requestId: request.requestId, ok: true, dispatchState: "completed", result: { muted: true } }));
+    const { engine } = await engineWith([adapter]);
+    const result = await engine.execute({ actionId: "timeline.track.set_mute", expectedRevision: "revision-1", args: { sequence: { $ref: "session-handle-1", type: "Sequence", session: "session-1234", stateToken: "semantic-v1-session-token" }, mediaType: "video", trackIndex: 0, muted: true } });
+    expect(result).toMatchObject({ status: "reconciliation_required", error: { code: "POSTCONDITION_NOT_VERIFIED", retryable: false }, reconciliation: { phase: "original_dispatch" } });
+    expect(adapter.calls).toHaveLength(1);
+  });
+
+  it("quarantines a host postcondition failure after a semantic dispatch", async () => {
+    const adapter = new FakeAdapter("uxp", true, (request) => ({ protocolVersion: 1, requestId: request.requestId, ok: false, dispatchState: "completed", error: { code: "UXP_TRACK_MUTE_NOT_VERIFIED", message: "readback differed", retryable: false } }));
+    const { engine } = await engineWith([adapter]);
+    const result = await engine.execute({ actionId: "timeline.track.set_mute", expectedRevision: "revision-1", args: { sequence: { $ref: "session-handle-1", type: "Sequence", session: "session-1234", stateToken: "semantic-v1-session-token" }, mediaType: "video", trackIndex: 0, muted: true } });
+    expect(result).toMatchObject({ status: "reconciliation_required", error: { code: "POSTCONDITION_NOT_VERIFIED", retryable: false } });
+    expect(adapter.calls).toHaveLength(1);
+  });
+
+  it("reports success only after the registered semantic verifier accepts readback", async () => {
+    const adapter = new FakeAdapter("uxp", true, (request) => ({ protocolVersion: 1, requestId: request.requestId, ok: true, dispatchState: "completed", afterRevision: "revision-2", result: { stateVerified: true, mediaType: "video", trackIndex: 0, muted: true } }));
+    const { engine } = await engineWith([adapter]);
+    const result = await engine.execute({ actionId: "timeline.track.set_mute", expectedRevision: "revision-1", args: { sequence: { $ref: "session-handle-1", type: "Sequence", session: "session-1234", stateToken: "semantic-v1-session-token" }, mediaType: "video", trackIndex: 0, muted: true } });
+    expect(result).toMatchObject({ status: "succeeded", verification: { outcome: "verified", method: "server semantic verifier timeline.track.set_mute.v1" } });
+    expect(adapter.calls).toHaveLength(1);
+  });
+
   it("atomically rejects concurrent requests that reuse one operationId with different arguments", async () => {
     let release!: () => void;
     let entered!: () => void;
@@ -340,6 +373,43 @@ describe("operation routing", () => {
     expect(uxp.calls).toHaveLength(0);
   });
 
+  it("rejects project Save As when the destination already exists before confirmation or dispatch", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ppmcp-existing-save-as-"));
+    const outputPath = join(root, "existing.prproj");
+    await writeFile(outputPath, "existing", "utf8");
+    const cep = new FakeAdapter("cep", true, success);
+    const confirmations = new ConfirmationService(await mkdtemp(join(tmpdir(), "ppmcp-save-as-approval-")), testApprovalAuthenticator);
+    const lease = await SessionLease.createForCurrentProcess({ authenticate: testLeaseAuthenticator });
+    const engine = new OperationEngine([cep], {
+      ledger: new OperationLedger(await mkdtemp(join(tmpdir(), "ppmcp-save-as-ledger-"))),
+      authorizationService: new AuthorizationService({ mode: "interactive", lease, confirmations }),
+      pathPolicy: new PathPolicy([root]),
+    });
+    const result = await engine.execute({ actionId: "project.save_as", args: { path: outputPath }, expectedRevision: "active-project-revision" });
+    expect(result.status).toBe("failed");
+    expect(result.error?.code).toBe("REQUEST_REJECTED");
+    expect(result.error?.message).toContain("refused to overwrite");
+    expect(cep.calls).toHaveLength(0);
+  });
+
+  it("refuses disposable-project close for a normal approved user project path", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ppmcp-user-project-close-"));
+    const projectPath = join(root, "user.prproj");
+    await writeFile(projectPath, "user-project", "utf8");
+    const uxp = new FakeAdapter("uxp", true, success);
+    const confirmations = new ConfirmationService(await mkdtemp(join(tmpdir(), "ppmcp-close-approval-")), testApprovalAuthenticator);
+    const lease = await SessionLease.createForCurrentProcess({ authenticate: testLeaseAuthenticator });
+    const engine = new OperationEngine([uxp], {
+      ledger: new OperationLedger(await mkdtemp(join(tmpdir(), "ppmcp-close-ledger-"))),
+      authorizationService: new AuthorizationService({ mode: "interactive", lease, confirmations }),
+      pathPolicy: new PathPolicy([root]),
+    });
+    const result = await engine.execute({ actionId: "project.close_disposable", args: { path: projectPath, saveBeforeClose: true }, expectedRevision: "active-project-identity" });
+    expect(result.status).toBe("failed");
+    expect(result.error?.message).toContain("outside a Premiere MCP OS-temporary fixture workspace");
+    expect(uxp.calls).toHaveLength(0);
+  });
+
   it("persists only privacy-safe ledger fields", async () => {
     const cep = new FakeAdapter("cep", true, success);
     const { engine, directory, approvalDirectory } = await engineWith([cep]);
@@ -468,6 +538,31 @@ describe("operation routing", () => {
     const checkpoints = await readdir(join(root, ".premiere-mcp-checkpoints"));
     expect(checkpoints).toHaveLength(1);
     expect(await readFile(join(root, ".premiere-mcp-checkpoints", checkpoints[0]!), "utf8")).toBe("saved-project");
+  });
+
+  it("executes an explicit durable workflow checkpoint and returns only path digests", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ppmcp-explicit-checkpoint-"));
+    const projectPath = join(root, "active.prproj");
+    await writeFile(projectPath, "saved-project", "utf8");
+    const lease = await SessionLease.createForCurrentProcess({ authenticate: testLeaseAuthenticator });
+    const profile: TrustProfile = {
+      schemaVersion: 1, profileId: "explicit-checkpoint", mode: "trusted_unattended", riskCeiling: "R3", actionAllow: ["project.checkpoint"], actionDeny: [], approvedRoots: [root],
+      capabilities: { overwrite: false, delete: false, thirdPartyPluginUi: false, cloudPublish: false, cloudShare: false, purchase: false },
+      checkpoint: { beforeFirstMutation: true, beforeNonUndoable: true, intervalOperations: 100, retainCount: 2 },
+    };
+    const calls: BridgeRequest[] = [];
+    const adapter: BackendAdapter = {
+      backend: "uxp",
+      probe: async () => ({ backend: "uxp", available: true, hostVersion: "26.3.2", hostSessionId: "explicit-session", capabilityFingerprint: "explicit-capabilities", operations: ["project.checkpoint"] }),
+      supports: async () => ({ supported: true, state: "implemented_unverified" }),
+      availability: async () => ({ available: true, hostVersion: "26.3.2" }),
+      execute: async (request) => { calls.push(request); return { protocolVersion: 1, requestId: request.requestId, ok: true, dispatchState: "completed", result: { saved: true, projectPath, projectIdentity: "project-guid" } }; },
+    };
+    const engine = new OperationEngine([adapter], { authorizationService: new AuthorizationService({ mode: "trusted_unattended", lease, profile }), pathPolicy: new PathPolicy([root]), ledger: new OperationLedger(await mkdtemp(join(tmpdir(), "ppmcp-explicit-checkpoint-ledger-"))) });
+    const result = await engine.execute({ actionId: "project.checkpoint", args: {} });
+    expect(result).toMatchObject({ status: "succeeded", verification: { outcome: "verified" }, data: { checkpointCreated: true, bytes: 13, sha256: expect.stringMatching(/^sha256:/), projectPathDigest: expect.stringMatching(/^sha256:/), checkpointPathDigest: expect.stringMatching(/^sha256:/) } });
+    expect(JSON.stringify(result)).not.toContain(projectPath);
+    expect(calls.map((call) => (call.args.checkpoint as { phase: string }).phase)).toEqual(["inspect", "save"]);
   });
 
   it("stops with a reconciliation-required ledger record when checkpoint outcome is unknown", async () => {

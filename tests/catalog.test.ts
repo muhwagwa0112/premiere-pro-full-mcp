@@ -24,7 +24,7 @@ describe("action catalog", () => {
   it("keeps transactions and generic UI fallback behind R3 confirmation", () => {
     expect(getAction("uxp.transaction.execute").risk).toBe("R3");
     expect(getAction("project.create").risk).toBe("R2");
-    expect(getAction("ui.invoke").risk).toBe("R3");
+    expect(getAction("ui.adapter.invoke").risk).toBe("R3");
   });
 
   it("exposes a typed R1 sequence creation contract without accepting paths", () => {
@@ -32,5 +32,22 @@ describe("action catalog", () => {
     expect(action.risk).toBe("R1");
     expect(validateActionArgs(action, { name: "Live Validation", projectItemIds: ["node-1"] })).toMatchObject({ name: "Live Validation" });
     expect(() => validateActionArgs(action, { name: "Live Validation", projectItemIds: ["node-1"], path: "C:\\escape.mp4" })).toThrow();
+  });
+
+  it("requires scoped state tokens and strict typed handles for core semantic mutations", () => {
+    const handle = { $ref: "session-handle-1", type: "Sequence", session: "session-1234", stateToken: "semantic-v1-session-token" };
+    for (const actionId of ["project.close_disposable", "project.save_as", "media.relink", "media.proxy.attach", "timeline.track.set_mute", "timeline.clip.insert"]) {
+      const action = getAction(actionId);
+      expect(action.stateTokenRequired).toBe(true);
+      expect(action.stateScope).toBeTruthy();
+      expect(action.verifierId).toMatch(/^.+\.v1$/);
+    }
+    expect(validateActionArgs(getAction("timeline.track.set_mute"), { sequence: handle, mediaType: "video", trackIndex: 0, muted: true })).toMatchObject({ trackIndex: 0, muted: true });
+    expect(() => validateActionArgs(getAction("timeline.track.set_mute"), { sequence: { $ref: "session-handle-1" }, mediaType: "video", trackIndex: 0, muted: true })).toThrow();
+    expect(() => validateActionArgs(getAction("timeline.clip.insert"), { sequence: handle, projectItem: handle, timeSeconds: 0, videoTrackIndex: 0, audioTrackIndex: 0, limitShift: true, selector: "*" })).toThrow();
+    expect(() => validateActionArgs(getAction("timeline.clip.insert"), { sequence: handle, projectItem: handle, timeSeconds: 604_801, videoTrackIndex: 0, audioTrackIndex: 0 })).toThrow();
+    expect(() => validateActionArgs(getAction("media.proxy.attach"), { clip: handle, path: "C:\\media\\proxy.mp4", teamProjectAlternate: true })).toThrow();
+    expect(validateActionArgs(getAction("project.save_as"), { path: "C:\\project\\copy.prproj" })).toMatchObject({ overwrite: false });
+    expect(() => validateActionArgs(getAction("project.save_as"), { path: "C:\\project\\copy.prproj", overwrite: true })).toThrow();
   });
 });

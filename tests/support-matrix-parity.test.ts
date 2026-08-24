@@ -34,12 +34,16 @@ describe("generated support matrix", () => {
     }
   });
 
-  it("flags preferred backend declarations that are not backed by a handler", () => {
+  it("binds each new semantic action to its concrete typed handler", () => {
     const matrix = generateSupportMatrix();
-    const insert = matrix.actions.find((action) => action.actionId === "timeline.clip.insert");
-    expect(insert?.mismatches).toContain("preferred_backend_without_handler");
-    expect(insert?.backends.find((backend) => backend.backend === "uxp")?.mismatches).toContain("preferred_backend_without_handler");
-    expect(insert?.backends.find((backend) => backend.backend === "cep")?.mismatches).toContain("preferred_backend_without_handler");
+    for (const actionId of ["project.close_disposable", "media.relink", "media.proxy.attach", "timeline.track.set_mute", "timeline.clip.insert"]) {
+      const action = matrix.actions.find((entry) => entry.actionId === actionId);
+      expect(action?.mismatches).toEqual([]);
+      expect(action?.backends.find((backend) => backend.backend === "uxp")?.handlerState).toBe("implemented_unverified");
+    }
+    const saveAs = matrix.actions.find((entry) => entry.actionId === "project.save_as");
+    expect(saveAs?.mismatches).toEqual([]);
+    expect(saveAs?.backends.find((backend) => backend.backend === "cep")?.handlerState).toBe("implemented_unverified");
   });
 
   it("does not declare implemented_unverified without at least one real handler", () => {
@@ -64,10 +68,12 @@ describe("generated support matrix", () => {
     expect(action("export.sequence").preferredBackends).toEqual(["uxp", "cep"]);
     expect(implemented("export.sequence", "uxp")).toBe("implemented_unverified");
     expect(implemented("export.sequence", "cep")).toBe("implemented_unverified");
-    for (const actionId of ["timeline.clip.insert", "effects.apply", "history.undo"]) {
+    for (const actionId of ["effects.apply", "history.undo"]) {
       expect(action(actionId).declaredSupport).toBe("unsupported");
       expect(action(actionId).backends.every((entry) => entry.handlerState === "not_implemented")).toBe(true);
     }
+    expect(action("timeline.clip.insert").declaredSupport).toBe("implemented_unverified");
+    expect(implemented("timeline.clip.insert", "uxp")).toBe("implemented_unverified");
   });
 
   it("matches the committed deterministic artifact", async () => {

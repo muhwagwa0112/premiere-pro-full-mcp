@@ -33,7 +33,7 @@ export class AuthorizationService {
 
   async executionRequirements(action: ActionDescriptor): Promise<ExecutionRequirements> {
     const checkpointRetention = this.#profile?.checkpoint.retainCount ?? 10;
-    if (this.mode === "interactive" || !this.#profile || !action.mutatesProject) return { checkpointRequired: false, checkpointRetention };
+    if (action.id === "project.checkpoint" || this.mode === "interactive" || !this.#profile || !action.mutatesProject) return { checkpointRequired: false, checkpointRetention };
     const next = await this.#lease.previewNextIndexes(true).catch((error) => { throw leaseAuthorizationError(error); });
     const checkpoint = this.#profile.checkpoint;
     const checkpointRequired = (checkpoint.beforeFirstMutation && next.mutationIndex === 0) ||

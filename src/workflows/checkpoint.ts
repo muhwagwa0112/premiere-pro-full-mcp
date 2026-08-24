@@ -3,7 +3,7 @@ import { constants } from "node:fs";
 import { copyFile, lstat, mkdir, readFile, readdir, realpath, rm, stat } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, parse, relative, resolve, sep } from "node:path";
 import type { BridgeRequest, BridgeResponse, DispatchState, RouteBinding } from "../contracts.js";
-import { effectiveBridgeRequestDigest, type ExecutionPlan } from "../security/execution-plan.js";
+import { effectiveBridgeRequestDigest, sha256Canonical, type ExecutionPlan } from "../security/execution-plan.js";
 
 export class CheckpointError extends Error {
   constructor(readonly code: string, message: string, readonly dispatchState: DispatchState | null = null) { super(message); }
@@ -26,6 +26,19 @@ export interface CheckpointResult {
   checkpointPath: string;
   bytes: number;
   sha256: string;
+}
+
+export interface CheckpointEvidenceBinding {
+  operationId: string;
+  bytes: number;
+  sha256: string;
+  projectPathDigest: string;
+  checkpointPathDigest: string;
+}
+
+/** Binds a verified checkpoint copy to the exact operation that produced it. */
+export function checkpointEvidenceBindingDigest(binding: CheckpointEvidenceBinding): `sha256:${string}` {
+  return sha256Canonical({ schemaVersion: 1, ...binding }) as `sha256:${string}`;
 }
 
 function routeBinding(plan: ExecutionPlan): RouteBinding {

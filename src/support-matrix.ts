@@ -76,7 +76,8 @@ const handlerEvidence: HandlerEvidence[] = [
     evidence("local", actionId, localHandler, "src/bridge/local-adapter.ts", `\"${actionId}\"`, "verified")),
 
   ...[
-    "host.inspect", "project.inspect", "sequence.inspect", "project.save", "captions.inspect",
+    "host.inspect", "project.inspect", "sequence.inspect", "project.save", "project.checkpoint", "project.close_disposable", "captions.inspect",
+    "media.relink", "media.proxy.attach", "timeline.track.set_mute", "timeline.clip.insert",
     "export.frame", "export.sequence", "uxp.catalog", "uxp.read", "uxp.edit", "uxp.sensitive",
     "uxp.filesystem", "uxp.destructive", "uxp.handle.release", "uxp.page.read",
     "uxp.transaction.execute", "uxp.locked.batch", "uxp.events.subscribe", "uxp.events.poll",
@@ -93,7 +94,7 @@ const handlerEvidence: HandlerEvidence[] = [
   )),
 
   ...[
-    "host.inspect", "project.inspect", "sequence.inspect", "project.create", "project.save",
+    "host.inspect", "project.inspect", "sequence.inspect", "project.create", "project.save", "project.save_as", "project.checkpoint",
     "project.open", "media.import", "timeline.sequence.create_from_media", "export.sequence",
     "workspace.set", "cep.surface.catalog", "cep.read", "cep.edit", "cep.filesystem", "cep.destructive",
   ].map((actionId) => evidence(
@@ -118,8 +119,8 @@ const handlerEvidence: HandlerEvidence[] = [
 
   ...[
     ["host.inspect", "premiere.window.inspect", "verified"],
-    ["ui.catalog", "premiere.controls.catalog", "verified"],
-    ["ui.invoke", "ui.control.invoke", "committed_unverified"],
+    ["ui.adapter.catalog", "premiere.adapters.catalog", "verified"],
+    ["ui.adapter.invoke", "premiere.adapter.invoke", "committed_unverified"],
   ].map(([actionId, sourceFragment, verification]) => evidence(
     "ui",
     actionId!,

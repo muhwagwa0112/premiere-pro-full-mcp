@@ -21,7 +21,7 @@ const transport = new StdioClientTransport({
 try {
   await client.connect(transport);
   const result = await client.callTool(
-    { name: "premiere_api", arguments: { actionId: "ui.catalog", args: { offset: 0, limit: 20 } } },
+    { name: "premiere_api", arguments: { actionId: "ui.adapter.catalog", args: {} } },
     undefined,
     { timeout: 60_000, maxTotalTimeout: 60_000 },
   );

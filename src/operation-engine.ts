@@ -2,14 +2,17 @@ import { randomUUID } from "node:crypto";
 import { actionRequestSchema, type ActionRequest, type Authority, type Backend, type BackendAdapter, type BackendProbe, type BridgeResponse, type OperationResult, type ReconciliationPhase, type Risk } from "./contracts.js";
 import { getAction, listActions, validateActionArgs } from "./catalog.js";
 import { OperationLedger } from "./ledger.js";
-import { readFile, stat } from "node:fs/promises";
+import { lstat, readFile, realpath, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { PathPolicy } from "./security/path-policy.js";
 import { pathArgumentsForEntry, validateAdobeRuntimeCall } from "./adobe-api-catalog.js";
 import { AuthorizationError, AuthorizationService } from "./security/authorization-service.js";
 import { buildExecutionPlan, effectiveBridgeRequestDigest, routeBindingFromProbe, sameRouteBinding, sha256Canonical, type ExecutionPlan } from "./security/execution-plan.js";
 import type { ActionDescriptor } from "./contracts.js";
-import { CheckpointError, createCheckpoint } from "./workflows/checkpoint.js";
+import { CheckpointError, checkpointEvidenceBindingDigest, createCheckpoint } from "./workflows/checkpoint.js";
 import { canonicalRecoverableOutputPaths, RecoverableOutput, RecoverableOutputError, type RecoverableOutputPaths } from "./workflows/recoverable-output.js";
+import { verifyCoreSemanticResult } from "./verifiers/core-semantic.js";
 
 interface AdobeInventorySummary {
   source: unknown;
@@ -57,13 +60,33 @@ function enabledAuthorities(): Set<Authority> {
 }
 
 async function assertOutputPolicy(actionId: string, args: Record<string, unknown>): Promise<void> {
-  if (actionId !== "export.sequence" || args.overwrite === true || typeof args.outputPath !== "string") return;
+  const outputPath = actionId === "project.save_as" && typeof args.path === "string"
+    ? args.path
+    : actionId === "export.sequence" && args.overwrite !== true && typeof args.outputPath === "string"
+      ? args.outputPath
+      : null;
+  if (!outputPath) return;
   try {
-    const existing = await stat(args.outputPath);
-    if (existing.isFile() || existing.isDirectory()) throw new Error("Sequence export refused to overwrite an existing output path");
+    const existing = await stat(outputPath);
+    if (existing.isFile() || existing.isDirectory()) throw new Error(`${actionId} refused to overwrite an existing output path`);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
     throw error;
+  }
+}
+
+async function assertDisposableFixtureClose(actionId: string, args: Record<string, unknown>): Promise<void> {
+  if (actionId !== "project.close_disposable") return;
+  if (typeof args.path !== "string") throw new Error("Disposable fixture close requires an exact project path");
+  const supplied = resolve(args.path);
+  const canonical = await realpath(supplied);
+  const metadata = await lstat(canonical);
+  if (!metadata.isFile() || metadata.isSymbolicLink()) throw new Error("Disposable fixture project must be a regular non-link file");
+  const workspace = dirname(canonical);
+  const temporaryBase = await realpath(resolve(tmpdir()));
+  const rel = relative(temporaryBase, workspace);
+  if (!isAbsolute(canonical) || rel === "" || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel) || !basename(workspace).startsWith("premiere-mcp-live-fixture-")) {
+    throw new Error("Refusing to close a project outside a Premiere MCP OS-temporary fixture workspace");
   }
 }
 
@@ -263,6 +286,61 @@ export class OperationEngine {
         }
       }
 
+      if (action.id === "project.checkpoint") {
+        try {
+          const checkpoint = await createCheckpoint({
+            dispatch: candidate.adapter,
+            plan,
+            approvedRoots: authorization.approvedRoots() ?? this.#pathPolicy.roots(),
+            retention: grant.checkpointRetention,
+          });
+          const projectPathDigest = sha256Canonical(checkpoint.projectPath);
+          const checkpointPathDigest = sha256Canonical(checkpoint.checkpointPath);
+          const checkpointBindingDigest = checkpointEvidenceBindingDigest({
+            operationId,
+            bytes: checkpoint.bytes,
+            sha256: checkpoint.sha256,
+            projectPathDigest,
+            checkpointPathDigest,
+          });
+          authorization.markDispatched(grant);
+          this.#pendingFallbacks.delete(operationId);
+          const persistenceFailure = await this.recordDispatch(operationId, action.id, action.risk, candidate.backend, request.expectedRevision ?? null, undefined, "checkpoint");
+          if (persistenceFailure) return persistenceFailure;
+          const response: BridgeResponse = {
+            protocolVersion: 1,
+            requestId: operationId,
+            ok: true,
+            dispatchState: "completed",
+            ...(request.expectedRevision ? { beforeRevision: request.expectedRevision, afterRevision: request.expectedRevision } : {}),
+            verification: { outcome: "verified", method: "route-bound project save and exclusive checkpoint copy byte/SHA-256 verification" },
+            result: {
+              checkpointCreated: true,
+              bytes: checkpoint.bytes,
+              sha256: checkpoint.sha256,
+              projectPathDigest,
+              checkpointPathDigest,
+              checkpointBindingDigest,
+            },
+          };
+          return await this.record(this.resultFromResponse(operationId, action, request, candidate, response));
+        } catch (error) {
+          const checkpoint = error instanceof CheckpointError ? error : new CheckpointError("CHECKPOINT_FAILED", (error as Error).message);
+          this.#pendingFallbacks.delete(operationId);
+          if (checkpoint.dispatchState === "not_dispatched") {
+            authorization.release(grant, "not_dispatched");
+            lastNotDispatched = { backend: candidate.backend, response: { protocolVersion: 1, requestId: operationId, ok: false, dispatchState: "not_dispatched", error: { code: checkpoint.code, message: checkpoint.message, retryable: true } } };
+            const reauthorization = this.fallbackReauthorizationResult(prepared, index, authorization, pendingFallback);
+            if (reauthorization) return reauthorization;
+            continue;
+          }
+          authorization.markDispatched(grant);
+          const persistenceFailure = await this.recordDispatch(operationId, action.id, action.risk, candidate.backend, request.expectedRevision ?? null, undefined, "checkpoint");
+          if (persistenceFailure) return persistenceFailure;
+          return await this.record(this.outcomeUnknownResult(operationId, action.id, action.risk, candidate.backend, checkpoint.message, checkpoint.code, undefined, "checkpoint"));
+        }
+      }
+
       let recoverableOutput: RecoverableOutput | null = null;
       let dispatchArgs = request.args;
       if (action.id === "export.sequence" && request.args.overwrite === true && typeof request.args.outputPath === "string") {
@@ -390,6 +468,15 @@ export class OperationEngine {
           }
         }
       }
+      const semanticVerification = verifyCoreSemanticResult(action.id, response.result, request.args);
+      if (semanticVerification.registered && response.dispatchState === "completed") {
+        const postconditionFailure = response.error?.code?.endsWith("_NOT_VERIFIED") === true;
+        if (postconditionFailure || (response.ok && !semanticVerification.verified)) {
+          const result = this.outcomeUnknownResult(operationId, action.id, action.risk, candidate.backend, response.error?.message ?? semanticVerification.detail ?? "The semantic postcondition could not be verified", "POSTCONDITION_NOT_VERIFIED", undefined, "original_dispatch");
+          return await this.record(result);
+        }
+        if (response.ok) response = { ...response, verification: { outcome: "verified", method: semanticVerification.method! } };
+      }
       let result = this.resultFromResponse(operationId, action, request, candidate, response);
       if (recoverableOutput && response.dispatchState !== "completed") {
         const evidence = recoverableOutput.reconciliationEvidence();
@@ -426,6 +513,9 @@ export class OperationEngine {
     const action = getAction(request.actionId);
     this.assertAuthority(action.authority);
     request = { ...request, args: validateActionArgs(action, request.args), operationId: request.operationId ?? randomUUID() };
+    if (action.stateTokenRequired && !request.expectedRevision) {
+      throw new AuthorizationError("STATE_TOKEN_REQUIRED", `${action.id} requires an expectedRevision scoped to ${action.stateScope ?? "the selected state"}`);
+    }
     if ((action.mutatesProject || (action.id === "export.sequence" && request.args.overwrite === true)) && (this.#localReconciliationRequired || (await this.#ledger.activeReconciliations()).length > 0)) {
       throw new AuthorizationError("RECONCILIATION_REQUIRED", "A prior unknown outcome must be explicitly reconciled before any further mutation or overwrite");
     }
@@ -433,6 +523,7 @@ export class OperationEngine {
     const pathArguments = pathArgumentsForEntry(adobeEntry, request.args);
     await this.#pathPolicy.assert(action, pathArguments);
     await assertOutputPolicy(action.id, request.args);
+    await assertDisposableFixtureClose(action.id, request.args);
     if (action.authority !== "filesystem" && Array.isArray(request.args.paths) && request.args.paths.length > 0) await this.#pathPolicy.assert({ ...action, authority: "filesystem" }, { paths: request.args.paths });
     const paths = collectPathValues(pathArguments);
     const approvedRootDigests = await this.#pathPolicy.approvedRootDigests();
@@ -494,6 +585,9 @@ export class OperationEngine {
     }
     if (error instanceof AuthorizationError && (error.code === "CHECKPOINT_BARRIER_ACTIVE" || error.code === "RECONCILIATION_REQUIRED")) {
       return this.failureResult(operationId, actionId, risk, null, error.code, error.message, true, "blocked");
+    }
+    if (error instanceof AuthorizationError && error.code === "STATE_TOKEN_REQUIRED") {
+      return this.failureResult(operationId, actionId, risk, null, error.code, error.message, false, "blocked");
     }
     const noBackend = parsed.success && error.message.startsWith("NO_BACKEND_AVAILABLE:");
     return this.failureResult(operationId, actionId, risk, null, noBackend ? "NO_BACKEND_AVAILABLE" : parsed.success ? "REQUEST_REJECTED" : "INVALID_REQUEST", error.message, noBackend, noBackend ? "blocked" : "failed");

@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "pins": [
+    {
+      "artifact": "contract-v1.json",
+      "protocol": "premiere-mcp-native/1",
+      "sha256": "sha256:b4960021a6c838ace306bc29c50b63c05564760ae35b5128a98c0240a64d5863",
+      "status": "contract_only"
+    }
+  ]
+}

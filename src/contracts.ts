@@ -55,6 +55,9 @@ export interface ActionDescriptor {
   verification: string;
   support: SupportStatus;
   argsSchema: z.ZodType<Record<string, unknown>>;
+  stateTokenRequired?: boolean;
+  stateScope?: string;
+  verifierId?: string;
 }
 
 const jsonRecordSchema = z.record(z.string(), z.unknown());

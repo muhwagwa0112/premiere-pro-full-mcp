@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "post-caption-cues",
+  "domain": "captions",
+  "evidenceState": "plan_only",
+  "liveEvidence": false,
+  "isolation": { "root": "unique-os-temporary-directory", "userProjectAllowed": false, "disposableProject": true },
+  "generator": "synthetic-caption-cues",
+  "scenarios": ["caption-track-crud", "caption-export"],
+  "requiredEvidence": ["host-build", "capability-fingerprint", "verified-action-readback", "verified-before-checkpoint", "durable-job-record", "stable-output", "verified-after-checkpoint"],
+  "cleanup": { "closeDisposableProject": true, "removeTemporaryRoot": true, "verifyRestoredState": true }
+}

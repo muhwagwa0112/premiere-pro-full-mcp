@@ -69,9 +69,9 @@ export class AuthorizationPolicy {
       if (!(await allPathsWithinApprovedRoots(plan.paths, this.#profile.approvedRoots))) return deny("PATH_DENIED", "A requested path is outside the approved roots");
     } catch { return deny("PATH_UNSAFE", "A requested path cannot be safely canonicalized or crosses a reparse point"); }
     const operationIndex = lease.operationIndex ?? 0;
-    const checkpoint = (plan.mutation && this.#profile.checkpoint.beforeFirstMutation && lease.mutationIndex === 0) ||
+    const checkpoint = plan.actionId !== "project.checkpoint" && ((plan.mutation && this.#profile.checkpoint.beforeFirstMutation && lease.mutationIndex === 0) ||
       (plan.nonUndoable && this.#profile.checkpoint.beforeNonUndoable) ||
-      (operationIndex > 0 && operationIndex % this.#profile.checkpoint.intervalOperations === 0);
+      (operationIndex > 0 && operationIndex % this.#profile.checkpoint.intervalOperations === 0));
     return checkpoint ? { outcome: "allow_with_checkpoint", profileId: this.#profile.profileId, leaseId: lease.leaseId }
       : { outcome: "allow", profileId: this.#profile.profileId, leaseId: lease.leaseId };
   }

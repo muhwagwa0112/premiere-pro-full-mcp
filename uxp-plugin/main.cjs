@@ -3,7 +3,8 @@ const uxp = require("uxp");
 const API_CATALOG = require("./api-catalog.cjs");
 
 const CAPABILITIES = [
-  "host.inspect", "project.inspect", "sequence.inspect", "project.save", "project.checkpoint", "captions.inspect",
+  "host.inspect", "project.inspect", "sequence.inspect", "project.save", "project.close_disposable", "project.checkpoint", "captions.inspect",
+  "media.relink", "media.proxy.attach", "timeline.track.set_mute", "timeline.clip.insert",
   "export.frame", "export.sequence",
   "uxp.catalog", "uxp.read", "uxp.edit", "uxp.sensitive", "uxp.filesystem", "uxp.destructive", "uxp.handle.release",
   "uxp.page.read", "uxp.transaction.execute", "uxp.locked.batch", "uxp.events.subscribe", "uxp.events.poll", "uxp.events.unsubscribe"
@@ -87,11 +88,11 @@ function probeCatalog() {
   return { status: "probed", availableRoots, unavailableRoots, probedRootMembers, unavailableRootMembers: unavailableRootMembers.slice(0, 256), unavailableRootMemberCount: unavailableRootMembers.length, instanceMembers: "lazy_probe_on_typed_handle" };
 }
 
-function registerHandle(value, typeHint) {
+function registerHandle(value, typeHint, projectIdentity) {
   expireHandles();
   if (handles.size >= 1024) handles.delete(handles.keys().next().value);
   const id = `${sessionPrefix}-${(++handleCounter).toString(36)}`;
-  handles.set(id, { value, typeHint: String(typeHint || "unknown"), createdAt: Date.now(), expiresAt: Date.now() + 30 * 60 * 1000 });
+  handles.set(id, { value, typeHint: String(typeHint || "unknown"), projectIdentity: projectIdentity || null, createdAt: Date.now(), expiresAt: Date.now() + 30 * 60 * 1000 });
   return { $ref: id, type: String(typeHint || "unknown"), session: sessionPrefix };
 }
 
@@ -120,13 +121,82 @@ function assertHandleType(record, expected) {
   if (!tokens.has(expected) && runtimeName !== expected) throw Object.assign(new Error(`Handle type ${record.typeHint} cannot be used as ${expected}`), { code: "UXP_HANDLE_TYPE_MISMATCH" });
 }
 
+async function semanticStateMaterial(record) {
+  const value = record.value;
+  const tokens = typeTokens(record.typeHint);
+  let runtimeName = "";
+  try { runtimeName = value && value.constructor && value.constructor.name || ""; } catch (_) { runtimeName = ""; }
+  if (tokens.has("Sequence") || runtimeName === "Sequence") {
+    const videoCount = await value.getVideoTrackCount();
+    const audioCount = await value.getAudioTrackCount();
+    if (videoCount > 128 || audioCount > 128) throw Object.assign(new Error("Sequence exceeds the semantic state-token track limit"), { code: "UXP_SEMANTIC_SCOPE_TOO_LARGE" });
+    const tracks = [];
+    for (let index = 0; index < videoCount; index += 1) {
+      const track = await value.getVideoTrack(index);
+      const items = Array.from(await track.getTrackItems(ppro.Constants.TrackItemType.CLIP, false) || []);
+      tracks.push(["v", index, await track.isMuted(), items.length]);
+    }
+    for (let index = 0; index < audioCount; index += 1) {
+      const track = await value.getAudioTrack(index);
+      tracks.push(["a", index, await track.isMuted()]);
+    }
+    return JSON.stringify({ type: "Sequence", projectIdentity: record.projectIdentity, guid: String(value.guid || ""), videoCount, audioCount, tracks });
+  }
+  if (tokens.has("ClipProjectItem") || runtimeName === "ClipProjectItem") {
+    const mediaPath = typeof value.getMediaFilePath === "function" ? await value.getMediaFilePath() : "";
+    const hasProxy = typeof value.hasProxy === "function" ? await value.hasProxy() : false;
+    const proxyPath = hasProxy && typeof value.getProxyPath === "function" ? await value.getProxyPath() : "";
+    return JSON.stringify({ type: "ClipProjectItem", projectIdentity: record.projectIdentity, guid: String(value.guid || value.nodeId || ""), name: String(value.name || ""), mediaPath: String(mediaPath || ""), hasProxy: !!hasProxy, proxyPath: String(proxyPath || "") });
+  }
+  if (tokens.has("ProjectItem") || runtimeName === "ProjectItem") {
+    return JSON.stringify({ type: "ProjectItem", projectIdentity: record.projectIdentity, guid: String(value.guid || value.nodeId || ""), name: String(value.name || "") });
+  }
+  return null;
+}
+
+async function enrichSemanticHandleTokens(value, depth = 0) {
+  if (depth > 8 || !value || typeof value !== "object") return;
+  if (typeof value.$ref === "string") {
+    const record = handleRecord(value.$ref, value.session);
+    const material = await semanticStateMaterial(record);
+    if (material !== null && record.projectIdentity) {
+      record.semanticStateMaterial = material;
+      record.semanticStateToken = `semantic-v1-${value.$ref}-${hash(material)}`;
+      value.stateToken = record.semanticStateToken;
+    }
+    return;
+  }
+  for (const child of Array.isArray(value) ? value : Object.values(value)) await enrichSemanticHandleTokens(child, depth + 1);
+}
+
+async function semanticHandle(reference, expectedTypes, activeProjectIdentity) {
+  if (!reference || typeof reference !== "object" || typeof reference.$ref !== "string" || typeof reference.session !== "string" || typeof reference.stateToken !== "string") {
+    throw Object.assign(new Error("A session-scoped UXP object handle with a state token is required"), { code: "UXP_SEMANTIC_HANDLE_REQUIRED" });
+  }
+  const record = handleRecord(reference.$ref, reference.session);
+  const types = Array.isArray(expectedTypes) ? expectedTypes : [expectedTypes];
+  const matched = types.some((expected) => {
+    try { assertHandleType(record, expected); return true; } catch (_) { return false; }
+  });
+  if (!matched) throw Object.assign(new Error(`Handle cannot be used as ${types.join(" or ")}`), { code: "UXP_HANDLE_TYPE_MISMATCH" });
+  if (!record.projectIdentity || record.projectIdentity !== activeProjectIdentity) throw Object.assign(new Error("Object handle is not bound to the active project"), { code: "UXP_HANDLE_PROJECT_MISMATCH" });
+  if (!record.semanticStateToken || reference.stateToken !== record.semanticStateToken) throw Object.assign(new Error("Object handle state token is invalid"), { code: "UXP_SEMANTIC_STATE_TOKEN_INVALID" });
+  const currentMaterial = await semanticStateMaterial(record);
+  if (currentMaterial === null || currentMaterial !== record.semanticStateMaterial) throw Object.assign(new Error("Target object state changed after the handle was issued"), { code: "UXP_SEMANTIC_STATE_STALE" });
+  return record.value;
+}
+
+function sameWindowsPath(left, right) {
+  return String(left || "").replace(/\//g, "\\").replace(/\\+$/g, "").toLowerCase() === String(right || "").replace(/\//g, "\\").replace(/\\+$/g, "").toLowerCase();
+}
+
 function decode(value, depth = 0) {
   if (depth > 8) throw Object.assign(new Error("Argument nesting exceeds the safe limit"), { code: "UXP_ARGUMENT_DEPTH" });
   if (Array.isArray(value)) return value.map((item) => decode(item, depth + 1));
   if (!value || typeof value !== "object") return value;
   if (typeof value.$ref === "string") {
     const keys = Object.keys(value);
-    if (keys.some((key) => !["$ref", "type", "session"].includes(key))) throw Object.assign(new Error("Handle reference contains unsupported properties"), { code: "UXP_HANDLE_SHAPE" });
+    if (keys.some((key) => !["$ref", "type", "session", "stateToken"].includes(key))) throw Object.assign(new Error("Handle reference contains unsupported properties"), { code: "UXP_HANDLE_SHAPE" });
     return handleRecord(value.$ref, value.session).value;
   }
   if (value.$callback && typeof value.$callback === "object") return callbackFromSpec(value.$callback);
@@ -148,17 +218,17 @@ function elementType(typeHint) {
   return value;
 }
 
-function encode(value, typeHint, depth = 0, seen = new Set()) {
+function encode(value, typeHint, depth = 0, seen = new Set(), projectIdentity = null) {
   if (value === null || value === undefined || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value ?? null;
   if (typeof value === "bigint") return value.toString();
-  if (typeof value === "function") return registerHandle(value, typeHint || "Function");
-  if (depth >= 6 || seen.has(value)) return registerHandle(value, typeHint);
+  if (typeof value === "function") return registerHandle(value, typeHint || "Function", projectIdentity);
+  if (depth >= 6 || seen.has(value)) return registerHandle(value, typeHint, projectIdentity);
   seen.add(value);
   if (Array.isArray(value)) {
     const itemType = elementType(typeHint);
-    const result = value.slice(0, 512).map((item) => encode(item, itemType, depth + 1, seen));
+    const result = value.slice(0, 512).map((item) => encode(item, itemType, depth + 1, seen, projectIdentity));
     seen.delete(value);
-    return value.length <= 512 ? result : { items: result, truncated: true, totalKnown: value.length, continuation: registerHandle({ kind: "page", items: value, itemType, offset: 512 }, "PagedResult") };
+    return value.length <= 512 ? result : { items: result, truncated: true, totalKnown: value.length, continuation: registerHandle({ kind: "page", items: value, itemType, offset: 512 }, "PagedResult", projectIdentity) };
   }
   let prototype;
   try { prototype = Object.getPrototypeOf(value); } catch (_) { prototype = null; }
@@ -168,18 +238,18 @@ function encode(value, typeHint, depth = 0, seen = new Set()) {
     if (allKeys.length > 256) {
       seen.delete(value);
       return { properties: Object.fromEntries(allKeys.slice(0, 256).map((key) => {
-        try { return [key, encode(value[key], "unknown", depth + 1, seen)]; } catch (_) { return [key, { unavailable: true }]; }
-      })), truncated: true, totalKnown: allKeys.length, continuation: registerHandle({ kind: "objectPage", value, keys: allKeys, offset: 256 }, "PagedResult") };
+        try { return [key, encode(value[key], "unknown", depth + 1, seen, projectIdentity)]; } catch (_) { return [key, { unavailable: true }]; }
+      })), truncated: true, totalKnown: allKeys.length, continuation: registerHandle({ kind: "objectPage", value, keys: allKeys, offset: 256 }, "PagedResult", projectIdentity) };
     }
     const keys = allKeys;
     for (const key of keys) {
-      try { output[key] = encode(value[key], "unknown", depth + 1, seen); } catch (_) { output[key] = { unavailable: true }; }
+      try { output[key] = encode(value[key], "unknown", depth + 1, seen, projectIdentity); } catch (_) { output[key] = { unavailable: true }; }
     }
     seen.delete(value);
     return output;
   }
   seen.delete(value);
-  return registerHandle(value, typeHint || (value.constructor && value.constructor.name) || "PremiereObject");
+  return registerHandle(value, typeHint || (value.constructor && value.constructor.name) || "PremiereObject", projectIdentity);
 }
 
 function targetFor(entry, target) {
@@ -308,7 +378,7 @@ async function invokeMember(operation, args) {
   return { entry, result };
 }
 
-async function executeRuntime(operation, args) {
+async function executeRuntime(operation, args, context) {
   if (operation === "uxp.catalog") {
     const query = typeof args.query === "string" ? args.query.toLowerCase() : "";
     const container = typeof args.container === "string" ? args.container : null;
@@ -438,7 +508,10 @@ async function executeRuntime(operation, args) {
     return { removed: true };
   }
   const outcome = await invokeMember(operation, args);
-  return { memberId: outcome.entry.id, bucket: outcome.entry.bucket, result: encode(outcome.result, outcome.entry.returnTypeHint), activeHandles: handles.size, callbackEventsPending: callbackEvents.length };
+  const projectIdentity = context && context.project ? String(context.project.guid || context.project.path || "") : null;
+  const encodedResult = encode(outcome.result, outcome.entry.returnTypeHint, 0, new Set(), projectIdentity);
+  await enrichSemanticHandleTokens(encodedResult);
+  return { memberId: outcome.entry.id, bucket: outcome.entry.bucket, result: encodedResult, activeHandles: handles.size, callbackEventsPending: callbackEvents.length };
 }
 
 async function execute(operation, args, expectedRevision) {
@@ -446,7 +519,7 @@ async function execute(operation, args, expectedRevision) {
     const context = await activeContext();
     const beforeRevision = await snapshotRevision(context.project, context.sequence);
     if (expectedRevision && expectedRevision !== beforeRevision) throw Object.assign(new Error("Project state changed after the request was prepared"), { code: "UXP_STALE_REVISION" });
-    const runtimeResult = await executeRuntime(operation, args || {});
+    const runtimeResult = await executeRuntime(operation, args || {}, context);
     const after = await activeContext();
     const afterRevision = await snapshotRevision(after.project, after.sequence);
     return { beforeRevision, afterRevision, verification: { outcome: operation === "uxp.read" || operation === "uxp.catalog" ? "verified" : "committed_unverified", method: "generated Adobe UXP allowlist and host response" }, result: runtimeResult };
@@ -502,6 +575,134 @@ async function execute(operation, args, expectedRevision) {
     const projectPath = String(after.project && after.project.path || "");
     if (!projectPath) throw Object.assign(new Error("Saved active project did not provide a path"), { code: "UXP_CHECKPOINT_PROJECT_PATH_UNAVAILABLE" });
     return { beforeRevision, afterRevision: await snapshotRevision(after.project, after.sequence), verification: { outcome: "verified", method: "Project.save returned true and active project path was read back" }, result: { saved: true, projectPath } };
+  }
+  if (operation === "project.close_disposable") {
+    if (!context.project) throw Object.assign(new Error("No active project"), { code: "UXP_NO_ACTIVE_PROJECT" });
+    if (!args || args.saveBeforeClose !== true || typeof args.path !== "string") throw Object.assign(new Error("project.close_disposable requires an exact disposable path and saveBeforeClose=true"), { code: "UXP_CLOSE_FIXTURE_BINDING_REQUIRED" });
+    if (!sameWindowsPath(context.project.path, args.path)) throw Object.assign(new Error("Active project path does not match the disposable fixture binding"), { code: "UXP_CLOSE_FIXTURE_PATH_MISMATCH" });
+    if (typeof context.project.close !== "function" || typeof ppro.CloseProjectOptions !== "function") throw Object.assign(new Error("Typed project close APIs are unavailable"), { code: "UXP_PROJECT_CLOSE_API_UNAVAILABLE" });
+    const closedProjectIdentity = String(context.project.guid || context.project.path || "");
+    let closeDispatched = false;
+    let saveDispatched = false;
+    try {
+      saveDispatched = true;
+      const savedBeforeClose = await context.project.save();
+      if (savedBeforeClose !== true) throw new Error("Premiere did not confirm the required save before close");
+      const closeOptions = new ppro.CloseProjectOptions();
+      if (typeof closeOptions.setPromptIfDirty === "function") closeOptions.setPromptIfDirty(false);
+      if (typeof closeOptions.setShowCancelButton === "function") closeOptions.setShowCancelButton(false);
+      if (typeof closeOptions.setSaveWorkspace === "function") closeOptions.setSaveWorkspace(false);
+      if (typeof closeOptions.setIsAppBeingPreparedToQuit === "function") closeOptions.setIsAppBeingPreparedToQuit(false);
+      closeDispatched = true;
+      const closed = await context.project.close(closeOptions);
+      const after = await activeContext();
+      const activeIdentity = after.project ? String(after.project.guid || after.project.path || "") : "";
+      const closedProjectIdentityAbsent = closedProjectIdentity.length > 0 && activeIdentity !== closedProjectIdentity;
+      if (closed === false || !closedProjectIdentityAbsent) throw new Error("Premiere did not confirm that the exact project identity was closed");
+      return { beforeRevision, afterRevision: after.project ? await snapshotRevision(after.project, after.sequence) : null, verification: { outcome: "verified", method: "Project.save returned true and closed project identity is absent from active project readback" }, result: { savedBeforeClose: true, closed: true, closedProjectIdentity, closedProjectIdentityAbsent } };
+    } catch (error) {
+      throw Object.assign(new Error(`Project save/close outcome could not be verified after dispatch: ${String(error && error.message || error)}`), { code: closeDispatched || saveDispatched ? "UXP_PROJECT_CLOSE_NOT_VERIFIED" : "UXP_PROJECT_CLOSE_FAILED" });
+    }
+  }
+  if (operation === "media.relink") {
+    if (!context.project) throw Object.assign(new Error("No active project"), { code: "UXP_NO_ACTIVE_PROJECT" });
+    const activeProjectIdentity = String(context.project.guid || context.project.path || "");
+    const clip = await semanticHandle(args && args.clip, "ClipProjectItem", activeProjectIdentity);
+    const requestedPath = args && args.path;
+    if (typeof requestedPath !== "string" || !/^[A-Za-z]:[\\/]/.test(requestedPath)) throw Object.assign(new Error("A Windows media path is required"), { code: "UXP_INVALID_MEDIA_PATH" });
+    if (typeof clip.changeMediaFilePath !== "function" || typeof clip.getMediaFilePath !== "function") throw Object.assign(new Error("Clip media relink APIs are unavailable"), { code: "UXP_RELINK_API_UNAVAILABLE" });
+    const priorPath = await clip.getMediaFilePath();
+    let relinkDispatched = false;
+    try {
+      relinkDispatched = true;
+      const changed = await clip.changeMediaFilePath(requestedPath, args.overrideCompatibilityCheck === true);
+      const mediaPath = await clip.getMediaFilePath();
+      if (changed === false || !sameWindowsPath(mediaPath, requestedPath)) throw new Error("Premiere did not confirm the exact relinked path");
+      const after = await activeContext();
+      return { beforeRevision, afterRevision: await snapshotRevision(after.project, after.sequence), verification: { outcome: "verified", method: "ClipProjectItem media path readback" }, result: { relinked: true, pathVerified: true, priorPath: String(priorPath || ""), mediaPath: String(mediaPath) } };
+    } catch (error) {
+      throw Object.assign(new Error(`Relink outcome could not be verified after dispatch: ${String(error && error.message || error)}`), { code: relinkDispatched ? "UXP_RELINK_NOT_VERIFIED" : "UXP_RELINK_FAILED" });
+    }
+  }
+  if (operation === "media.proxy.attach") {
+    if (!context.project) throw Object.assign(new Error("No active project"), { code: "UXP_NO_ACTIVE_PROJECT" });
+    const activeProjectIdentity = String(context.project.guid || context.project.path || "");
+    const clip = await semanticHandle(args && args.clip, "ClipProjectItem", activeProjectIdentity);
+    const requestedPath = args && args.path;
+    if (typeof requestedPath !== "string" || !/^[A-Za-z]:[\\/]/.test(requestedPath)) throw Object.assign(new Error("A Windows proxy path is required"), { code: "UXP_INVALID_PROXY_PATH" });
+    if (typeof clip.attachProxy !== "function" || typeof clip.hasProxy !== "function" || typeof clip.getProxyPath !== "function") throw Object.assign(new Error("Clip proxy APIs are unavailable"), { code: "UXP_PROXY_API_UNAVAILABLE" });
+    let proxyDispatched = false;
+    try {
+      proxyDispatched = true;
+      const attached = await clip.attachProxy(requestedPath, args.isHiRes === true, false);
+      const hasProxy = await clip.hasProxy();
+      const proxyPath = await clip.getProxyPath();
+      if (attached === false || hasProxy !== true || !sameWindowsPath(proxyPath, requestedPath)) throw new Error("Premiere did not confirm the exact attached proxy path");
+      const after = await activeContext();
+      return { beforeRevision, afterRevision: await snapshotRevision(after.project, after.sequence), verification: { outcome: "verified", method: "ClipProjectItem proxy presence and path readback" }, result: { proxyAttached: true, pathVerified: true, proxyPath: String(proxyPath) } };
+    } catch (error) {
+      throw Object.assign(new Error(`Proxy attachment outcome could not be verified after dispatch: ${String(error && error.message || error)}`), { code: proxyDispatched ? "UXP_PROXY_NOT_VERIFIED" : "UXP_PROXY_FAILED" });
+    }
+  }
+  if (operation === "timeline.track.set_mute") {
+    if (!context.project || !context.sequence) throw Object.assign(new Error("No active sequence"), { code: "UXP_NO_ACTIVE_SEQUENCE" });
+    const activeProjectIdentity = String(context.project.guid || context.project.path || "");
+    const sequence = await semanticHandle(args && args.sequence, "Sequence", activeProjectIdentity);
+    if (String(sequence.guid || "") !== String(context.sequence.guid || "")) throw Object.assign(new Error("Sequence handle is not the active sequence covered by expectedRevision"), { code: "UXP_SEQUENCE_SCOPE_MISMATCH" });
+    const isVideo = args.mediaType === "video";
+    if (!isVideo && args.mediaType !== "audio") throw Object.assign(new Error("mediaType must be video or audio"), { code: "UXP_INVALID_MEDIA_TYPE" });
+    const count = await sequence[isVideo ? "getVideoTrackCount" : "getAudioTrackCount"]();
+    if (!Number.isInteger(args.trackIndex) || args.trackIndex < 0 || args.trackIndex >= count) throw Object.assign(new Error("Target track index is out of range"), { code: "UXP_TRACK_INDEX_OUT_OF_RANGE" });
+    const track = await sequence[isVideo ? "getVideoTrack" : "getAudioTrack"](args.trackIndex);
+    if (!track || typeof track.setMute !== "function" || typeof track.isMuted !== "function") throw Object.assign(new Error("Track mute APIs are unavailable"), { code: "UXP_TRACK_MUTE_API_UNAVAILABLE" });
+    const beforeMuted = await track.isMuted();
+    let muteDispatched = false;
+    try {
+      muteDispatched = true;
+      const changed = await track.setMute(args.muted);
+      const muted = await track.isMuted();
+      if (changed === false || muted !== args.muted) throw new Error("Premiere did not confirm the requested track mute state");
+      const after = await activeContext();
+      return { beforeRevision, afterRevision: await snapshotRevision(after.project, after.sequence), verification: { outcome: "verified", method: "Track.isMuted state readback" }, result: { stateVerified: true, mediaType: args.mediaType, trackIndex: args.trackIndex, beforeMuted, muted } };
+    } catch (error) {
+      throw Object.assign(new Error(`Track mute outcome could not be verified after dispatch: ${String(error && error.message || error)}`), { code: muteDispatched ? "UXP_TRACK_MUTE_NOT_VERIFIED" : "UXP_TRACK_MUTE_FAILED" });
+    }
+  }
+  if (operation === "timeline.clip.insert") {
+    if (!context.project || !context.sequence) throw Object.assign(new Error("No active sequence"), { code: "UXP_NO_ACTIVE_SEQUENCE" });
+    const activeProjectIdentity = String(context.project.guid || context.project.path || "");
+    const sequence = await semanticHandle(args && args.sequence, "Sequence", activeProjectIdentity);
+    const projectItem = await semanticHandle(args && args.projectItem, ["ProjectItem", "ClipProjectItem"], activeProjectIdentity);
+    if (String(sequence.guid || "") !== String(context.sequence.guid || "")) throw Object.assign(new Error("Sequence handle is not the active sequence covered by expectedRevision"), { code: "UXP_SEQUENCE_SCOPE_MISMATCH" });
+    const videoTrackCount = await sequence.getVideoTrackCount();
+    const audioTrackCount = await sequence.getAudioTrackCount();
+    if (!Number.isFinite(args.timeSeconds) || args.timeSeconds < 0 || args.timeSeconds > 604800) throw Object.assign(new Error("Insert time must be between zero and seven days"), { code: "UXP_INSERT_TIME_OUT_OF_RANGE" });
+    if (!Number.isInteger(args.videoTrackIndex) || args.videoTrackIndex < 0 || args.videoTrackIndex >= videoTrackCount || !Number.isInteger(args.audioTrackIndex) || args.audioTrackIndex < 0 || args.audioTrackIndex >= audioTrackCount) throw Object.assign(new Error("Target track index is out of range"), { code: "UXP_TRACK_INDEX_OUT_OF_RANGE" });
+    if (typeof ppro.SequenceEditor.getEditor !== "function" || typeof ppro.TickTime.createWithSeconds !== "function" || typeof context.project.lockedAccess !== "function" || typeof context.project.executeTransaction !== "function") throw Object.assign(new Error("Transactional sequence editing APIs are unavailable"), { code: "UXP_SEQUENCE_EDIT_API_UNAVAILABLE" });
+    const videoTrack = await sequence.getVideoTrack(args.videoTrackIndex);
+    const beforeItems = Array.from(await videoTrack.getTrackItems(ppro.Constants.TrackItemType.CLIP, false) || []);
+    let committed = false;
+    let insertDispatched = false;
+    try {
+      context.project.lockedAccess(function () {
+        const editor = ppro.SequenceEditor.getEditor(sequence);
+        if (!editor || typeof editor.createInsertProjectItemAction !== "function") throw Object.assign(new Error("Sequence editor is unavailable"), { code: "UXP_SEQUENCE_EDITOR_UNAVAILABLE" });
+        const time = ppro.TickTime.createWithSeconds(args.timeSeconds);
+        insertDispatched = true;
+        committed = context.project.executeTransaction(function (compoundAction) {
+          compoundAction.addAction(editor.createInsertProjectItemAction(projectItem, time, args.videoTrackIndex, args.audioTrackIndex, args.limitShift !== false));
+        }, "Premiere MCP insert project item");
+      });
+      if (committed === false) throw new Error("Premiere rejected the insert transaction");
+      const afterItems = Array.from(await videoTrack.getTrackItems(ppro.Constants.TrackItemType.CLIP, false) || []);
+      const addedVideoItems = afterItems.length - beforeItems.length;
+      if (addedVideoItems <= 0) throw new Error("Target track item count did not increase");
+      const after = await activeContext();
+      return { beforeRevision, afterRevision: await snapshotRevision(after.project, after.sequence), verification: { outcome: "verified", method: "Project transaction and target VideoTrack item-count readback" }, result: { inserted: true, trackCountVerified: true, addedVideoItems, videoTrackIndex: args.videoTrackIndex, audioTrackIndex: args.audioTrackIndex } };
+    } catch (error) {
+      if (!insertDispatched && error && error.code) throw error;
+      throw Object.assign(new Error(`Insert outcome could not be verified after dispatch: ${String(error && error.message || error)}`), { code: insertDispatched ? "UXP_INSERT_NOT_VERIFIED" : "UXP_INSERT_FAILED" });
+    }
   }
   if (operation === "export.frame") {
     if (!context.sequence) throw Object.assign(new Error("No active sequence"), { code: "UXP_NO_ACTIVE_SEQUENCE" });

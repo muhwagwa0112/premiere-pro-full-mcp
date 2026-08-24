@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { createConnection } from "node:net";
 import type { BackendAdapter, BackendProbe, BridgeRequest, BridgeResponse, DispatchState, RouteBinding, SupportDecision } from "../contracts.js";
 import { hasValidEffectiveRequestBinding, routeBindingFromProbe, sameRouteBinding } from "../security/execution-plan.js";
+import { uiSemanticOperationIds } from "../features/ui/semantic-adapters.js";
 
 interface UiResponse {
   protocolVersion: 1;
@@ -18,11 +19,22 @@ interface UiHealth {
   agentVersion: string;
   agentSessionId: string;
   capabilityFingerprint: string;
+  semanticAdapterProtocol: 1;
+}
+
+function hasVerifiedSemanticPostcondition(result: unknown): boolean {
+  if (!result || typeof result !== "object") return false;
+  const postcondition = (result as { postcondition?: unknown }).postcondition;
+  return !!postcondition
+    && typeof postcondition === "object"
+    && (postcondition as { verified?: unknown }).verified === true
+    && typeof (postcondition as { method?: unknown }).method === "string"
+    && (postcondition as { method: string }).method.length > 0;
 }
 
 export class UiNamedPipeAdapter implements BackendAdapter {
   readonly backend = "ui" as const;
-  static readonly operations = ["host.inspect", "ui.catalog", "ui.invoke"] as const;
+  static readonly operations = ["host.inspect", ...uiSemanticOperationIds] as const;
   readonly #token: string | null;
   readonly #pipePath: string;
   readonly #timeoutMs: number;
@@ -40,7 +52,8 @@ export class UiNamedPipeAdapter implements BackendAdapter {
     const identityIsValid = health?.status === "ok"
       && typeof health.agentVersion === "string" && health.agentVersion.length > 0
       && typeof health.agentSessionId === "string" && health.agentSessionId.length > 0
-      && typeof health.capabilityFingerprint === "string" && /^[a-f0-9]{64}$/i.test(health.capabilityFingerprint);
+      && typeof health.capabilityFingerprint === "string" && /^[a-f0-9]{64}$/i.test(health.capabilityFingerprint)
+      && health.semanticAdapterProtocol === 1;
     return response.ok
       && identityIsValid
       ? { backend: this.backend, available: true, hostVersion: health.agentVersion!, hostSessionId: health.agentSessionId!, capabilityFingerprint: health.capabilityFingerprint!, operations: UiNamedPipeAdapter.operations }
@@ -65,10 +78,10 @@ export class UiNamedPipeAdapter implements BackendAdapter {
     }
     const operation = request.operation === "host.inspect"
       ? "premiere.window.inspect"
-      : request.operation === "ui.catalog"
-        ? "premiere.controls.catalog"
-        : request.operation === "ui.invoke"
-          ? "ui.control.invoke"
+      : request.operation === "ui.adapter.catalog"
+        ? "premiere.adapters.catalog"
+        : request.operation === "ui.adapter.invoke"
+          ? "premiere.adapter.invoke"
           : null;
     if (!operation) {
       return {
@@ -83,8 +96,8 @@ export class UiNamedPipeAdapter implements BackendAdapter {
         },
       };
     }
-    const defaultTimeoutMs = operation === "premiere.controls.catalog" ? 50_000 : 5_000;
-    const timeoutMs = this.#timeoutMs === 5_000 ? defaultTimeoutMs : operation === "premiere.controls.catalog" ? Math.max(50_000, this.#timeoutMs) : this.#timeoutMs;
+    const defaultTimeoutMs = operation === "premiere.adapters.catalog" ? 10_000 : 5_000;
+    const timeoutMs = this.#timeoutMs === 5_000 ? defaultTimeoutMs : operation === "premiere.adapters.catalog" ? Math.max(10_000, this.#timeoutMs) : this.#timeoutMs;
     const response = await this.call(
       operation,
       request.operation === "host.inspect" ? {} : request.args,
@@ -96,19 +109,40 @@ export class UiNamedPipeAdapter implements BackendAdapter {
       request.effectiveRequestDigest,
     );
     if (!response.ok) {
+      const postconditionUnknown = response.error?.code === "ui_postcondition_failed" || response.error?.code === "UI_POSTCONDITION_NOT_VERIFIED";
       const dispatchState: DispatchState = response.error?.code === "UI_UNAVAILABLE" || response.error?.code === "UI_TOKEN_MISSING"
         ? "not_dispatched"
-        : response.error?.code === "UI_TIMEOUT" || response.error?.code === "UI_DISCONNECTED" || response.error?.code === "UI_PROTOCOL_ERROR" || response.error?.code === "UI_RESPONSE_TOO_LARGE"
+        : postconditionUnknown || response.error?.code === "UI_TIMEOUT" || response.error?.code === "UI_DISCONNECTED" || response.error?.code === "UI_PROTOCOL_ERROR" || response.error?.code === "UI_RESPONSE_TOO_LARGE"
           ? "unknown"
           : "completed";
-      return { protocolVersion: 1, requestId: request.requestId, ok: false, dispatchState, error: { code: response.error?.code ?? "UI_AGENT_ERROR", message: response.error?.message ?? "UI agent failed", retryable: dispatchState === "unknown" ? false : response.error?.retryable ?? false } };
+      return { protocolVersion: 1, requestId: request.requestId, ok: false, dispatchState, error: { code: postconditionUnknown ? "UI_POSTCONDITION_NOT_VERIFIED" : response.error?.code ?? "UI_AGENT_ERROR", message: response.error?.message ?? "UI agent failed", retryable: dispatchState === "unknown" ? false : response.error?.retryable ?? false } };
+    }
+    if (request.operation === "ui.adapter.invoke" && !hasVerifiedSemanticPostcondition(response.result)) {
+      return {
+        protocolVersion: 1,
+        requestId: request.requestId,
+        ok: false,
+        dispatchState: "unknown",
+        error: {
+          code: "UI_POSTCONDITION_NOT_VERIFIED",
+          message: "The semantic adapter completed without its registered postcondition evidence; the action must not be retried automatically",
+          retryable: false,
+        },
+      };
     }
     return {
       protocolVersion: 1,
       requestId: request.requestId,
       ok: true,
       dispatchState: "completed",
-      verification: { outcome: request.operation === "ui.catalog" || request.operation === "host.inspect" ? "verified" : "committed_unverified", method: request.operation === "ui.catalog" ? "bounded semantic UI Automation catalog" : "semantic UI state; host postcondition still required" },
+      verification: {
+        outcome: "verified",
+        method: request.operation === "ui.adapter.invoke"
+          ? "versioned semantic adapter postcondition"
+          : request.operation === "ui.adapter.catalog"
+            ? "targeted semantic adapter compatibility probe"
+            : "foreground Premiere window inspection",
+      },
       result: response.result,
     };
   }

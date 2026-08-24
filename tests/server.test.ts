@@ -22,12 +22,25 @@ describe("public MCP request schema", () => {
     close.push(() => client.close(), () => server.close());
 
     const tools = await client.listTools();
-    const typedTools = tools.tools.filter((tool) => tool.name.startsWith("premiere_") && !["premiere_capabilities", "premiere_operations"].includes(tool.name));
+    expect(tools.tools.find((tool) => tool.name === "premiere_jobs")?.inputSchema).toMatchObject({
+      required: ["mode"],
+      properties: { mode: { enum: ["plan", "workflow_plan", "execute", "status", "cancel", "resume", "rollback"] } },
+    });
+    const typedTools = tools.tools.filter((tool) => tool.name.startsWith("premiere_") && !["premiere_capabilities", "premiere_operations", "premiere_jobs"].includes(tool.name));
     expect(typedTools.length).toBeGreaterThan(0);
     for (const tool of typedTools) {
       expect(tool.inputSchema).toMatchObject({
         properties: { planHash: { type: "string", pattern: "^sha256:[a-f0-9]{64}$" } },
       });
     }
+
+    const resources = await client.listResources();
+    expect(resources.resources).toEqual(expect.arrayContaining([
+      expect.objectContaining({ uri: "premiere://features", name: "premiere-feature-registry" }),
+    ]));
+    const registry = await client.readResource({ uri: "premiere://features" });
+    const entries = JSON.parse((registry.contents[0] as { text: string }).text) as Array<{ featureId: string; status: string }>;
+    expect(entries.length).toBeGreaterThan(100);
+    expect(entries.find((entry) => entry.featureId === "timeline.clip.insert")?.status).toBe("SUPPORTED_CONTEXTUAL");
   });
 });

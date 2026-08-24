@@ -1,8 +1,12 @@
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { domainSchema, type ActionDomain } from "./contracts.js";
+import { actionRequestSchema, domainSchema, type ActionDomain } from "./contracts.js";
 import { getAction, listActions } from "./catalog.js";
 import type { OperationEngine } from "./operation-engine.js";
+import { JobEngine } from "./workflows/job-engine.js";
+import { jobPlanInputSchema } from "./workflows/job-contracts.js";
+import { listFeatureRegistry } from "./features/registry.js";
+import { buildPostProductionJobPlanInput } from "./features/program/workflows.js";
 
 const jsonRecord = z.record(z.string(), z.unknown());
 const actionInputShape = {
@@ -26,8 +30,10 @@ function normalizeRequest(input: Record<string, unknown>): Record<string, unknow
   return { ...input, args: input.args ?? {} };
 }
 
-export function createServer(engine: OperationEngine): McpServer {
+export function createServer(engine: OperationEngine, jobs?: JobEngine): McpServer {
   const server = new McpServer({ name: "premiere-pro-full-mcp", version: "0.3.0" });
+  let jobEngine = jobs;
+  const durableJobs = () => jobEngine ??= new JobEngine(engine);
 
   server.registerTool("premiere_capabilities", {
     title: "Premiere capabilities",
@@ -97,11 +103,52 @@ export function createServer(engine: OperationEngine): McpServer {
     }
   });
 
+  server.registerTool("premiere_jobs", {
+    title: "Durable Premiere job lifecycle",
+    description: "Plan and durably execute a DAG of Premiere operations, inspect status, request cooperative cancellation, resume verified work, or perform evidence-based rollback.",
+    inputSchema: {
+      mode: z.enum(["plan", "workflow_plan", "execute", "status", "cancel", "resume", "rollback"]),
+      job: jobPlanInputSchema.optional(),
+      workflowId: z.string().min(3).max(128).optional(),
+      requests: z.array(actionRequestSchema).max(128).optional(),
+      jobId: z.uuid().optional(),
+    },
+    annotations: { openWorldHint: false },
+  }, async ({ mode, job, workflowId, requests, jobId }) => {
+    try {
+      if (mode === "plan") {
+        if (!job) throw new Error("job is required for plan");
+        return textResult({ ...(await durableJobs().plan(job)) });
+      }
+      if (mode === "workflow_plan") {
+        if (!workflowId || !requests) throw new Error("workflowId and requests are required for workflow_plan");
+        const capabilities = await engine.capabilities() as { backends?: Record<string, { available?: boolean; operations?: string[] }> };
+        const advertisedHandlers = [...new Set(Object.values(capabilities.backends ?? {}).filter((probe) => probe.available).flatMap((probe) => probe.operations ?? []))];
+        const jobPlan = buildPostProductionJobPlanInput(workflowId, requests, { advertisedHandlers, verifiedEntitlements: [] });
+        return textResult({ ...(await durableJobs().plan(jobPlan)) });
+      }
+      if (!jobId) throw new Error(`jobId is required for ${mode}`);
+      if (mode === "execute") return textResult({ ...(await durableJobs().execute(jobId)) });
+      if (mode === "status") return textResult({ ...(await durableJobs().status(jobId)) });
+      if (mode === "cancel") return textResult({ ...(await durableJobs().cancel(jobId)) });
+      if (mode === "resume") return textResult({ ...(await durableJobs().resume(jobId)) });
+      return textResult({ ...(await durableJobs().rollback(jobId)) });
+    } catch (error) {
+      return textResult({ status: "failed", error: { code: "JOB_REQUEST_REJECTED", message: (error as Error).message } });
+    }
+  });
+
   server.registerResource("premiere-capabilities", "premiere://capabilities", {
     title: "Premiere capability catalog",
     description: "Current backend availability, authorities, and action support states.",
     mimeType: "application/json",
   }, async (uri) => ({ contents: [{ uri: uri.href, mimeType: "application/json", text: JSON.stringify(await engine.capabilities(), null, 2) }] }));
+
+  server.registerResource("premiere-feature-registry", "premiere://features", {
+    title: "Premiere feature registry",
+    description: "Complete user-facing Premiere feature-family registry with truthful backend, evidence state, version, precondition, and verifier classifications.",
+    mimeType: "application/json",
+  }, async (uri) => ({ contents: [{ uri: uri.href, mimeType: "application/json", text: JSON.stringify(listFeatureRegistry(), null, 2) }] }));
 
   server.registerResource("premiere-actions", new ResourceTemplate("premiere://actions/{domain}", { list: undefined }), {
     title: "Premiere domain actions",

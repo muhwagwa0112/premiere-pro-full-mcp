@@ -21,8 +21,8 @@ describe("bounded live bridge deadlines", () => {
     expect(uxp).toContain("isSequence ? 30 * 60_000 : 5_000");
     expect(uxp).toContain("isSequence ? 20 : 1");
     expect(uxp).toContain("UXP_EXPORT_OUTPUT_EXISTS");
-    expect(ui).toContain('operation === "premiere.controls.catalog" ? 50_000 : 5_000');
-    expect(worker).toContain("CatalogDeadline = TimeSpan.FromSeconds(45)");
+    expect(ui).toContain('operation === "premiere.adapters.catalog" ? 10_000 : 5_000');
+    expect(worker).toContain("CatalogDeadline = TimeSpan.FromSeconds(8)");
     expect(broker).toContain('["--hmac", key, "session-key", "node-server"]');
     expect(broker).toContain('createHmac("sha256", await sessionKey(key))');
     expect(broker).toContain("timingSafeEqual(expected, provided)");

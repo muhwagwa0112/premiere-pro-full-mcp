@@ -1,11 +1,12 @@
 import { z } from "zod";
 import type { ActionDescriptor, ActionDomain } from "./contracts.js";
+import { coreSemanticActions } from "./features/core-semantic.js";
+import { uiSemanticActions } from "./features/ui/semantic-adapters.js";
 
 const emptyArgs = z.object({}).strict();
 const optionalScope = z.object({ scope: z.string().min(1).max(64).optional() }).strict();
 const projectPath = z.object({ path: z.string().min(1).max(4096) }).strict();
 const mediaImport = z.object({ paths: z.array(z.string().min(1).max(4096)).min(1).max(128) }).strict();
-const timelineInsert = z.object({ projectItemId: z.string().min(1), timeSeconds: z.number().nonnegative(), trackIndex: z.number().int().nonnegative() }).strict();
 const sequenceFromMedia = z.object({ name: z.string().min(1).max(256), projectItemIds: z.array(z.string().min(1).max(256)).min(1).max(128) }).strict();
 const effectAction = z.object({ clipId: z.string().min(1), effectId: z.string().min(1), parameters: z.record(z.string(), z.unknown()).optional() }).strict();
 const exportFrame = z.object({ outputPath: z.string().min(1).max(4096), timeSeconds: z.number().nonnegative() }).strict();
@@ -13,7 +14,7 @@ const exportSequence = z.object({ outputPath: z.string().min(1).max(4096), prese
 const workspaceSet = z.object({ name: z.string().min(1).max(128) }).strict();
 const pluginUi = z.object({ pluginId: z.string().min(1).max(256), command: z.string().min(1).max(128), values: z.record(z.string(), z.unknown()).optional() }).strict();
 const cloudAction = z.object({ service: z.enum(["frameio", "stock", "generative"]), command: z.string().min(1).max(128), values: z.record(z.string(), z.unknown()).optional() }).strict();
-const runtimeTarget = z.object({ $ref: z.string().min(8).max(256), type: z.string().min(1).max(128).optional(), session: z.string().min(8).max(128).optional() }).strict();
+const runtimeTarget = z.object({ $ref: z.string().min(8).max(256), type: z.string().min(1).max(128).optional(), session: z.string().min(8).max(128).optional(), stateToken: z.string().min(16).max(512).optional() }).strict();
 const runtimeCall = z.object({ memberId: z.string().min(3).max(256), target: runtimeTarget.optional(), arguments: z.array(z.unknown()).max(64).default([]), value: z.unknown().optional(), paths: z.array(z.string().min(1).max(4096)).max(64).optional() }).strict();
 const runtimeCatalog = z.object({ query: z.string().max(128).optional(), container: z.string().max(128).optional(), bucket: z.enum(["read", "edit", "sensitive", "filesystem", "destructive"]).optional(), offset: z.number().int().nonnegative().default(0), limit: z.number().int().min(1).max(200).default(100) }).strict();
 const handleRelease = z.object({ $ref: z.string().min(8).max(256), session: z.string().min(8).max(128).optional() }).strict();
@@ -25,7 +26,6 @@ const subscriptionId = z.object({ subscriptionId: z.string().min(8).max(256) }).
 const eventPoll = z.object({ subscriptionId: z.string().min(8).max(256).optional(), limit: z.number().int().min(1).max(200).default(100) }).strict();
 const capabilityCall = z.object({ capabilityId: z.string().min(8).max(256), arguments: z.array(z.unknown()).max(64).default([]), value: z.unknown().optional(), paths: z.array(z.string().min(1).max(4096)).max(64).optional() }).strict();
 const capabilityCatalog = z.object({ root: z.string().max(128).optional(), objectRef: z.string().min(8).max(256).optional(), query: z.string().max(128).optional(), offset: z.number().int().nonnegative().default(0), limit: z.number().int().min(1).max(200).default(100) }).strict();
-const uiInvoke = z.object({ capability: z.string().regex(/^[a-f0-9]{64}$/), automationId: z.string().min(1).max(512), controlType: z.enum(["Button", "MenuItem", "CheckBox", "RadioButton", "ListItem", "TabItem"]), action: z.enum(["invoke", "toggle", "select"]) }).strict();
 
 const actions: ActionDescriptor[] = [
   {
@@ -116,16 +116,7 @@ const actions: ActionDescriptor[] = [
     preferredBackends: ["qe"], minimumPremiereVersion: "26.3.2", mutatesProject: bucket !== "read", undoable: bucket === "edit",
     verification: "opaque QE capability and host readback", support: "experimental", argsSchema: capabilityCall,
   })),
-  {
-    id: "ui.catalog", domain: "api", title: "Catalog semantic Premiere controls", description: "Enumerate bounded foreground Premiere controls with stable AutomationId and supported patterns.",
-    risk: "R0", authority: "inspect", preferredBackends: ["ui"], minimumPremiereVersion: "26.3.2", mutatesProject: false, undoable: false,
-    verification: "foreground UI Automation tree", support: "ui_fallback", argsSchema: z.object({ offset: z.number().int().nonnegative().default(0), limit: z.number().int().min(1).max(500).default(200) }).strict(),
-  },
-  {
-    id: "ui.invoke", domain: "api", title: "Invoke semantic Premiere control", description: "Use a short-lived, single-use capability issued by ui.catalog to invoke, toggle, or select the exact unchanged foreground Premiere control.",
-    risk: "R3", authority: "experimental", preferredBackends: ["ui"], minimumPremiereVersion: "26.3.2", mutatesProject: true, undoable: false,
-    verification: "semantic UI state and host readback", support: "ui_fallback", argsSchema: uiInvoke,
-  },
+  ...uiSemanticActions,
   {
     id: "host.inspect", domain: "inspection", title: "Inspect Premiere host", description: "Read installed and connected host status without project content.",
     risk: "R0", authority: "inspect", preferredBackends: ["uxp", "cep", "local"], minimumPremiereVersion: "26.3.0", mutatesProject: false, undoable: false,
@@ -161,11 +152,7 @@ const actions: ActionDescriptor[] = [
     risk: "R2", authority: "filesystem", preferredBackends: ["uxp", "cep"], minimumPremiereVersion: "26.3.0", mutatesProject: true, undoable: false,
     verification: "project item identity readback", support: "implemented_unverified", argsSchema: mediaImport,
   },
-  {
-    id: "timeline.clip.insert", domain: "timeline", title: "Insert clip", description: "Insert one project item into a sequence track with revision protection.",
-    risk: "R1", authority: "edit", preferredBackends: ["uxp", "cep"], minimumPremiereVersion: "26.3.0", mutatesProject: true, undoable: true,
-    verification: "track item boundary readback", support: "unsupported", argsSchema: timelineInsert,
-  },
+  ...coreSemanticActions,
   {
     id: "timeline.sequence.create_from_media", domain: "timeline", title: "Create sequence from media", description: "Create a named sequence from exact imported project-item identities.",
     risk: "R1", authority: "edit", preferredBackends: ["uxp", "cep"], minimumPremiereVersion: "26.3.0", mutatesProject: true, undoable: true,
