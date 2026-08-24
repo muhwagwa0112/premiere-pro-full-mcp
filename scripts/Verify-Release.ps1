@@ -6,6 +6,7 @@ param(
     [string]$SignaturePath = '',
     [string]$SbomPath = '',
     [string]$NoticesPath = '',
+    [string]$ZxpSignCmdPath = '',
     [string]$Repository = 'muhwagwa0112/premiere-pro-full-mcp'
 )
 
@@ -15,6 +16,14 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 if ($Repository -ne $script:PpMcpRepository) { throw 'The public release repository is pinned and cannot be overridden.' }
 $package = Get-Content -LiteralPath (Join-Path $repoRoot 'package.json') -Raw | ConvertFrom-Json
 $version = [string]$package.version
+$expectedZxpSignCmdSha256 = 'dc2e711a46504830062ac1afede1f8ee08c1e21399b6c30d7d38cf907c35bcf5'
+if (-not $ZxpSignCmdPath) {
+    if ($env:ZXPSIGNCMD_PATH) { $ZxpSignCmdPath = $env:ZXPSIGNCMD_PATH }
+    elseif ($env:LOCALAPPDATA) { $ZxpSignCmdPath = Join-Path $env:LOCALAPPDATA 'PremiereMCP\audit-tools\zxpsigncmd-4.1.103\ZXPSignCmd.exe' }
+}
+if (-not $ZxpSignCmdPath -or -not (Test-Path -LiteralPath $ZxpSignCmdPath -PathType Leaf)) { throw 'Adobe ZXPSignCmd 4.1.103 is required for CEP verification.' }
+$ZxpSignCmdPath = [System.IO.Path]::GetFullPath($ZxpSignCmdPath)
+if ((Get-PpMcpSha256 -Path $ZxpSignCmdPath) -ne $expectedZxpSignCmdSha256) { throw 'ZXPSignCmd does not match the pinned Adobe 4.1.103 win64 checksum.' }
 if (-not $ArchivePath) { $ArchivePath = Join-Path $repoRoot "artifacts\premiere-pro-full-mcp-v$version-windows.zip" }
 if (-not $CcxPath) { $CcxPath = Join-Path $repoRoot "artifacts\premiere-pro-full-mcp-v$version.ccx" }
 if (-not $SbomPath) { $SbomPath = Join-Path $repoRoot "artifacts\premiere-pro-full-mcp-v$version.spdx.json" }
@@ -56,6 +65,8 @@ try {
     foreach ($required in @('Install.ps1', 'Doctor.ps1', 'Update.ps1', 'Uninstall.ps1', 'Common.ps1', 'release-signing-public.xml', 'MANIFEST.sha256', 'MANIFEST.sha256.sig', 'release-manifest.json', 'LICENSE', 'SBOM.spdx.json', 'THIRD-PARTY-NOTICES.md', 'payload\native\win-x64\PremiereMcp.WindowsUiAgent.exe', 'payload\bundle\premiere-mcp.bundle.mjs', 'payload\runtime\node\node.exe', 'payload\integrity\runtime-integrity.json', 'payload\integrity\runtime-integrity.json.sig', 'payload\uxp-plugin\manifest.json', 'payload\cep-plugin\CSXS\manifest.xml', 'payload\cep-plugin\META-INF\signatures.xml', 'payload\cep-plugin\mimetype')) {
         if (-not (Test-Path -LiteralPath (Join-Path $bundle $required))) { throw "Release payload is missing: $required" }
     }
+    & $ZxpSignCmdPath -verify (Join-Path $bundle 'payload\cep-plugin')
+    if ($LASTEXITCODE -ne 0) { throw 'Adobe ZXPSignCmd rejected the packaged CEP directory.' }
     $bundledCcx = Join-Path $bundle "premiere-pro-full-mcp-v$version.ccx"
     if ((Get-PpMcpSha256 $bundledCcx) -ne (Get-PpMcpSha256 $CcxPath)) { throw 'Bundled and standalone CCX assets differ.' }
     $ccxZip = Join-Path $temporaryRoot 'plugin.zip'; $ccxExpanded = Join-Path $temporaryRoot 'plugin'
@@ -69,6 +80,8 @@ try {
     $doctor = Join-Path $installRoot 'app\tools\Doctor.ps1'
     & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $doctor -InstallRoot $installRoot -CepInstallRoot $cepRoot -SkipCodexRegistration -SkipPremiereCheck
     if ($LASTEXITCODE -ne 0) { throw 'Installed Doctor reported a failure.' }
+    & $ZxpSignCmdPath -verify $cepRoot
+    if ($LASTEXITCODE -ne 0) { throw 'Adobe ZXPSignCmd rejected the installed CEP directory.' }
 
     $tamperedManifest = Join-Path $temporaryRoot 'tampered-manifest.json'
     Copy-Item -LiteralPath $ManifestPath -Destination $tamperedManifest -Force

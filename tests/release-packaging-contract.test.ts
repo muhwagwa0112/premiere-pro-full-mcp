@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, test } from "vitest";
@@ -28,6 +28,16 @@ describe("release packaging contract", () => {
     expect(requiredCheck).toBeGreaterThan(0);
     expect(requiredCheck).toBeLessThan(dirtyCheck);
     expect(script).not.toContain("scripts\\Build-Ccx.ps1");
+  });
+
+  test("creates and verifies the CEP signature during the clean release build", () => {
+    const script = readFileSync(resolve(root, "scripts", "Build-Release.ps1"), "utf8");
+    expect(script).toContain("ZXPSignCmd 4.1.103 is required");
+    expect(script).toContain("$expectedZxpSignCmdSha256");
+    expect(script).toContain("-sign $cepSigningSource $cepZxpPath");
+    expect(script).toContain("-verify $signedCepRoot");
+    expect(existsSync(resolve(root, "cep-plugin", "META-INF", "signatures.xml"))).toBe(false);
+    expect(existsSync(resolve(root, "cep-plugin", "mimetype"))).toBe(false);
   });
 
   test("development archive cannot be emitted as a CCX", () => {

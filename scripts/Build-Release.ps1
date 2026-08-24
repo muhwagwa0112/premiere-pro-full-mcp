@@ -4,6 +4,9 @@ param(
     [string]$CcxPath = '',
     [string]$SigningKeyPath = '',
     [string]$SyftPath = '',
+    [string]$ZxpSignCmdPath = '',
+    [string]$CepSigningCertificatePath = '',
+    [string]$CepSigningCredentialPath = '',
     [string]$Repository = 'muhwagwa0112/premiere-pro-full-mcp'
 )
 
@@ -34,6 +37,21 @@ if (-not $SyftPath) {
     elseif ($env:LOCALAPPDATA) { $SyftPath = (Get-ChildItem (Join-Path $env:LOCALAPPDATA 'PremiereMCP\audit-tools\syft-*\syft.exe') -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -First 1).FullName }
 }
 if (-not $SyftPath -or -not (Test-Path -LiteralPath $SyftPath -PathType Leaf)) { throw 'A checksum-verified Syft executable is required. Pass -SyftPath or set SYFT_PATH.' }
+$expectedZxpSignCmdSha256 = 'dc2e711a46504830062ac1afede1f8ee08c1e21399b6c30d7d38cf907c35bcf5'
+if (-not $ZxpSignCmdPath) {
+    if ($env:ZXPSIGNCMD_PATH) { $ZxpSignCmdPath = $env:ZXPSIGNCMD_PATH }
+    elseif ($env:LOCALAPPDATA) { $ZxpSignCmdPath = Join-Path $env:LOCALAPPDATA 'PremiereMCP\audit-tools\zxpsigncmd-4.1.103\ZXPSignCmd.exe' }
+}
+if (-not $ZxpSignCmdPath -or -not (Test-Path -LiteralPath $ZxpSignCmdPath -PathType Leaf)) { throw 'Adobe ZXPSignCmd 4.1.103 is required. Pass -ZxpSignCmdPath or set ZXPSIGNCMD_PATH.' }
+$ZxpSignCmdPath = [System.IO.Path]::GetFullPath($ZxpSignCmdPath)
+if ((Get-PpMcpSha256 -Path $ZxpSignCmdPath) -ne $expectedZxpSignCmdSha256) { throw 'ZXPSignCmd does not match the pinned Adobe 4.1.103 win64 checksum.' }
+if (-not $CepSigningCertificatePath -and $env:LOCALAPPDATA) { $CepSigningCertificatePath = Join-Path $env:LOCALAPPDATA 'PremiereMCP\release-cep-signing.p12' }
+if (-not $CepSigningCredentialPath -and $env:LOCALAPPDATA) { $CepSigningCredentialPath = Join-Path $env:LOCALAPPDATA 'PremiereMCP\release-cep-signing-password.clixml' }
+foreach ($requiredSigningInput in @($CepSigningCertificatePath, $CepSigningCredentialPath)) {
+    if (-not $requiredSigningInput -or -not (Test-Path -LiteralPath $requiredSigningInput -PathType Leaf)) { throw 'The CEP signing certificate and DPAPI-protected credential are required.' }
+}
+$CepSigningCertificatePath = [System.IO.Path]::GetFullPath($CepSigningCertificatePath)
+$CepSigningCredentialPath = [System.IO.Path]::GetFullPath($CepSigningCredentialPath)
 if (-not $OutputDirectory) { $OutputDirectory = Join-Path $repoRoot 'artifacts' }
 $OutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
 $stagingRoot = Join-Path $repoRoot '.release-staging'
@@ -49,7 +67,30 @@ Invoke-PpMcpCommand -FilePath 'npm.cmd' -Arguments @('run', 'build') -FailureMes
 Invoke-PpMcpCommand -FilePath 'dotnet.exe' -Arguments @('publish', 'windows-ui-agent/PremiereMcp.WindowsUiAgent.csproj', '--configuration', 'Release', '--runtime', 'win-x64', '--self-contained', 'true', '--output', $nativePublishRoot, '/p:DebugType=None', '/p:DebugSymbols=false', '/p:PublishSingleFile=false') -FailureMessage 'Native launcher publish failed'
 New-Item -ItemType Directory -Path (Join-Path $payloadRoot 'native') -Force | Out-Null
 Copy-Item -LiteralPath $nativePublishRoot -Destination (Join-Path $payloadRoot 'native\win-x64') -Recurse -Force
-foreach ($name in @('bundle', 'generated', 'uxp-plugin', 'cep-plugin')) { Copy-Item -LiteralPath (Join-Path $repoRoot $name) -Destination (Join-Path $payloadRoot $name) -Recurse -Force }
+foreach ($name in @('bundle', 'generated', 'uxp-plugin')) { Copy-Item -LiteralPath (Join-Path $repoRoot $name) -Destination (Join-Path $payloadRoot $name) -Recurse -Force }
+$cepSigningSource = Join-Path $stagingRoot 'cep-signing-source'
+New-Item -ItemType Directory -Path $cepSigningSource -Force | Out-Null
+Get-ChildItem -LiteralPath (Join-Path $repoRoot 'cep-plugin') -Force |
+    Where-Object { $_.Name -notin @('META-INF', 'mimetype') } |
+    Copy-Item -Destination $cepSigningSource -Recurse -Force
+$cepCredential = Import-Clixml -LiteralPath $CepSigningCredentialPath
+if ($cepCredential -isnot [System.Management.Automation.PSCredential]) { throw 'The CEP signing credential must be a DPAPI-protected PSCredential.' }
+$cepPasswordPointer = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($cepCredential.Password)
+$cepZxpPath = Join-Path $stagingRoot 'cep-plugin.zxp'
+try {
+    $cepPassword = [System.Runtime.InteropServices.Marshal]::PtrToStringBSTR($cepPasswordPointer)
+    & $ZxpSignCmdPath -sign $cepSigningSource $cepZxpPath $CepSigningCertificatePath $cepPassword
+    if ($LASTEXITCODE -ne 0) { throw 'Adobe ZXPSignCmd failed to sign the CEP payload.' }
+} finally {
+    $cepPassword = $null
+    [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($cepPasswordPointer)
+}
+& $ZxpSignCmdPath -verify $cepZxpPath
+if ($LASTEXITCODE -ne 0) { throw 'Adobe ZXPSignCmd rejected the signed CEP ZXP.' }
+$signedCepRoot = Join-Path $payloadRoot 'cep-plugin'
+Expand-PpMcpSafeArchive -ArchivePath $cepZxpPath -DestinationPath $signedCepRoot
+& $ZxpSignCmdPath -verify $signedCepRoot
+if ($LASTEXITCODE -ne 0) { throw 'Adobe ZXPSignCmd rejected the extracted signed CEP directory.' }
 $nodeExecutable = (Get-Command node.exe -ErrorAction Stop).Source
 $nodeVersion = (& $nodeExecutable --version).TrimStart('v')
 if ($LASTEXITCODE -ne 0 -or $nodeVersion -notmatch '^\d+\.\d+\.\d+$') { throw 'Could not resolve the bundled Node.js runtime version.' }
