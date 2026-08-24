@@ -53,6 +53,13 @@ elseif ($metadata -and (Get-Command codex -ErrorAction SilentlyContinue)) {
 } else { Add-Check 'codex-registration' $false 'Codex CLI or installed metadata is unavailable.' }
 
 if ($CheckLive -and $metadata) {
+    $uxpConnections = @(Get-NetTCPConnection -LocalAddress '127.0.0.1' -LocalPort 17777 -ErrorAction SilentlyContinue)
+    $uxpListener = @($uxpConnections | Where-Object State -eq 'Listen' | Select-Object -First 1)
+    $uxpOwner = if ($uxpListener.Count) { Get-CimInstance Win32_Process -Filter "ProcessId=$($uxpListener[0].OwningProcess)" -ErrorAction SilentlyContinue } else { $null }
+    $uxpOwnedByRuntime = $uxpOwner -and [string]$uxpOwner.CommandLine -and ([string]$uxpOwner.CommandLine).Contains([string]$metadata.bundle)
+    Add-Check 'uxp-listener' ([bool]$uxpOwnedByRuntime) ($(if ($uxpOwnedByRuntime) { 'Installed MCP runtime is listening on 127.0.0.1:17777.' } else { 'The installed MCP runtime is not listening on 127.0.0.1:17777.' }))
+    $uxpSession = $uxpOwnedByRuntime -and @($uxpConnections | Where-Object { $_.State -eq 'Established' -and $_.OwningProcess -eq $uxpListener[0].OwningProcess }).Count -gt 0
+    Add-Check 'uxp-panel-session' ([bool]$uxpSession) ($(if ($uxpSession) { 'Premiere UXP panel has an established one-click local session.' } else { 'No established Premiere UXP panel session was found; open the panel and select Connect.' }))
     $cepHeartbeat = Join-Path $resolvedInstallRoot 'cep-public-v1\heartbeat.json'
     $cepFresh = (Test-Path -LiteralPath $cepHeartbeat -PathType Leaf) -and (((Get-Date) - (Get-Item -LiteralPath $cepHeartbeat).LastWriteTime).TotalSeconds -lt 30)
     Add-Check 'cep-heartbeat' $cepFresh ($(if ($cepFresh) { $cepHeartbeat } else { 'No fresh CEP heartbeat was found.' }))

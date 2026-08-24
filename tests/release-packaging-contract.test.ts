@@ -79,6 +79,15 @@ describe("release packaging contract", () => {
     expect(install).toContain("trustProfileId = $(if ($TrustProfileId)");
     expect(install).toContain("@('--trust-profile', 'enroll', $trustEnrollment.path)");
     expect(install).toContain("The launcher identity changed; unattended mode requires -TrustProfilePath");
+    expect(install).toContain("secrets\\uxp-bridge-token.dpapi");
+    expect(install).toContain("app\\runtime-bootstrap.json");
+  });
+
+  test("Doctor diagnoses the token-free UXP listener and panel session", () => {
+    const doctor = readFileSync(resolve(root, "scripts", "install", "Doctor.ps1"), "utf8");
+    expect(doctor).toContain("Add-Check 'uxp-listener'");
+    expect(doctor).toContain("Add-Check 'uxp-panel-session'");
+    expect(doctor).toContain("Get-NetTCPConnection -LocalAddress '127.0.0.1' -LocalPort 17777");
   });
 
   test("trust profile enrollment validates exact mode and profile ID before installation", () => {

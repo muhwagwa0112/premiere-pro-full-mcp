@@ -211,6 +211,19 @@ try {
     $env:PREMIERE_MCP_INSTALL_ROOT = $previousInstallRootEnvironment
 }
 
+# v0.3.0 no longer accepts a UXP shared token. Retire only the exact legacy
+# secret and bootstrap filenames after activation has succeeded, including
+# copies moved into this product's timestamped install/uninstall archives.
+$deprecatedUxpSecret = Join-Path $resolvedInstallRoot 'secrets\uxp-bridge-token.dpapi'
+if (Test-Path -LiteralPath $deprecatedUxpSecret -PathType Leaf) { Remove-Item -LiteralPath $deprecatedUxpSecret -Force }
+$backupBase = Join-Path $resolvedInstallRoot 'backups'
+if (Test-Path -LiteralPath $backupBase -PathType Container) {
+    foreach ($archive in @(Get-ChildItem -LiteralPath $backupBase -Directory -Force)) {
+        $deprecatedBootstrap = Join-Path $archive.FullName 'app\runtime-bootstrap.json'
+        if (Test-Path -LiteralPath $deprecatedBootstrap -PathType Leaf) { Remove-Item -LiteralPath $deprecatedBootstrap -Force }
+    }
+}
+
 Write-Host "Installed Premiere Pro Full MCP $version for the current Windows user."
 if (Test-Path -LiteralPath $backupRoot) { Write-Host "Previous files were backed up to: $backupRoot" }
 Write-Host "Codex registration: $(if ($SkipCodexRegistration) { 'skipped' } else { $script:PpMcpRegistration })"
