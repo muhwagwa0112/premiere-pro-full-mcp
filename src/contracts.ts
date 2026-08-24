@@ -116,6 +116,7 @@ export interface BridgeResponse {
   protocolVersion: 1;
   requestId: string;
   ok: boolean;
+  dispatchState: DispatchState;
   hostVersion?: string;
   beforeRevision?: string;
   afterRevision?: string;
@@ -125,8 +126,30 @@ export interface BridgeResponse {
   error?: { code: string; message: string; retryable?: boolean };
 }
 
+export type DispatchState = "not_dispatched" | "accepted" | "completed" | "unknown";
+
+export interface BackendProbe {
+  backend: Backend;
+  available: boolean;
+  hostVersion?: string;
+  hostSessionId?: string;
+  capabilityFingerprint?: string;
+  operations: readonly string[];
+  reason?: string;
+}
+
+export interface SupportDecision {
+  supported: boolean;
+  state: "verified" | "implemented_unverified" | "contextual" | "experimental" | "unsupported";
+  requiredState?: readonly string[];
+  reason?: string;
+}
+
 export interface BackendAdapter {
   readonly backend: Backend;
+  probe(): Promise<BackendProbe>;
+  supports(operation: string, context: Record<string, unknown>): Promise<SupportDecision>;
+  /** @deprecated Compatibility shim for existing diagnostics. Use probe(). */
   availability(): Promise<{ available: boolean; reason?: string; hostVersion?: string }>;
   execute(request: BridgeRequest): Promise<BridgeResponse>;
   close?(): Promise<void>;

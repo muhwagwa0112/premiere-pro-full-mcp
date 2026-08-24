@@ -2,7 +2,7 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 import { stat } from "node:fs/promises";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { IncomingMessage } from "node:http";
-import type { BackendAdapter, BridgeRequest, BridgeResponse } from "../contracts.js";
+import type { BackendAdapter, BackendProbe, BridgeRequest, BridgeResponse, DispatchState, SupportDecision } from "../contracts.js";
 import { loadAdobeApiCatalog } from "../adobe-api-catalog.js";
 
 interface AuthMessage {
@@ -67,6 +67,7 @@ export class UxpWebSocketAdapter implements BackendAdapter {
   #server: WebSocketServer | null = null;
   #socket: WebSocket | null = null;
   #hostVersion: string | null = null;
+  #hostSessionId: string | null = null;
   #sequenceExportInFlight: string | null = null;
   #capabilities = new Set<string>();
   #apiFingerprint: string | null = null;
@@ -96,26 +97,48 @@ export class UxpWebSocketAdapter implements BackendAdapter {
     });
   }
 
+  async probe(): Promise<BackendProbe> {
+    const base = { backend: this.backend, operations: [...this.#capabilities].sort() } as const;
+    if (!this.#token) return { ...base, available: false, reason: "PREMIERE_MCP_UXP_TOKEN is not configured with at least 24 characters" };
+    if (!this.#server) return { ...base, available: false, reason: "UXP listener is not started" };
+    if (!this.#socket || this.#socket.readyState !== this.#socket.OPEN) return { ...base, available: false, reason: "Authenticated Premiere UXP panel is not connected" };
+    return {
+      ...base,
+      available: true,
+      ...(this.#hostVersion ? { hostVersion: this.#hostVersion } : {}),
+      ...(this.#hostSessionId ? { hostSessionId: this.#hostSessionId } : {}),
+      ...(this.#apiFingerprint ? { capabilityFingerprint: this.#apiFingerprint } : {}),
+    };
+  }
+
+  async supports(operation: string, _context: Record<string, unknown>): Promise<SupportDecision> {
+    return this.#capabilities.has(operation)
+      ? { supported: true, state: "implemented_unverified", requiredState: ["authenticated UXP session"] }
+      : { supported: false, state: "unsupported", reason: `Authenticated UXP host did not advertise ${operation}` };
+  }
+
   async availability(): Promise<{ available: boolean; reason?: string; hostVersion?: string }> {
-    if (!this.#token) return { available: false, reason: "PREMIERE_MCP_UXP_TOKEN is not configured with at least 24 characters" };
-    if (!this.#server) return { available: false, reason: "UXP listener is not started" };
-    if (!this.#socket || this.#socket.readyState !== this.#socket.OPEN) return { available: false, reason: "Authenticated Premiere UXP panel is not connected" };
-    return this.#hostVersion ? { available: true, hostVersion: this.#hostVersion } : { available: true };
+    const probe = await this.probe();
+    return {
+      available: probe.available,
+      ...(probe.reason ? { reason: probe.reason } : {}),
+      ...(probe.hostVersion ? { hostVersion: probe.hostVersion } : {}),
+    };
   }
 
   async execute(request: BridgeRequest): Promise<BridgeResponse> {
-    const availability = await this.availability();
-    if (!availability.available || !this.#socket) return this.failure(request.requestId, "UXP_UNAVAILABLE", availability.reason ?? "UXP unavailable", true);
-    if (!this.#capabilities.has(request.operation)) return this.failure(request.requestId, "UXP_CAPABILITY_UNAVAILABLE", `Connected host did not advertise ${request.operation}`, false);
+    const availability = await this.probe();
+    if (!availability.available || !this.#socket) return this.failure(request.requestId, "UXP_UNAVAILABLE", availability.reason ?? "UXP unavailable", true, "not_dispatched");
+    if (!this.#capabilities.has(request.operation)) return this.failure(request.requestId, "UXP_CAPABILITY_UNAVAILABLE", `Connected host did not advertise ${request.operation}`, false, "not_dispatched");
     if (request.operation === "export.sequence" && this.#sequenceExportInFlight) {
-      return this.failure(request.requestId, "UXP_SEQUENCE_EXPORT_BUSY", "Another sequence export is still being verified", false);
+      return this.failure(request.requestId, "UXP_SEQUENCE_EXPORT_BUSY", "Another sequence export is still being verified", false, "not_dispatched");
     }
     const outputPath = (request.operation === "export.frame" || request.operation === "export.sequence") && typeof request.args.outputPath === "string"
       ? request.args.outputPath
       : null;
     const outputBaseline = outputPath ? await fileSnapshot(outputPath) : null;
     if (request.operation === "export.sequence" && request.args.overwrite !== true && outputBaseline) {
-      return this.failure(request.requestId, "UXP_EXPORT_OUTPUT_EXISTS", "Sequence export refused to overwrite an existing output file", false);
+      return this.failure(request.requestId, "UXP_EXPORT_OUTPUT_EXISTS", "Sequence export refused to overwrite an existing output file", false, "not_dispatched");
     }
     if (request.operation === "export.sequence") this.#sequenceExportInFlight = request.requestId;
     try {
@@ -123,7 +146,7 @@ export class UxpWebSocketAdapter implements BackendAdapter {
         const timeoutMs = request.operation === "export.sequence" ? 30 * 60_000 : 30_000;
         const timer = setTimeout(() => {
           this.#pending.delete(request.requestId);
-          resolve(this.failure(request.requestId, "UXP_TIMEOUT", "Premiere UXP command timed out; it was not retried", true));
+          resolve(this.failure(request.requestId, "UXP_TIMEOUT", "Premiere UXP command timed out; it was not retried", false, "unknown"));
         }, timeoutMs);
         this.#pending.set(request.requestId, { resolve, reject, timer, request, outputBaseline });
         try {
@@ -142,7 +165,7 @@ export class UxpWebSocketAdapter implements BackendAdapter {
   async close(): Promise<void> {
     for (const [requestId, pending] of this.#pending) {
       clearTimeout(pending.timer);
-      pending.resolve(this.failure(requestId, "UXP_CLOSED", "UXP bridge closed before completion", true));
+      pending.resolve(this.failure(requestId, "UXP_CLOSED", "UXP bridge closed before completion", false, "unknown"));
     }
     this.#pending.clear();
     this.#socket?.close();
@@ -205,7 +228,8 @@ export class UxpWebSocketAdapter implements BackendAdapter {
         this.#socket = socket;
         this.#hostVersion = auth.hostVersion;
         this.#capabilities = new Set(auth.capabilities.filter((item): item is string => typeof item === "string"));
-        socket.send(JSON.stringify({ type: "authenticated", protocolVersion: 1, sessionId: randomUUID() }));
+        this.#hostSessionId = randomUUID();
+        socket.send(JSON.stringify({ type: "authenticated", protocolVersion: 1, sessionId: this.#hostSessionId }));
         return;
       }
       const response = message as BridgeResponse & { type?: string };
@@ -215,16 +239,18 @@ export class UxpWebSocketAdapter implements BackendAdapter {
       clearTimeout(pending.timer);
       this.#pending.delete(response.requestId);
       const hostVersion = response.hostVersion ?? this.#hostVersion;
-      let resolved = hostVersion ? { ...response, hostVersion } : response;
+      let resolved: BridgeResponse = hostVersion
+        ? { ...response, hostVersion, dispatchState: "completed" }
+        : { ...response, dispatchState: "completed" };
       if (resolved.ok && (pending.request.operation === "export.frame" || pending.request.operation === "export.sequence")) {
         const outputPath = pending.request.args.outputPath;
         if (typeof outputPath !== "string") {
-          resolved = this.failure(response.requestId, "UXP_EXPORT_PATH_INVALID", "Export output path is unavailable for postcondition verification", false);
+          resolved = this.failure(response.requestId, "UXP_EXPORT_PATH_INVALID", "Export output path is unavailable for postcondition verification", false, "accepted");
         } else {
           const isSequence = pending.request.operation === "export.sequence";
           const bytes = await waitForChangedStableFile(outputPath, pending.outputBaseline, isSequence ? 30 * 60_000 : 5_000, isSequence ? 20 : 1);
           resolved = bytes === null
-            ? this.failure(response.requestId, "UXP_EXPORT_FILE_NOT_VERIFIED", "Premiere accepted export but no changed stable output file was observed", isSequence)
+            ? this.failure(response.requestId, "UXP_EXPORT_FILE_NOT_VERIFIED", "Premiere accepted export but no changed stable output file was observed", false, "accepted")
             : { ...resolved, createdFiles: [{ name: outputPath, verified: true }], verification: { outcome: "verified", method: `Authenticated Premiere export dispatch and changed stable file readback (${bytes} bytes)` } };
         }
       }
@@ -236,10 +262,11 @@ export class UxpWebSocketAdapter implements BackendAdapter {
       if (socket !== this.#socket) return;
       this.#socket = null;
       this.#hostVersion = null;
+      this.#hostSessionId = null;
       this.#capabilities.clear();
       for (const [requestId, pending] of this.#pending) {
         clearTimeout(pending.timer);
-        pending.resolve(this.failure(requestId, "UXP_DISCONNECTED", "UXP panel disconnected; operation was not replayed", true));
+        pending.resolve(this.failure(requestId, "UXP_DISCONNECTED", "UXP panel disconnected; operation was not replayed", false, "unknown"));
       }
       this.#pending.clear();
     });
@@ -257,7 +284,7 @@ export class UxpWebSocketAdapter implements BackendAdapter {
     }
   }
 
-  private failure(requestId: string, code: string, message: string, retryable: boolean): BridgeResponse {
-    return { protocolVersion: 1, requestId, ok: false, error: { code, message, retryable } };
+  private failure(requestId: string, code: string, message: string, retryable: boolean, dispatchState: DispatchState): BridgeResponse {
+    return { protocolVersion: 1, requestId, ok: false, dispatchState, error: { code, message, retryable } };
   }
 }

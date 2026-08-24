@@ -1,10 +1,21 @@
 import { randomUUID } from "node:crypto";
 import { collectLocalInventory } from "../inventory.js";
-import type { BackendAdapter, BridgeRequest, BridgeResponse } from "../contracts.js";
+import type { BackendAdapter, BackendProbe, BridgeRequest, BridgeResponse, SupportDecision } from "../contracts.js";
 import { searchAdobeApiCatalog } from "../adobe-api-catalog.js";
 
 export class LocalAdapter implements BackendAdapter {
   readonly backend = "local" as const;
+  static readonly operations = ["host.inspect", "plugin.catalog", "effects.catalog", "uxp.catalog"] as const;
+
+  async probe(): Promise<BackendProbe> {
+    return { backend: this.backend, available: true, hostVersion: "26.3.2-target", operations: LocalAdapter.operations };
+  }
+
+  async supports(operation: string, _context: Record<string, unknown>): Promise<SupportDecision> {
+    return LocalAdapter.operations.includes(operation as (typeof LocalAdapter.operations)[number])
+      ? { supported: true, state: "verified" }
+      : { supported: false, state: "unsupported", reason: `Local adapter does not implement ${operation}` };
+  }
 
   async availability(): Promise<{ available: boolean; hostVersion?: string }> {
     return { available: true, hostVersion: "26.3.2-target" };
@@ -19,6 +30,7 @@ export class LocalAdapter implements BackendAdapter {
         protocolVersion: 1,
         requestId: request.requestId,
         ok: true,
+        dispatchState: "completed",
         hostVersion: "26.3.2-target",
         verification: { outcome: "verified", method: "generated Adobe declaration catalog" },
         result: await searchAdobeApiCatalog(request.args),
@@ -41,6 +53,7 @@ export class LocalAdapter implements BackendAdapter {
       protocolVersion: 1,
       requestId: request.requestId,
       ok: true,
+      dispatchState: "completed",
       hostVersion: inventory.supportedHost.expectedVersion,
       afterRevision: inventory.revision,
       verification: { outcome: "verified", method: "read-only local inventory" },
@@ -49,6 +62,6 @@ export class LocalAdapter implements BackendAdapter {
   }
 
   private failure(request: BridgeRequest, code: string, message: string): BridgeResponse {
-    return { protocolVersion: 1, requestId: request.requestId || randomUUID(), ok: false, error: { code, message, retryable: false } };
+    return { protocolVersion: 1, requestId: request.requestId || randomUUID(), ok: false, dispatchState: "not_dispatched", error: { code, message, retryable: false } };
   }
 }

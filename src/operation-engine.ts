@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { actionRequestSchema, riskNeedsConfirmation, type ActionRequest, type Authority, type Backend, type BackendAdapter, type OperationResult } from "./contracts.js";
+import { actionRequestSchema, riskNeedsConfirmation, type ActionRequest, type Authority, type Backend, type BackendAdapter, type BackendProbe, type BridgeResponse, type OperationResult, type Risk } from "./contracts.js";
 import { getAction, listActions, validateActionArgs } from "./catalog.js";
 import { ConfirmationService } from "./security/confirmation.js";
 import { OperationLedger } from "./ledger.js";
@@ -56,8 +56,8 @@ export class OperationEngine {
 
   async capabilities(): Promise<Record<string, unknown>> {
     const backendEntries = await Promise.all([...this.#adapters.entries()].map(async ([backend, adapter]) => {
-      const availability = await adapter.availability();
-      return [backend, availability] as const;
+      const probe = await adapter.probe();
+      return [backend, probe] as const;
     }));
     const backends = Object.fromEntries(backendEntries);
     return {
@@ -80,7 +80,7 @@ export class OperationEngine {
         verification: action.verification,
         enabled: this.#authorities.has(action.authority),
       })),
-      fallbackPolicy: "Select an available backend before dispatch. Never replay a failed mutation through another backend.",
+      fallbackPolicy: "Fix the supported route before authorization. Only explicit not_dispatched may fallback; accepted, completed, and unknown are never replayed. A consumed interactive approval never covers a changed backend.",
       liveHostClaims: "unverified_until_exercised",
     };
   }
@@ -133,20 +133,35 @@ export class OperationEngine {
     }
 
     const unavailable: string[] = [];
-    let selected: { backend: Backend; adapter: BackendAdapter; hostVersion?: string } | null = null;
+    const candidates: Array<{ backend: Backend; adapter: BackendAdapter; probe: BackendProbe }> = [];
+    const routingContext: Record<string, unknown> = {
+      args: request.args,
+      ...(request.target ? { target: request.target } : {}),
+      ...(request.expectedRevision ? { expectedRevision: request.expectedRevision } : {}),
+    };
     for (const backend of action.preferredBackends) {
       const adapter = this.#adapters.get(backend);
       if (!adapter) {
         unavailable.push(`${backend}: adapter not configured`);
         continue;
       }
-      const status = await adapter.availability();
-      if (status.available) {
-        selected = status.hostVersion ? { backend, adapter, hostVersion: status.hostVersion } : { backend, adapter };
-        break;
+      try {
+        const probe = await adapter.probe();
+        if (!probe.available) {
+          unavailable.push(`${backend}: ${probe.reason ?? "unavailable"}`);
+          continue;
+        }
+        const support = await adapter.supports(action.id, routingContext);
+        if (!support.supported) {
+          unavailable.push(`${backend}: ${support.reason ?? `does not support ${action.id}`}`);
+          continue;
+        }
+        candidates.push({ backend, adapter, probe });
+      } catch (error) {
+        unavailable.push(`${backend}: capability probe failed (${(error as Error).message})`);
       }
-      unavailable.push(`${backend}: ${status.reason ?? "unavailable"}`);
     }
+    const selected = candidates[0] ?? null;
     if (!selected) {
       const blocked = this.failureResult(operationId, action.id, action.risk, null, "NO_BACKEND_AVAILABLE", unavailable.join("; "), true, "blocked");
       await this.record(blocked);
@@ -163,54 +178,61 @@ export class OperationEngine {
       }
     }
 
-    await this.#ledger.record({
-      operationId,
-      actionId: action.id,
-      backend: selected.backend,
-      risk: action.risk,
-      status: "dispatched",
-      timestamp: new Date().toISOString(),
-      verificationOutcome: "pending",
-      beforeRevision: request.expectedRevision ?? null,
-      afterRevision: null,
-    });
-
-    try {
-      const response = await selected.adapter.execute({
-        protocolVersion: 1,
-        requestId: operationId,
-        operation: action.id,
-        args: request.args,
-        ...(request.expectedRevision ? { expectedRevision: request.expectedRevision } : {}),
+    let lastNotDispatched: { backend: Backend; response: BridgeResponse } | null = null;
+    for (const candidate of candidates) {
+      await this.#ledger.record({
+        operationId,
+        actionId: action.id,
+        backend: candidate.backend,
+        risk: action.risk,
+        status: "planned",
+        timestamp: new Date().toISOString(),
+        verificationOutcome: "pending",
+        beforeRevision: request.expectedRevision ?? null,
+        afterRevision: null,
       });
-      const result: OperationResult = response.ok
-        ? {
-            operationId,
-            actionId: action.id,
-            status: "succeeded",
-            backend: selected.backend,
-            hostVersion: response.hostVersion ?? selected.hostVersion ?? null,
-            risk: action.risk,
-            beforeRevision: response.beforeRevision ?? request.expectedRevision ?? null,
-            afterRevision: response.afterRevision ?? null,
-            verification: response.verification ?? { outcome: action.mutatesProject ? "committed_unverified" : "not_applicable", method: action.verification },
-            undo: { available: action.undoable, method: action.undoable ? "Premiere undo history" : null },
-            createdFiles: response.createdFiles ?? [],
-            warnings: response.verification?.outcome === "committed_unverified" ? ["Host accepted the operation, but its full postcondition was not verified."] : [],
-            data: response.result,
-          }
-        : this.isOutcomeSensitive(action) && (response.error?.retryable ?? false)
-          ? this.outcomeUnknownResult(operationId, action.id, action.risk, selected.backend, response.error?.message ?? "The host may have accepted the operation before the bridge failed")
-          : this.failureResult(operationId, action.id, action.risk, selected.backend, response.error?.code ?? "BRIDGE_ERROR", response.error?.message ?? "Bridge request failed", response.error?.retryable ?? false);
-      await this.record(result);
-      return result;
-    } catch (error) {
-      const result = this.isOutcomeSensitive(action)
-        ? this.outcomeUnknownResult(operationId, action.id, action.risk, selected.backend, (error as Error).message)
-        : this.failureResult(operationId, action.id, action.risk, selected.backend, "BRIDGE_EXCEPTION", (error as Error).message, true);
-      await this.record(result);
-      return result;
+      try {
+        const response = await candidate.adapter.execute({
+          protocolVersion: 1,
+          requestId: operationId,
+          operation: action.id,
+          args: request.args,
+          ...(request.expectedRevision ? { expectedRevision: request.expectedRevision } : {}),
+        });
+        if (response.dispatchState === "not_dispatched") {
+          lastNotDispatched = { backend: candidate.backend, response };
+          // The current interactive approval proves only the request, not a
+          // replacement backend. Do not silently extend a consumed one-shot
+          // approval to a changed route; P0-05/06 bind authorization to the
+          // selected backend and plan hash.
+          if (riskNeedsConfirmation(action.risk)) break;
+          continue;
+        }
+        await this.recordDispatch(operationId, action.id, action.risk, candidate.backend, request.expectedRevision ?? null);
+        const result = this.resultFromResponse(operationId, action, request, candidate, response);
+        await this.record(result);
+        return result;
+      } catch (error) {
+        await this.recordDispatch(operationId, action.id, action.risk, candidate.backend, request.expectedRevision ?? null);
+        const result = this.outcomeUnknownResult(operationId, action.id, action.risk, candidate.backend, (error as Error).message);
+        await this.record(result);
+        return result;
+      }
     }
+    const response = lastNotDispatched?.response;
+    const routeAuthorizationExpired = riskNeedsConfirmation(action.risk) && candidates.length > 1;
+    const result = this.failureResult(
+      operationId,
+      action.id,
+      action.risk,
+      lastNotDispatched?.backend ?? selected.backend,
+      routeAuthorizationExpired ? "ROUTE_REAUTHORIZATION_REQUIRED" : response?.error?.code ?? "NOT_DISPATCHED",
+      routeAuthorizationExpired ? "The authorized backend did not dispatch. A different backend requires a new exact-route authorization." : response?.error?.message ?? "Every supported backend declined before dispatch",
+      routeAuthorizationExpired ? false : response?.error?.retryable ?? true,
+      routeAuthorizationExpired ? "blocked" : "failed",
+    );
+    await this.record(result);
+    return result;
   }
 
   async status(operationId: string): Promise<Record<string, unknown>> {
@@ -251,8 +273,63 @@ export class OperationEngine {
     };
   }
 
-  private isOutcomeSensitive(action: { mutatesProject: boolean; authority: Authority; risk: "R0" | "R1" | "R2" | "R3" }): boolean {
-    return action.mutatesProject || action.authority === "filesystem" || action.authority === "cloud" || action.risk === "R2" || action.risk === "R3";
+  private resultFromResponse(
+    operationId: string,
+    action: { id: string; risk: Risk; mutatesProject: boolean; undoable: boolean; verification: string },
+    request: ActionRequest,
+    candidate: { backend: Backend; probe: BackendProbe },
+    response: BridgeResponse,
+  ): OperationResult {
+    if (!(["accepted", "completed", "unknown"] as const).includes(response.dispatchState as "accepted" | "completed" | "unknown")) {
+      return this.outcomeUnknownResult(operationId, action.id, action.risk, candidate.backend, "Bridge response omitted a valid post-dispatch state");
+    }
+    if (response.dispatchState === "unknown") {
+      return this.outcomeUnknownResult(operationId, action.id, action.risk, candidate.backend, response.error?.message ?? "The bridge could not determine whether the host accepted the operation");
+    }
+    if (response.dispatchState === "accepted") {
+      return this.acceptedUnconfirmedResult(operationId, action.id, action.risk, candidate.backend, response.error?.message ?? "The host accepted the operation but completion was not confirmed");
+    }
+    if (!response.ok) {
+      return this.failureResult(operationId, action.id, action.risk, candidate.backend, response.error?.code ?? "BRIDGE_ERROR", response.error?.message ?? "Bridge request failed", response.dispatchState === "completed" ? response.error?.retryable ?? false : false);
+    }
+    return {
+      operationId,
+      actionId: action.id,
+      status: "succeeded",
+      backend: candidate.backend,
+      hostVersion: response.hostVersion ?? candidate.probe.hostVersion ?? null,
+      risk: action.risk,
+      beforeRevision: response.beforeRevision ?? request.expectedRevision ?? null,
+      afterRevision: response.afterRevision ?? null,
+      verification: response.verification ?? { outcome: action.mutatesProject ? "committed_unverified" : "not_applicable", method: action.verification },
+      undo: { available: action.undoable, method: action.undoable ? "Premiere undo history" : null },
+      createdFiles: response.createdFiles ?? [],
+      warnings: response.verification?.outcome === "committed_unverified" ? ["Host accepted the operation, but its full postcondition was not verified."] : [],
+      data: response.result,
+    };
+  }
+
+  private acceptedUnconfirmedResult(operationId: string, actionId: string, risk: Risk, backend: Backend, detail: string): OperationResult {
+    const result = this.outcomeUnknownResult(operationId, actionId, risk, backend, detail);
+    return {
+      ...result,
+      warnings: ["The host accepted the operation, but completion was not confirmed. Inspect host state before any manual retry; never retry this operation automatically."],
+      error: { code: "OUTCOME_ACCEPTED", message: "The operation was accepted but completion was not confirmed. Inspect host state before retrying.", retryable: false },
+    };
+  }
+
+  private async recordDispatch(operationId: string, actionId: string, risk: Risk, backend: Backend, beforeRevision: string | null): Promise<void> {
+    await this.#ledger.record({
+      operationId,
+      actionId,
+      backend,
+      risk,
+      status: "dispatched",
+      timestamp: new Date().toISOString(),
+      verificationOutcome: "pending",
+      beforeRevision,
+      afterRevision: null,
+    });
   }
 
   private outcomeUnknownResult(operationId: string, actionId: string, risk: "R0" | "R1" | "R2" | "R3", backend: Backend, detail: string): OperationResult {

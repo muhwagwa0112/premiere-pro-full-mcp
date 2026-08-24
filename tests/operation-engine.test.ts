@@ -11,7 +11,10 @@ import { approveForTest, testApprovalAuthenticator } from "./test-approval.js";
 
 class FakeAdapter implements BackendAdapter {
   calls: BridgeRequest[] = [];
-  constructor(readonly backend: Backend, private readonly available: boolean, private readonly response: (request: BridgeRequest) => BridgeResponse) {}
+  supportCalls: string[] = [];
+  constructor(readonly backend: Backend, private readonly available: boolean, private readonly response: (request: BridgeRequest) => BridgeResponse, private readonly supported = true) {}
+  async probe() { return { backend: this.backend, available: this.available, hostVersion: "26.3.2", operations: this.supported ? ["test-advertised"] : [], ...(this.available ? {} : { reason: "test unavailable" }) }; }
+  async supports(operation: string) { this.supportCalls.push(operation); return this.supported ? { supported: true as const, state: "implemented_unverified" as const } : { supported: false as const, state: "unsupported" as const, reason: "test unsupported" }; }
   async availability() { return this.available ? { available: true, hostVersion: "26.3.2" } : { available: false, reason: "test unavailable" }; }
   async execute(request: BridgeRequest) { this.calls.push(request); return this.response(request); }
 }
@@ -23,7 +26,7 @@ async function engineWith(adapters: BackendAdapter[]) {
 }
 
 function success(request: BridgeRequest): BridgeResponse {
-  return { protocolVersion: 1, requestId: request.requestId, ok: true, hostVersion: "26.3.2", afterRevision: "after", verification: { outcome: "verified", method: "test readback" }, result: { ok: true } };
+  return { protocolVersion: 1, requestId: request.requestId, ok: true, dispatchState: "completed", hostVersion: "26.3.2", afterRevision: "after", verification: { outcome: "verified", method: "test readback" }, result: { ok: true } };
 }
 
 async function confirm(engine: OperationEngine, approvalDirectory: string, request: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -33,6 +36,25 @@ async function confirm(engine: OperationEngine, approvalDirectory: string, reque
 }
 
 describe("operation routing", () => {
+  it("exposes runtime capability metadata without dropping probe fields", async () => {
+    const adapter: BackendAdapter = {
+      backend: "uxp",
+      probe: async () => ({ backend: "uxp", available: true, reason: "test context", hostVersion: "26.3.2", hostSessionId: "session-1", capabilityFingerprint: "fingerprint-1", operations: ["project.inspect"] }),
+      supports: async () => ({ supported: true, state: "implemented_unverified" }),
+      availability: async () => ({ available: true, hostVersion: "26.3.2" }),
+      execute: async (request) => success(request),
+    };
+    const { engine } = await engineWith([adapter]);
+    const capabilities = await engine.capabilities() as { backends: Record<string, unknown> };
+    expect(capabilities.backends.uxp).toMatchObject({
+      reason: "test context",
+      hostVersion: "26.3.2",
+      hostSessionId: "session-1",
+      capabilityFingerprint: "fingerprint-1",
+      operations: ["project.inspect"],
+    });
+  });
+
   it("selects a fallback only before dispatch", async () => {
     const uxp = new FakeAdapter("uxp", false, success);
     const cep = new FakeAdapter("cep", true, success);
@@ -45,8 +67,46 @@ describe("operation routing", () => {
     expect(cep.calls).toHaveLength(1);
   });
 
+  it("skips a connected adapter that does not support the operation before authorization", async () => {
+    const uxp = new FakeAdapter("uxp", true, success, false);
+    const cep = new FakeAdapter("cep", true, success);
+    const { engine, approvalDirectory } = await engineWith([uxp, cep]);
+    const request = { actionId: "project.save", args: {} };
+    const result = await engine.execute(await confirm(engine, approvalDirectory, request));
+    expect(result).toMatchObject({ status: "succeeded", backend: "cep" });
+    expect(uxp.supportCalls).toEqual(["project.save"]);
+    expect(uxp.calls).toHaveLength(0);
+    expect(cep.calls).toHaveLength(1);
+  });
+
+  it("falls back after an explicit not_dispatched result", async () => {
+    const uxp = new FakeAdapter("uxp", true, (request) => ({ protocolVersion: 1, requestId: request.requestId, ok: false, dispatchState: "not_dispatched", error: { code: "PRE_SEND_FAILURE", message: "socket closed before send", retryable: true } }));
+    const cep = new FakeAdapter("cep", true, success);
+    const { engine, directory } = await engineWith([uxp, cep]);
+    const request = { actionId: "project.inspect", args: {} };
+    const result = await engine.execute(request);
+    expect(result).toMatchObject({ status: "succeeded", backend: "cep" });
+    expect(uxp.calls).toHaveLength(1);
+    expect(cep.calls).toHaveLength(1);
+    const records = (await readFile(join(directory, "ledger.jsonl"), "utf8")).trim().split(/\r?\n/).map((line) => JSON.parse(line) as { backend: Backend; status: string });
+    expect(records).not.toContainEqual(expect.objectContaining({ backend: "uxp", status: "dispatched" }));
+    expect(records).toContainEqual(expect.objectContaining({ backend: "uxp", status: "planned" }));
+    expect(records).toContainEqual(expect.objectContaining({ backend: "cep", status: "dispatched" }));
+  });
+
+  it("does not apply a consumed interactive approval to a fallback backend", async () => {
+    const uxp = new FakeAdapter("uxp", true, (request) => ({ protocolVersion: 1, requestId: request.requestId, ok: false, dispatchState: "not_dispatched", error: { code: "PRE_SEND_FAILURE", message: "socket closed before send", retryable: true } }));
+    const cep = new FakeAdapter("cep", true, success);
+    const { engine, approvalDirectory } = await engineWith([uxp, cep]);
+    const request = { actionId: "project.save", args: {} };
+    const result = await engine.execute(await confirm(engine, approvalDirectory, request));
+    expect(result).toMatchObject({ status: "blocked", backend: "uxp", error: { code: "ROUTE_REAUTHORIZATION_REQUIRED", retryable: false } });
+    expect(uxp.calls).toHaveLength(1);
+    expect(cep.calls).toHaveLength(0);
+  });
+
   it("does not replay a failed mutation through another backend", async () => {
-    const uxp = new FakeAdapter("uxp", true, (request) => ({ protocolVersion: 1, requestId: request.requestId, ok: false, error: { code: "UXP_FAILED", message: "partial state unknown", retryable: true } }));
+    const uxp = new FakeAdapter("uxp", true, (request) => ({ protocolVersion: 1, requestId: request.requestId, ok: false, dispatchState: "unknown", error: { code: "UXP_FAILED", message: "partial state unknown", retryable: true } }));
     const cep = new FakeAdapter("cep", true, success);
     const { engine, approvalDirectory } = await engineWith([uxp, cep]);
     const request = { actionId: "project.save", args: {} };
@@ -60,7 +120,7 @@ describe("operation routing", () => {
   });
 
   it("keeps retryable read-only bridge failures retryable", async () => {
-    const cep = new FakeAdapter("cep", true, (request) => ({ protocolVersion: 1, requestId: request.requestId, ok: false, error: { code: "CEP_TIMEOUT", message: "read timed out", retryable: true } }));
+    const cep = new FakeAdapter("cep", true, (request) => ({ protocolVersion: 1, requestId: request.requestId, ok: false, dispatchState: "completed", error: { code: "CEP_TIMEOUT", message: "read timed out", retryable: true } }));
     const { engine } = await engineWith([cep]);
     const result = await engine.execute({ actionId: "project.inspect", args: {} });
     expect(result.error).toMatchObject({ code: "CEP_TIMEOUT", retryable: true });
@@ -70,6 +130,8 @@ describe("operation routing", () => {
   it("marks mutation adapter exceptions as non-retryable unknown outcomes", async () => {
     const cep: BackendAdapter = {
       backend: "cep",
+      probe: async () => ({ backend: "cep", available: true, hostVersion: "26.3.2", operations: ["project.save"] }),
+      supports: async () => ({ supported: true, state: "implemented_unverified" }),
       availability: async () => ({ available: true, hostVersion: "26.3.2" }),
       execute: async () => { throw new Error("connection lost after dispatch"); },
     };
@@ -78,6 +140,22 @@ describe("operation routing", () => {
     const result = await engine.execute(await confirm(engine, approvalDirectory, request));
     expect(result.error).toMatchObject({ code: "OUTCOME_UNKNOWN", retryable: false });
     expect(result.warnings[0]).toContain("never retry");
+  });
+
+  it.each(["accepted", "completed", "unknown"] as const)("never replays a %s outcome", async (dispatchState) => {
+    const uxp = new FakeAdapter("uxp", true, (request) => ({ protocolVersion: 1, requestId: request.requestId, ok: false, dispatchState, error: { code: "INJECTED_FAILURE", message: dispatchState, retryable: true } }));
+    const cep = new FakeAdapter("cep", true, success);
+    const { engine } = await engineWith([uxp, cep]);
+    const result = await engine.execute({ actionId: "project.inspect", args: {} });
+    expect(result.status).toBe("failed");
+    expect(uxp.calls).toHaveLength(1);
+    expect(cep.calls).toHaveLength(0);
+    if (dispatchState === "unknown") expect(result.error).toMatchObject({ code: "OUTCOME_UNKNOWN", retryable: false });
+    if (dispatchState === "accepted") {
+      expect(result.error).toMatchObject({ code: "OUTCOME_ACCEPTED", retryable: false });
+      expect(result.verification.outcome).toBe("committed_unverified");
+      expect(result.warnings[0]).toContain("accepted");
+    }
   });
 
   it("requires and consumes exact confirmation for R2 actions", async () => {
