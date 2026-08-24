@@ -164,7 +164,7 @@ const actions: ActionDescriptor[] = [
   {
     id: "timeline.clip.insert", domain: "timeline", title: "Insert clip", description: "Insert one project item into a sequence track with revision protection.",
     risk: "R1", authority: "edit", preferredBackends: ["uxp", "cep"], minimumPremiereVersion: "26.3.0", mutatesProject: true, undoable: true,
-    verification: "track item boundary readback", support: "implemented_unverified", argsSchema: timelineInsert,
+    verification: "track item boundary readback", support: "unsupported", argsSchema: timelineInsert,
   },
   {
     id: "timeline.sequence.create_from_media", domain: "timeline", title: "Create sequence from media", description: "Create a named sequence from exact imported project-item identities.",
@@ -184,7 +184,7 @@ const actions: ActionDescriptor[] = [
   {
     id: "effects.apply", domain: "effects_audio", title: "Apply effect", description: "Apply a discovered effect and read back the component chain.",
     risk: "R1", authority: "edit", preferredBackends: ["uxp", "cep"], minimumPremiereVersion: "26.3.0", mutatesProject: true, undoable: true,
-    verification: "component chain readback", support: "implemented_unverified", argsSchema: effectAction,
+    verification: "component chain readback", support: "unsupported", argsSchema: effectAction,
   },
   {
     id: "captions.inspect", domain: "text_captions", title: "Inspect captions", description: "Read caption-track structure without transcript content.",
@@ -209,7 +209,7 @@ const actions: ActionDescriptor[] = [
   {
     id: "history.undo", domain: "workspace", title: "Undo last action", description: "Request one Premiere undo operation and read back active state.",
     risk: "R1", authority: "edit", preferredBackends: ["cep", "ui"], minimumPremiereVersion: "26.3.0", mutatesProject: true, undoable: false,
-    verification: "active state readback", support: "implemented_unverified", argsSchema: emptyArgs,
+    verification: "active state readback", support: "unsupported", argsSchema: emptyArgs,
   },
   {
     id: "plugin.catalog", domain: "plugins", title: "Inventory installed plugins", description: "List installed Premiere effects and extension manifests without exposing full paths.",

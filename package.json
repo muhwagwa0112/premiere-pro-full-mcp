@@ -27,6 +27,8 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "inventory:adobe": "node scripts/generate-adobe-inventory.mjs",
+    "inventory:support": "tsc -p tsconfig.build.json && node scripts/generate-support-matrix.mjs",
+    "inventory:support:check": "tsc -p tsconfig.build.json && node scripts/generate-support-matrix.mjs --check",
     "inventory:local": "node dist/cli/inventory.js",
     "smoke:mcp": "node scripts/smoke-mcp.mjs",
     "smoke:security": "node scripts/smoke-security.mjs",
