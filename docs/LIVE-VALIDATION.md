@@ -28,8 +28,8 @@ media was used.
   registered semantic controls in this host state, so it proves transport fail-closed behavior and
   does not establish broad UI automation coverage.
 - The exact v0.3 UXP source was packaged with Adobe UXP Developer Tool and installed by Adobe UPIA.
-  Opening the installed panel established its automatic connection over the exact `file://` Origin
-  allowlist and reported 761 members,
+  Opening the installed panel established its automatic protocol-v3 mutually authenticated connection
+  over the exact `file://` Origin allowlist and reported 761 members,
   91 containers, 69 roots, and fingerprint
   `3ad423e187ccb155afd139a8181bdc3093de357fb183d7505b4a00e1e3c3b17e`.
 - Interactive exact-plan approvals retained the same `operationId`, `planHash`, route, session, and
@@ -62,7 +62,9 @@ same CCX successfully and listed `Premiere Pro Full MCP Bridge` v0.3.0 as enable
 the Premiere **Window > UXP Plugins** menu opened that exact installed plug-in. Premiere's
 accessibility tree exposed the UXP panel, its Connect retry button, and the named panel tab. The MCP
 capability response reported `uxp.available: true`, host version 26.3.2, a live session ID, and the
-exact generated catalog fingerprint without user token entry or pairing UI. At 100% Windows scale, the floating
+exact generated catalog fingerprint without user token entry or pairing UI. A legacy protocol-v2
+client was rejected with WebSocket close code 1008 and did not replace or disconnect the authenticated
+panel session. At 100% Windows scale, the floating
 window measured 340x326 outer / 324x287 client pixels at 96 DPI. At 125% Windows scale, Premiere
 reported 120 DPI and the same installed panel measured 338x324 outer pixels with an exact 320x260
 nested UXP content view. The Connect retry control and named panel tab remained present at both

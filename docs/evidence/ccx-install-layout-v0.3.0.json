@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "recordedAt": "2026-08-24T23:56:46+09:00",
+  "recordedAt": "2026-08-25T00:09:49+09:00",
   "releaseVersion": "0.3.0",
   "host": {
     "application": "Adobe Premiere Pro",
@@ -80,11 +80,21 @@
       "endpoint": "ws://localhost:17777/uxp",
       "userManagedToken": false,
       "mutualAuthentication": "protocol-v3-hmac-per-user-uxp-storage",
-      "available": false,
-      "verificationStatus": "pending-revalidation-after-authentication-upgrade",
+      "available": true,
+      "verificationStatus": "passed",
       "hostVersion": "26.3.2",
-      "lastPreUpgradeHostSessionId": "11aea1ec-bf82-4db1-a77f-11cce576c97c",
-      "capabilityFingerprint": "3ad423e187ccb155afd139a8181bdc3093de357fb183d7505b4a00e1e3c3b17e"
+      "hostSessionId": "e21e3cd5-4259-4501-a51e-d9b5af20d771",
+      "capabilityFingerprint": "3ad423e187ccb155afd139a8181bdc3093de357fb183d7505b4a00e1e3c3b17e",
+      "authenticationFile": {
+        "scope": "current-user Adobe UXP plug-in storage",
+        "size": 64,
+        "contentRecorded": false
+      },
+      "negativeHandshake": {
+        "legacyProtocolVersion": 2,
+        "closeCode": 1008,
+        "authenticatedSessionPreserved": true
+      }
     },
     "scaleObservations": [
       {

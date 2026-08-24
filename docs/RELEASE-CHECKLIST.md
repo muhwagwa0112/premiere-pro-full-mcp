@@ -15,7 +15,8 @@
 - [x] The CCX is packaged through Adobe UXP Developer Tool (not `Build-Ccx.ps1`) and installed through Creative Cloud Desktop; the panel is visible at minimum, docked, floating, and scaled layouts.
   Adobe UPIA 8.5.0.13 now installs the UDT-produced v0.3.0 CCX and lists it as enabled for
   Premiere Pro 26.3.2. Premiere's UXP menu opened the exact installed plug-in; it automatically
-  established the automatic local session and exposed its Connect retry control in a 340x326 outer
+  established the automatic protocol-v3 mutually authenticated local session and exposed its Connect
+  retry control in a 340x326 outer
   / 324x287 client window at 96 DPI, with an exact 320x260 nested UXP content view matching the
   manifest minimum. At 125% Windows scale, Premiere reported 120 DPI and the same installed panel
   retained its exact 320x260 content view with the retry control and named panel tab present. The

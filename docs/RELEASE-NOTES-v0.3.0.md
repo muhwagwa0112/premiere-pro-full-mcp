@@ -24,6 +24,8 @@ v0.3.0 is the current Windows release of the capability-gated Premiere Pro 26.3 
 
 - 33 TypeScript test files / 201 tests passed.
 - 36 Windows UI agent tests passed.
+- The installed Premiere Pro 26.3.2 panel completed protocol-v3 mutual authentication; a legacy
+  protocol-v2 client was rejected without displacing the authenticated panel session.
 - Release security tests passed ZIP traversal, package-attribute, symlink/reparse, and detached
   signature-tamper rejection.
 - Support/feature registry checks, 761-member UXP plan validation, disposable fixture planning, and
