@@ -32,6 +32,10 @@ media was used.
   over the exact `file://` Origin allowlist and reported 761 members,
   91 containers, 69 roots, and fingerprint
   `3ad423e187ccb155afd139a8181bdc3093de357fb183d7505b4a00e1e3c3b17e`.
+  Before the listener opened, the integrity-pinned native runtime provisioned the per-user key in the
+  exact Adobe UXP plug-in storage path. The key and its parent directory had inheritance disabled and
+  explicit FullControl entries only for the current Windows user, SYSTEM, and Administrators; no
+  foreign read ACE was present. The panel opened that existing file read-only and did not create it.
 - Interactive exact-plan approvals retained the same `operationId`, `planHash`, route, session, and
   effective request from preview through apply. Project creation, media import, and sequence creation
   succeeded through the typed CEP path. Frame export, sequence export, and project save succeeded
@@ -64,7 +68,8 @@ accessibility tree exposed the UXP panel, its Connect retry button, and the name
 capability response reported `uxp.available: true`, host version 26.3.2, a live session ID, and the
 exact generated catalog fingerprint without user token entry or pairing UI. A legacy protocol-v2
 client was rejected with WebSocket close code 1008 and did not replace or disconnect the authenticated
-panel session. At 100% Windows scale, the floating
+panel session. The installed `Doctor.ps1 -CheckLive` also passed its signed-runtime, Codex registration,
+UXP listener, one-click panel-session, and CEP heartbeat gates. At 100% Windows scale, the floating
 window measured 340x326 outer / 324x287 client pixels at 96 DPI. At 125% Windows scale, Premiere
 reported 120 DPI and the same installed panel measured 338x324 outer pixels with an exact 320x260
 nested UXP content view. The Connect retry control and named panel tab remained present at both
