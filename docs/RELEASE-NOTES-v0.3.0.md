@@ -19,21 +19,28 @@ v0.3.0 is the current Windows release of the capability-gated Premiere Pro 26.3 
 
 ## Validation
 
-- 33 TypeScript test files / 190 tests passed.
+- 33 TypeScript test files / 191 tests passed.
 - 37 Windows UI agent tests passed.
 - Release security tests passed ZIP traversal, package-attribute, symlink/reparse, and detached
   signature-tamper rejection.
 - Support/feature registry checks, 761-member UXP plan validation, disposable fixture planning, and
   MCP smoke passed.
-- Independent completion, quality, and security reviews reported no remaining High/Medium issue.
+- The installed v0.3 runtime passed CEP/QE, named-pipe UI transport, interactive project
+  create/import/sequence/save, authenticated UXP frame and sequence export, and 761-member live
+  catalog validation on Premiere Pro 26.3.2. The live ledger retained the 281-success baseline and
+  recorded 31 read-only calls as explicit fail-closed outcomes.
 
 ## Evidence boundary
 
-The live Premiere observations documented in `LIVE-VALIDATION.md` remain the v0.2 baseline. The new
-v0.3 mutation, unattended, durable-job, checkpoint, semantic-action, connector, and fixture paths
-have offline verification but no enrolled disposable live-host evidence in this release build
-environment. Their support states remain unverified, contextual, plan-only, entitlement-blocked, or
-unsupported as recorded in the generated matrices.
+The v0.3 interactive create/import/sequence/export/save paths now have disposable live-host evidence
+documented in `LIVE-VALIDATION.md`. Unattended, durable-job, checkpoint, semantic relink/proxy/track/
+clip, recoverable-overwrite, cloud/service, third-party, modal, and entitlement-dependent paths do
+not inherit that evidence and retain their generated support states.
+
+The CCX was packaged with Adobe UXP Developer Tool and the same plugin source passed UDT developer
+loading. Creative Cloud Desktop installation and packaged-panel layout checks remain blocked on this
+machine by Creative Cloud update error 190 followed by a no-compatible-application result. They are
+not represented as passed release gates.
 
 ## Assets
 

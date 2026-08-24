@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
@@ -8,14 +8,15 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const localAppData = process.env.LOCALAPPDATA || join(homedir(), "AppData", "Local");
-const workspace = join(localAppData, "PremiereMCP", "workspace", "live-validation");
+const workspace = process.env.PREMIERE_MCP_VALIDATION_WORKSPACE || join(localAppData, "PremiereMCP", "workspace", "live-validation");
 const launcher = join(localAppData, "PremiereMCP", "bin", "PremiereMcp.WindowsUiAgent.exe");
 const bundle = process.env.PREMIERE_MCP_BUNDLE || join(localAppData, "PremiereMCP", "bundle", "premiere-mcp.bundle.mjs");
 const projectPath = join(workspace, "ppmcp-live-validation.prproj");
-const mediaPath = join(workspace, "ppmcp-live-source.mp4");
+const mediaPath = process.env.PREMIERE_MCP_VALIDATION_MEDIA || join(workspace, "ppmcp-live-source.mp4");
 const framePath = join(workspace, "ppmcp-live-frame.png");
 const sequenceOutputPath = join(workspace, "ppmcp-live-sequence.mp4");
-const sequencePresetPath = join(workspace, "ppmcp-live-preset.epr");
+const sequencePresetPath = process.env.PREMIERE_MCP_VALIDATION_PRESET || join(workspace, "ppmcp-live-preset.epr");
+const approvalDirectory = join(localAppData, "PremiereMCP", "approvals");
 const stage = process.argv[2];
 
 await mkdir(workspace, { recursive: true });
@@ -44,33 +45,49 @@ function data(result) {
   return result.structuredContent;
 }
 
-async function preview(label, actionId, args) {
+async function waitForUxp(timeout = 40_000) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    const capabilities = data(await client.callTool({ name: "premiere_capabilities", arguments: {} }, undefined, { timeout: 10_000 }));
+    if (capabilities.backends?.uxp?.available === true) return;
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+  throw new Error("Authenticated UXP panel did not reconnect before validation planning");
+}
+
+async function preview(label, actionId, args, requireUxp = true) {
+  if (requireUxp) await waitForUxp();
   const request = { actionId, args };
   const result = data(await client.callTool({ name: "premiere_operations", arguments: { mode: "preview", request } }));
   assert.equal(typeof result.approvalId, "string", JSON.stringify(result));
-  await writeFile(statePath(label), JSON.stringify({ request, approvalId: result.approvalId }, null, 2), "utf8");
-  return { stage, label, approvalId: result.approvalId, expiresAt: result.expiresAt, approvalCommand: result.approvalCommand, request };
+  assert.equal(typeof result.operationId, "string", JSON.stringify(result));
+  assert.equal(typeof result.planHash, "string", JSON.stringify(result));
+  const boundRequest = { ...request, operationId: result.operationId, planHash: result.planHash };
+  await writeFile(statePath(label), JSON.stringify({ request: boundRequest, approvalId: result.approvalId }, null, 2), "utf8");
+  return { stage, label, approvalId: result.approvalId, expiresAt: result.expiresAt, approvalCommand: result.approvalCommand, request: boundRequest };
 }
 
-async function apply(label) {
+async function apply(label, requireUxp = true) {
   const saved = JSON.parse(await readFile(statePath(label), "utf8"));
   const request = { ...saved.request, approvalId: saved.approvalId };
-  if (["export.frame", "export.sequence", "project.save", "uxp.transaction.execute"].includes(saved.request.actionId)) {
-    const deadline = Date.now() + (saved.request.actionId === "export.sequence" ? 120_000 : 40_000);
-    let available = false;
-    while (Date.now() < deadline) {
-      const capabilities = data(await client.callTool({ name: "premiere_capabilities", arguments: {} }, undefined, { timeout: 10_000 }));
-      available = capabilities.backends?.uxp?.available === true;
-      if (available) break;
-      await new Promise((resolve) => setTimeout(resolve, 1_000));
-    }
-    assert.equal(available, true, "Authenticated UXP panel did not reconnect before apply");
-  }
+  if (requireUxp) await waitForUxp(saved.request.actionId === "export.sequence" ? 120_000 : 40_000);
   const timeout = saved.request.actionId === "export.sequence" ? 10 * 60_000 : 60_000;
   const result = data(await client.callTool({ name: "premiere_operations", arguments: { mode: "apply", request } }, undefined, { timeout }));
   assert.equal(result.status, "succeeded", JSON.stringify(result));
   await writeFile(statePath(`${label}-result`), JSON.stringify(result, null, 2), "utf8");
   return { stage, label, result };
+}
+
+async function previewAndApply(label, actionId, args, requireUxp = true) {
+  const prepared = await preview(label, actionId, args, requireUxp);
+  process.stdout.write(`${JSON.stringify({ event: "approval_required", ...prepared })}\n`);
+  const approvedPath = join(approvalDirectory, `approved-${prepared.approvalId}.json`);
+  const deadline = Date.now() + 5 * 60_000;
+  while (Date.now() < deadline) {
+    if (await access(approvedPath).then(() => true, () => false)) return apply(label, requireUxp);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error(`Approval ${prepared.approvalId} was not completed before the validation deadline`);
 }
 
 async function direct(tool, actionId, args) {
@@ -83,6 +100,13 @@ try {
   await client.connect(transport);
   let output;
   switch (stage) {
+    case "run-create": {
+      output = await previewAndApply("create", "project.create", { path: projectPath });
+      const file = await stat(projectPath);
+      assert(file.size > 0, "Created project is empty");
+      output.projectFile = { path: projectPath, bytes: file.size };
+      break;
+    }
     case "preview-create":
       output = await preview("create", "project.create", { path: projectPath });
       break;
@@ -94,15 +118,26 @@ try {
       break;
     }
     case "preview-open":
-      output = await preview("open", "project.open", { path: projectPath });
+      output = await preview("open", "project.open", { path: projectPath }, false);
       break;
+    case "run-open": {
+      output = await previewAndApply("open", "project.open", { path: projectPath }, false);
+      assert.equal(output.result.verification?.outcome, "verified");
+      break;
+    }
     case "apply-open":
-      output = await apply("open");
+      output = await apply("open", false);
       assert.equal(output.result.verification?.outcome, "verified");
       break;
     case "preview-import":
       output = await preview("import", "media.import", { paths: [mediaPath] });
       break;
+    case "run-import": {
+      output = await previewAndApply("import", "media.import", { paths: [mediaPath] });
+      assert.equal(output.result.verification?.outcome, "verified");
+      assert.equal(output.result.data?.items?.[0]?.pathVerified, true);
+      break;
+    }
     case "apply-import":
       output = await apply("import");
       assert.equal(output.result.verification?.outcome, "verified");
@@ -121,6 +156,13 @@ try {
     case "preview-frame":
       output = await preview("frame", "export.frame", { outputPath: framePath, timeSeconds: 1 });
       break;
+    case "run-frame": {
+      output = await previewAndApply("frame", "export.frame", { outputPath: framePath, timeSeconds: 1 });
+      const file = await stat(framePath);
+      assert(file.size > 0, "Exported frame is empty");
+      output.frameFile = { path: framePath, bytes: file.size };
+      break;
+    }
     case "apply-frame": {
       output = await apply("frame");
       const file = await stat(framePath);
@@ -131,6 +173,13 @@ try {
     case "preview-sequence-export":
       output = await preview("sequence-export", "export.sequence", { outputPath: sequenceOutputPath, presetPath: sequencePresetPath, overwrite: false });
       break;
+    case "run-sequence-export": {
+      output = await previewAndApply("sequence-export", "export.sequence", { outputPath: sequenceOutputPath, presetPath: sequencePresetPath, overwrite: false });
+      const file = await stat(sequenceOutputPath);
+      assert(file.size > 0, "Exported sequence is empty");
+      output.sequenceFile = { path: sequenceOutputPath, bytes: file.size };
+      break;
+    }
     case "apply-sequence-export": {
       output = await apply("sequence-export");
       const file = await stat(sequenceOutputPath);
@@ -141,6 +190,13 @@ try {
     case "preview-save":
       output = await preview("save", "project.save", {});
       break;
+    case "run-save": {
+      output = await previewAndApply("save", "project.save", {});
+      const file = await stat(projectPath);
+      assert(file.size > 0, "Saved project is empty");
+      output.projectFile = { path: projectPath, bytes: file.size };
+      break;
+    }
     case "apply-save": {
       output = await apply("save");
       const file = await stat(projectPath);
@@ -171,7 +227,7 @@ try {
       break;
     }
     default:
-      throw new Error("stage must be one of preview-create, apply-create, preview-open, apply-open, preview-import, apply-import, create-sequence, preview-frame, apply-frame, preview-sequence-export, apply-sequence-export, preview-save, apply-save, readback, catalog-sequence-export");
+      throw new Error("stage must be one of run-create, preview-create, apply-create, run-open, preview-open, apply-open, run-import, preview-import, apply-import, create-sequence, run-frame, preview-frame, apply-frame, run-sequence-export, preview-sequence-export, apply-sequence-export, run-save, preview-save, apply-save, readback, catalog-sequence-export");
   }
   process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
 } finally {

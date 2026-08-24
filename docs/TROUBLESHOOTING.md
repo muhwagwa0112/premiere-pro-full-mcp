@@ -8,6 +8,11 @@ The v0.3.0 executable and PowerShell scripts are not Authenticode-signed. Verify
 
 Confirm that the CCX version matches the server version, restart Premiere, and open **Window > UXP Plugins > Premiere Pro Full MCP**. Run Doctor. If CCX installation is unavailable, use the UXP Developer Tool fallback from the installation guide. The panel supports 320x260 minimum, docked, floating, and Windows scaling layouts.
 
+If Creative Cloud Desktop reports update error 190 or says no compatible application is installed,
+update/repair Creative Cloud Desktop and confirm Premiere 26.3+ is detected before retrying. Do not
+rename a development ZIP to `.ccx` or treat UXP Developer Tool loading as proof that the public CCX
+installer and packaged layout gates passed.
+
 ## CEP heartbeat is stale
 
 Restart Premiere after installing or updating. Confirm that `%APPDATA%\Adobe\CEP\extensions\com.codex.premiere-pro-full-mcp.cep` contains `CSXS\manifest.xml`, `META-INF\signatures.xml`, and `mimetype`. Do not enable CEP developer mode or copy CEP files from an older release because the package signature, authenticated protocol, and extension ID must match the native broker.

@@ -10,7 +10,7 @@ Public releases are built from a clean commit with a Premiere-specific RSA signi
 - `.sha256` sidecars
 - versioned SPDX SBOM and third-party notices
 
-The release build also requires a checksum-verified [Syft](https://github.com/anchore/syft) executable through `-SyftPath`, `SYFT_PATH`, or the local audit-tools directory. The emitted SPDX starts with Syft's native and package inventory, then adds SHA-256 entries for every non-metadata file in the release ZIP.
+The release build also requires a checksum-verified [Syft](https://github.com/anchore/syft) executable through `-SyftPath`, `SYFT_PATH`, or the local audit-tools directory. It additionally requires Adobe ZXPSignCmd 4.1.103 win64 with the pinned SHA-256 and a local PKCS#12 signing identity/password protected for the current Windows user. The build creates the CEP signature from clean source, then verifies both the ZXP and extracted CEP directory before staging. The emitted SPDX starts with Syft's native and package inventory, then adds SHA-256 entries for every non-metadata file in the release ZIP.
 
 Generate the private/public key pair once with `npm run release:keygen`. The private key remains under `%LOCALAPPDATA%\PremiereMCP\release-signing-private.xml` with a current-user-only ACL. Only `scripts/install/release-signing-public.xml` is committed.
 
@@ -55,7 +55,8 @@ The updater is pinned to `muhwagwa0112/premiere-pro-full-mcp`. It downloads the 
 5. Push the clean noreply-authored history, create `v0.3.0`, and upload every bound asset.
 6. Verify the repository and download from a logged-out browser and reinstall the downloaded ZIP.
 
-`Verify-Release.ps1` safely expands the final ZIP, validates every signed asset binding, compares the
+`Verify-Release.ps1` safely expands the final ZIP, validates every signed asset binding, runs the
+pinned Adobe `ZXPSignCmd -verify` against packaged and installed CEP directories, compares the
 standalone and bundled CCX, performs an isolated installation and Doctor run, rejects a tampered
 signature, and exercises recoverable uninstall. A source-tree test pass does not replace this final
 artifact boundary test.

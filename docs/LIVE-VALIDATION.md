@@ -1,102 +1,69 @@
 # Premiere Pro 26.3.2 live validation
 
-> Evidence provenance: the Premiere-host observations below are the v0.2 live baseline. The latest
-> v0.3 unattended authorization, two-phase/explicit checkpoints, durable jobs, reconciliation
-> quarantine, semantic actions, recoverable overwrite, connector boundaries, and cross-process
-> request binding have been validated by offline contract, failure-injection, TypeScript, and native
-> tests only. They have not yet been exercised against an enrolled disposable v0.3 live fixture, so
-> v0.3 does not upgrade any live support claim on their basis.
+Validated on Windows against the installed v0.3.0 runtime and Adobe Premiere Pro 26.3.2 on
+2026-08-24. The fixture used generated media, a dedicated preset, and a dedicated project under
+`%LOCALAPPDATA%\PremiereMCP\workspace\v0.3-release-20260824`. The project was saved and closed after
+validation. No user project or user media was used.
 
-## v0.3 offline foundation gates
+## v0.3 release gates
 
-- `npm run check`: bridge syntax, TypeScript, 33 Vitest files / 190 tests, and bundle build passed.
-- Native Windows agent: 37/37 tests passed from a working directory outside the repository.
-- Deterministic support matrix check passed for 51 public actions across five backends.
-- The generated broader feature registry contains 150 records with explicit contextual, unverified,
-  UI-adapter, entitlement, third-party, host-version, manual, and unsupported states.
-- Full-surface UXP plan-only validation accounted for 761/761 generated members without live mutation.
-- The disposable fixture plan and MCP smoke passed; live mutation correctly remained unavailable
-  without an enrolled `trusted_unattended` or `isolated_lab` profile.
-- Release security tests passed traversal, reparse/symlink, package-attribute, and signature-tamper
-  rejection. Real signed-package installation, Codex registration, profile enrollment, and live
-  Premiere execution were deliberately not performed by these offline gates.
+- `npm run check` covers bridge syntax, TypeScript, 33 Vitest files / 191 tests, and the bundle build.
+- The native Windows agent has 37 tests. The generated support matrix contains 51 public actions and
+  the broader feature registry contains 150 records.
+- The plan and live UXP ledgers account for all 761 generated members. The live catalog fingerprint
+  matched the generated inventory on Premiere 26.3.2.
+- Release-security validation covers ZIP traversal, package attributes, reparse/symlink input, case
+  collisions, signature tampering, unexpected package files, signed downgrade, and forced
+  partial-install rollback.
+- The CEP payload is signed during a clean release build. Adobe `ZXPSignCmd 4.1.103 -verify` accepted
+  both the packaged and installed CEP directories, and CEP/QE reconnected with `PlayerDebugMode=0`.
 
-Validated on Windows against installed Adobe Premiere Pro 26.3.2 with an isolated project, generated
-test media, preset, and outputs under `%LOCALAPPDATA%\PremiereMCP\workspace\live-validation`.
-No real user project or media was used.
+## Verified installed-runtime paths
 
-## Verified live paths
-
-- UXP authenticated over a manifest-constrained `ws://localhost/` permission and reported host
-  version 26.3.2. The generated catalog returned 761 members, 91 containers, and 69 roots.
-- The installed CCX registers the `premiereMcp2026Panel` lifecycle through `entrypoints.setup`, so
-  Premiere creates the packaged panel document instead of an empty menu-discovered surface.
-- R0 UXP calls resolved active Project, Sequence, and VideoTrack session handles and read the original
-  track name.
-- An R3 `uxp.transaction.execute` request was previewed, approved in the native Windows dialog,
-  committed under Premiere 26.3 `lockedAccess`, read back with the changed name, then separately
-  approved and restored to its original name. This caught and fixed the Premiere 26.3 Action-lifetime
-  breaking change.
-- `export.frame` wrote a 68,832-byte 640x360 RGBA PNG. The bridge re-opened the exact output and
-  reported `verified`; SHA-256 was
+- The installed native launcher, pinned bundle, DPAPI-backed broker, one-shot approval dialog, MCP
+  discovery, and secret-preload scrubbing passed local checks.
+- CEP/QE host, project, sequence, bounded `app` reflection, and bounded `qe` reflection succeeded on
+  host version 26.3.2. The named-pipe UI catalog request completed without timeout; it exposed zero
+  registered semantic controls in this host state, so it proves transport fail-closed behavior and
+  does not establish broad UI automation coverage.
+- The exact installed v0.3 UXP source was developer-loaded with Adobe UXP Developer Tool. It
+  authenticated over the manifest-constrained localhost WebSocket and reported 761 members,
+  91 containers, 69 roots, and fingerprint
+  `3ad423e187ccb155afd139a8181bdc3093de357fb183d7505b4a00e1e3c3b17e`.
+- Interactive exact-plan approvals retained the same `operationId`, `planHash`, route, session, and
+  effective request from preview through apply. Project creation, media import, and sequence creation
+  succeeded through the typed CEP path. Frame export, sequence export, and project save succeeded
+  through authenticated UXP. Premiere readback confirmed project GUID
+  `2d5a8727-5613-4592-8537-3291d5f3c720` and sequence GUID
+  `ae351990-ac38-40ab-8649-df0836253613`.
+- The saved project was 12,386 bytes with SHA-256
+  `091cc9da254f0e386fa88bee20b9361086e9cce7ca77be4cb8045d770a95ac1d`.
+- `export.frame` produced a 68,832-byte 640x360 PNG with SHA-256
   `3ff1945dccec98b746df00b1a874e60faf67b723ee9dc86b707ee005c25741c4`.
-- `project.save` returned true and retained the active project.
-- CEP/QE live checks covered host/project inspection, reflected surface catalog, effect inventory,
-  project create/open/import, and sequence creation. The UXP `EncoderManager.exportSequence` path
-  dispatched the export without treating its host Promise as completion, then independently verified
-  a changed, non-empty, stable output file. The result was a 3-second 1280x720 H.264/AAC MP4,
-  2,837,041 bytes, SHA-256
-  `910c5b0527eb00715048614d108f05934fe0e92d45c1808e870363562ff53712`.
-- The installed native launcher, bundle integrity pin, DPAPI-backed signing broker, one-shot approval
-  dialog, MCP tool discovery, and secret-preload scrubbing passed local smoke checks.
-- A final full-surface ledger matched the generated and live UXP fingerprints and checked catalog
-  presence for 761/761 unique IDs. Of 312 deterministic read-only calls attempted against Premiere
-  26.3.2, 281 succeeded and 31 failed closed: 18 `UXP_METHOD_UNAVAILABLE`, 7
-  `UXP_ROOT_UNAVAILABLE`, and 6 `UXP_HANDLE_REQUIRED`. The validator recorded only stable result
-  shapes and error codes, never return values, messages, paths, or secrets.
-- The remaining 449 entries were still accounted for individually: 151 mutation, filesystem,
-  sensitive, or destructive entries were preview-only and not applied; 298 entries requiring typed
-  handles, arguments, callbacks, or transaction context were skipped with explicit reasons.
+- `export.sequence` produced a stable 2,837,041-byte MP4 with SHA-256
+  `e27a96b9a66f1997b721d437d1373b22c7e8d892fa0fe16689d72a9df6216ae3`.
+- The final full-surface live ledger contains 761/761 unique IDs. Of 312 deterministic read-only
+  calls, 281 succeeded and 31 failed closed. Another 151 mutation/filesystem/sensitive/destructive
+  entries were preview-only and not applied; 298 entries requiring typed handles, arguments,
+  callbacks, or transaction context were skipped with explicit reasons.
 
-## Automated gates
+The retained machine-readable evidence is
+`docs/evidence/uxp-full-surface-ledger-v0.3.0.json`. It records stable result shapes and error
+codes only; it does not record returned values, messages, absolute paths, or secrets.
 
-- TypeScript/bridge check: 15 test files, 49 tests, including concurrent one-shot approval claiming,
-  the full-surface safety-plan contract, sequence-export single-flight/stable-output verification,
-  existing-output rejection, UDT-only release packaging, Windows PowerShell 5.1 hashing, and
-  local-path-free release SBOM generation.
-- Native .NET check: 19 tests, including job-object child cleanup, strict UTF-8 HMAC input, and
-  hostile broker-locator/preload environment scrubbing.
-- MCP smoke: 13 tools, 761 Adobe UXP members, 140 local plug-ins.
-- Security smoke: broker signing succeeded; MCP self-approval remained blocked; preload variables were
-  scrubbed.
-- MCP and security smokes use process-specific UI pipes. The security smoke waits for the live UXP
-  backend on port 17777 by default so its self-approval rejection assertion cannot pass or fail before
-  a real backend is selectable; the port can be overridden for an explicitly reconfigured panel.
-- A fresh `codex exec` process called the installed registration and reported target 26.3.2, 761 UXP
-  declarations, backend `uxp`, host 26.3.2, and `uxp_available=true` with the panel loaded.
-- CEP and QE readiness were re-run independently after installation. Host/project inspection,
-  bounded `app` reflection, and bounded `qe` reflection all succeeded against 26.3.2. Full QE
-  effect/transition inventory remains a separate optional diagnostic because Premiere may spend
-  longer than the signed command freshness window enumerating third-party plug-ins.
-- The final foreground named-pipe UI probe returned `automation_timeout` and was terminated by its
-  hard deadline. This is recorded as fail-closed, not as a successful UI check; UI mutation remains
-  outside the verified surface.
+## Explicit release boundary
 
-## Explicit boundary
+The UDT-produced v0.3.0 CCX passed manifest/identity validation and UDT developer loading. Creative
+Cloud Desktop did not complete the public CCX installation on this machine: it first reported update
+error 190 and then reported that no compatible application was installed, despite Premiere 26.3.2
+being present. Therefore Creative Cloud installation and the minimum/docked/floating/scaled packaged
+panel layout checks remain blocking and are not claimed as successful.
 
-The declaration inventory is full-surface routing coverage, not 761 successful live executions.
-Many Adobe members require object types, installed third-party plug-ins, cloud entitlements, media,
-or project states that cannot all coexist in one fixture. CEP and UXP developer loading can also be
-affected by host modal/busy state during a cold restart and must be checked after installation.
+The live fixture above verifies only the listed interactive create/import/sequence/export/save paths.
+It does not promote trusted-unattended enrollment, durable jobs, checkpoint workflows, disposable
+semantic close, relink/proxy/track/clip semantic mutations, recoverable overwrite, cloud/service,
+third-party, modal, or entitlement-dependent paths. Those retain the contextual, unverified,
+plan-only, blocked, or unsupported states recorded in the generated matrices.
 
-After the final packaged reinstall and host restart, CEP/QE and UXP reconnected. The installed CCX
-panel was opened from **Window > UXP Plugins**, paired through the native file picker, and used for
-the final full-surface run described above, so the latest UXP evidence is from the current bridge
-rather than an earlier bundle.
-
-Premiere's native UI Automation provider can block during descendant enumeration on this machine.
-The final build isolates every UIA request in a killable, single-concurrency worker with a hard
-deadline. Earlier probes exposed a small, truncated set of semantic controls, while the final probe
-timed out and was terminated; neither result supports a broad UI-coverage claim. UI mutation remains
-fail-closed until a versioned adapter selects a unique pattern-backed control and verifies the requested
-postcondition.
+Inventory coverage is not universal execution coverage. A timeout, unavailable host object, missing
+semantic control, external installer failure, or unverified postcondition is never counted as success.
