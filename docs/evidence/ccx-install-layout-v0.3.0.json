@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "recordedAt": "2026-08-24T22:24:00+09:00",
+  "recordedAt": "2026-08-24T23:04:00+09:00",
   "releaseVersion": "0.3.0",
   "host": {
     "application": "Adobe Premiere Pro",
     "version": "26.3.2",
     "windowsVersion": "10.0.19045",
-    "systemDpi": 96
+    "systemDpi": 120
   },
   "installer": {
     "name": "Adobe Unified Plugin Installer Agent",
@@ -78,13 +78,30 @@
       "hostVersion": "26.3.2",
       "hostSessionId": "11aea1ec-bf82-4db1-a77f-11cce576c97c",
       "capabilityFingerprint": "3ad423e187ccb155afd139a8181bdc3093de357fb183d7505b4a00e1e3c3b17e"
-    }
+    },
+    "scaleObservations": [
+      {
+        "windowsScalePercent": 100,
+        "windowDpi": 96,
+        "outerWindow": { "width": 340, "height": 326 },
+        "clientFrame": { "width": 324, "height": 287 },
+        "uxpContent": { "width": 320, "height": 260 },
+        "primaryControlsVisible": true
+      },
+      {
+        "windowsScalePercent": 125,
+        "windowDpi": 120,
+        "outerWindow": { "width": 338, "height": 324 },
+        "uxpContent": { "width": 320, "height": 260 },
+        "primaryControlsVisible": true
+      }
+    ]
   },
   "gates": {
     "installation": "passed",
     "minimumContent": "passed",
     "floating": "passed",
     "docked": "pending",
-    "non100PercentWindowsScale": "pending"
+    "non100PercentWindowsScale": "passed"
   }
 }

@@ -62,11 +62,12 @@ same CCX successfully and listed `Premiere Pro Full MCP Bridge` v0.3.0 as enable
 the Premiere **Window > UXP Plugins** menu opened that exact installed plug-in. Premiere's
 accessibility tree exposed the UXP panel, its Connect retry button, and the named panel tab. The MCP
 capability response reported `uxp.available: true`, host version 26.3.2, a live session ID, and the
-exact generated catalog fingerprint without a shared token. The floating window
-measured 340x326 outer / 324x287 client pixels at 96 DPI; its nested UXP content view measured the
-manifest minimum of exactly 320x260 pixels, with every primary control present. The retained
-file-hash and window-geometry record is `docs/evidence/ccx-install-layout-v0.3.0.json`. A docked
-observation and a non-100% Windows-scale observation remain blocking, so the complete
+exact generated catalog fingerprint without a shared token. At 100% Windows scale, the floating
+window measured 340x326 outer / 324x287 client pixels at 96 DPI. At 125% Windows scale, Premiere
+reported 120 DPI and the same installed panel measured 338x324 outer pixels with an exact 320x260
+nested UXP content view. The Connect retry control and named panel tab remained present at both
+scales. The retained file-hash and window-geometry record is
+`docs/evidence/ccx-install-layout-v0.3.0.json`. A docked observation remains blocking, so the complete
 minimum/docked/floating/scaled layout gate is not yet claimed as successful.
 
 The live fixture above verifies only the listed interactive create/import/sequence/export/save paths.

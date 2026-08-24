@@ -16,10 +16,11 @@
   Adobe UPIA 8.5.0.13 now installs the UDT-produced v0.3.0 CCX and lists it as enabled for
   Premiere Pro 26.3.2. Premiere's UXP menu opened the exact installed plug-in; it automatically
   established the token-free local session and exposed its Connect retry control in a 340x326 outer
-  / 324x287 client window at 96 DPI, with an exact
-  320x260 nested UXP content view matching the manifest minimum. The retained comparison is
-  `docs/evidence/ccx-install-layout-v0.3.0.json`. Docked and non-100% Windows-scale observations
-  remain required before this gate can be checked.
+  / 324x287 client window at 96 DPI, with an exact 320x260 nested UXP content view matching the
+  manifest minimum. At 125% Windows scale, Premiere reported 120 DPI and the same installed panel
+  retained its exact 320x260 content view with the retry control and named panel tab present. The
+  retained comparison is `docs/evidence/ccx-install-layout-v0.3.0.json`. A docked observation remains
+  required before this gate can be checked.
 - [ ] A release build without `-CcxPath`, with a development ZIP renamed to `.ccx`, or with a mismatched CCX filename/identity fails before staging or publishing.
 - [ ] The signed release ZIP, CCX, SBOM, notices, hashes, manifest, and signature pass `Verify-Release.ps1`.
 - [ ] Tampered signature, extra ZIP file, path escape, reparse point, case collision, downgrade, and partial-install rollback tests reject safely.
