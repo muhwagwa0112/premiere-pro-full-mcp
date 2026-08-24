@@ -124,6 +124,42 @@ internal static class Program
             }
             catch (Exception ex) { Console.Error.WriteLine($"Protection broker failed: {ex.Message}"); return 3; }
         }
+        if (args is ["--trust-profile", "read", "node-server", _])
+        {
+            try
+            {
+                BrokerSecurity.AssertCaller("node-server");
+                Console.Out.Write(TrustProfileStore.CreateDefault().Read(args[3]));
+                return 0;
+            }
+            catch
+            {
+                Console.Error.WriteLine("Trust profile broker failed closed.");
+                return 3;
+            }
+        }
+        if (args is ["--trust-profile", "enroll", _])
+        {
+            try
+            {
+                BrokerSecurity.AssertTrustedInstalledSelf();
+                TrustProfileStore.CreateDefault().EnrollFile(args[2]);
+                Console.Out.WriteLine("Trust profile enrollment completed.");
+                return 0;
+            }
+            catch { Console.Error.WriteLine("Trust profile enrollment failed."); return 10; }
+        }
+        if (args is ["--trust-profile", "revoke", _])
+        {
+            try
+            {
+                BrokerSecurity.AssertTrustedInstalledSelf();
+                TrustProfileStore.CreateDefault().Revoke(args[2]);
+                Console.Out.WriteLine("Trust profile revocation completed.");
+                return 0;
+            }
+            catch { Console.Error.WriteLine("Trust profile revocation failed."); return 10; }
+        }
         if (args is ["--approval", "approve", _])
         {
             try

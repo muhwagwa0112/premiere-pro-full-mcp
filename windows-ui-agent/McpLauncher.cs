@@ -27,7 +27,7 @@ internal static class McpLauncher
         start.ArgumentList.Add(Path.GetFullPath(entrypoint));
         var localApplicationData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         var premiereRoot = Path.Combine(localApplicationData, "PremiereMCP");
-        foreach (var directory in new[] { premiereRoot, Path.Combine(premiereRoot, "approvals"), Path.Combine(premiereRoot, "cep-public-v1"), Path.Combine(premiereRoot, "workspace"), Path.Combine(premiereRoot, "secrets") })
+        foreach (var directory in new[] { premiereRoot, Path.Combine(premiereRoot, "approvals"), Path.Combine(premiereRoot, "cep-public-v1"), Path.Combine(premiereRoot, "workspace"), Path.Combine(premiereRoot, "secrets"), Path.Combine(premiereRoot, "trust-profiles") })
             SecretStore.EnsureCurrentUserDirectory(directory);
         HardenChildEnvironment(start.Environment, localApplicationData);
 

@@ -5,6 +5,7 @@ using System.Text;
 using System.IO;
 using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
+using System.Security.Principal;
 
 namespace PremiereMcp.WindowsUiAgent;
 
@@ -269,6 +270,18 @@ internal static class BrokerSecurity
         var expected = Encoding.ASCII.GetBytes(Sign(keyName, message));
         var provided = Encoding.ASCII.GetBytes(signature);
         return expected.Length == provided.Length && CryptographicOperations.FixedTimeEquals(expected, provided);
+    }
+
+    internal static TrustProfileBinding GetTrustProfileBinding()
+    {
+        var sid = WindowsIdentity.GetCurrent().User?.Value ?? throw new UnauthorizedAccessException("Current Windows user SID is unavailable.");
+        if (!File.Exists(TrustedHelperPath)) throw new UnauthorizedAccessException("Trusted launcher is unavailable.");
+        var canonicalRoot = Path.GetFullPath(InstallationRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).ToUpperInvariant();
+        return new TrustProfileBinding(
+            sid,
+            "premiere-pro-full-mcp",
+            Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonicalRoot))).ToLowerInvariant(),
+            Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(TrustedHelperPath))).ToLowerInvariant());
     }
 
     private static int GetParentProcessId(int processId)
