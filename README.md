@@ -39,7 +39,7 @@ Requirements: Windows 10/11 x64, Premiere Pro 26.3 or later, Creative Cloud Desk
 
    The installer verifies every packaged file, installs only in the current user profile, registers `premiere_pro_full_mcp` with Codex, and opens the bundled CCX.
 3. Approve the independent-plugin warning in Creative Cloud Desktop. Restart Premiere, then open **Window > UXP Plugins > Premiere Pro Full MCP**.
-4. Click **Connect** in the panel. The installed local bridge is fixed to `localhost:17777`; no token, file picker, or pairing step is required.
+4. The panel connects automatically to the installed bridge at `localhost:17777`; **Connect** retries it manually with one click. No token, file picker, or pairing step is required.
 5. Restart Codex and call the host/capability inspection tools. Run Doctor if the bridge is not connected:
 
    ```powershell
@@ -124,7 +124,7 @@ Release builds require a clean Git worktree and the dedicated private signing ke
    ```
 
 3. Creative Cloud Desktop에서 독립 플러그인 설치 경고를 승인합니다. Premiere를 재시작한 뒤 **창 > UXP 플러그인 > Premiere Pro Full MCP**를 엽니다.
-4. 패널에서 **Connect**를 누릅니다. 설치된 로컬 브리지는 `localhost:17777`에 고정되어 있으며 토큰 입력, 파일 선택, 페어링 단계가 없습니다.
+4. 패널은 설치된 `localhost:17777` 브리지에 자동 연결되며, **Connect** 한 번으로 수동 재연결할 수 있습니다. 토큰 입력, 파일 선택, 페어링 단계가 없습니다.
 5. Codex를 재시작합니다. 연결되지 않으면 다음 Doctor를 실행합니다.
 
    ```powershell

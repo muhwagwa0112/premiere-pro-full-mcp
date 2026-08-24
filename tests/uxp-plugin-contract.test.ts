@@ -53,6 +53,7 @@ describe("UXP bridge deployment contract", () => {
     expect(source).toContain('type: "connect", protocolVersion: 2');
     expect(source).toContain('document.getElementById("connect").addEventListener("click", connect)');
     expect(source).not.toContain("runtime-bootstrap.json");
+    expect(source).toContain("void connect();");
     expect(source).not.toContain("createPersistentToken");
     expect(source).not.toContain('document.getElementById("token")');
     expect(source).not.toContain("BOOTSTRAP_PERMISSION_KEY");

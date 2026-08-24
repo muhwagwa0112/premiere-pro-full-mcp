@@ -807,3 +807,4 @@ function connect() {
 }
 
 document.getElementById("connect").addEventListener("click", connect);
+void connect();

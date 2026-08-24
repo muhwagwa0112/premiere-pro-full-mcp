@@ -16,8 +16,9 @@ v0.3.0 is the current Windows release of the capability-gated Premiere Pro 26.3 
   post-production, collaboration, service, third-party, and native boundaries.
 - One implemented-unverified inspection/delivery workflow with durable checkpoint evidence before
   and after export. Other unavailable workflows remain plan-only or blocked.
-- One-click UXP connection to the fixed localhost bridge, with no user token, file picker, or pairing
-  bootstrap. The existing capability/fingerprint handshake and operation authorization remain enforced.
+- Automatic UXP connection to the fixed localhost bridge, with one-click manual retry and no user
+  token, file picker, or pairing bootstrap. The existing capability/fingerprint handshake and
+  operation authorization remain enforced.
 
 ## Validation
 
