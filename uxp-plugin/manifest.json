@@ -2,7 +2,7 @@
   "manifestVersion": 5,
   "id": "com.codex.premiere-pro-full-mcp",
   "name": "Premiere Pro Full MCP Bridge",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "main": "index.html",
   "host": { "app": "premierepro", "minVersion": "26.3.0" },
   "entrypoints": [

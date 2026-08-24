@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createConnection } from "node:net";
-import type { BackendAdapter, BackendProbe, BridgeRequest, BridgeResponse, DispatchState, SupportDecision } from "../contracts.js";
+import type { BackendAdapter, BackendProbe, BridgeRequest, BridgeResponse, DispatchState, RouteBinding, SupportDecision } from "../contracts.js";
+import { hasValidEffectiveRequestBinding, routeBindingFromProbe, sameRouteBinding } from "../security/execution-plan.js";
 
 interface UiResponse {
   protocolVersion: 1;
@@ -8,6 +9,15 @@ interface UiResponse {
   ok: boolean;
   result?: unknown;
   error?: { code?: string; message?: string; retryable?: boolean };
+}
+
+interface UiHealth {
+  status: "ok";
+  agent: string;
+  protocolVersion: 1;
+  agentVersion: string;
+  agentSessionId: string;
+  capabilityFingerprint: string;
 }
 
 export class UiNamedPipeAdapter implements BackendAdapter {
@@ -26,8 +36,14 @@ export class UiNamedPipeAdapter implements BackendAdapter {
   async probe(): Promise<BackendProbe> {
     if (!this.#token) return { backend: this.backend, available: false, operations: [], reason: "PREMIERE_MCP_UI_TOKEN is not configured with at least 24 characters" };
     const response = await this.call("health", {}, this.#timeoutMs);
+    const health = response.result as Partial<UiHealth> | undefined;
+    const identityIsValid = health?.status === "ok"
+      && typeof health.agentVersion === "string" && health.agentVersion.length > 0
+      && typeof health.agentSessionId === "string" && health.agentSessionId.length > 0
+      && typeof health.capabilityFingerprint === "string" && /^[a-f0-9]{64}$/i.test(health.capabilityFingerprint);
     return response.ok
-      ? { backend: this.backend, available: true, operations: UiNamedPipeAdapter.operations }
+      && identityIsValid
+      ? { backend: this.backend, available: true, hostVersion: health.agentVersion!, hostSessionId: health.agentSessionId!, capabilityFingerprint: health.capabilityFingerprint!, operations: UiNamedPipeAdapter.operations }
       : { backend: this.backend, available: false, operations: [], reason: response.error?.message ?? "UI agent is unavailable" };
   }
 
@@ -43,6 +59,10 @@ export class UiNamedPipeAdapter implements BackendAdapter {
   }
 
   async execute(request: BridgeRequest): Promise<BridgeResponse> {
+    if (request.routeBinding || request.planHash || request.effectiveRequestDigest) {
+      const currentProbe = await this.probe();
+      if (!request.routeBinding || !request.planHash || !hasValidEffectiveRequestBinding(request) || !currentProbe.available || !sameRouteBinding(request.routeBinding, routeBindingFromProbe(currentProbe))) return { protocolVersion: 1, requestId: request.requestId, ok: false, dispatchState: "not_dispatched", error: { code: "ROUTE_BINDING_DRIFT", message: "UI route, plan, or effective request binding is incomplete or changed before named-pipe send", retryable: true } };
+    }
     const operation = request.operation === "host.inspect"
       ? "premiere.window.inspect"
       : request.operation === "ui.catalog"
@@ -65,7 +85,16 @@ export class UiNamedPipeAdapter implements BackendAdapter {
     }
     const defaultTimeoutMs = operation === "premiere.controls.catalog" ? 50_000 : 5_000;
     const timeoutMs = this.#timeoutMs === 5_000 ? defaultTimeoutMs : operation === "premiere.controls.catalog" ? Math.max(50_000, this.#timeoutMs) : this.#timeoutMs;
-    const response = await this.call(operation, request.operation === "host.inspect" ? {} : request.args, timeoutMs);
+    const response = await this.call(
+      operation,
+      request.operation === "host.inspect" ? {} : request.args,
+      timeoutMs,
+      request.routeBinding,
+      request.planHash,
+      request.operation,
+      request.expectedRevision,
+      request.effectiveRequestDigest,
+    );
     if (!response.ok) {
       const dispatchState: DispatchState = response.error?.code === "UI_UNAVAILABLE" || response.error?.code === "UI_TOKEN_MISSING"
         ? "not_dispatched"
@@ -84,7 +113,7 @@ export class UiNamedPipeAdapter implements BackendAdapter {
     };
   }
 
-  private async call(operation: string, args: Record<string, unknown>, timeoutMs = 5_000): Promise<UiResponse> {
+  private async call(operation: string, args: Record<string, unknown>, timeoutMs = 5_000, routeBinding?: RouteBinding, planHash?: string, boundOperation?: string, expectedRevision?: string, effectiveRequestDigest?: string): Promise<UiResponse> {
     const requestId = randomUUID();
     if (!this.#token) return { protocolVersion: 1, requestId, ok: false, error: { code: "UI_TOKEN_MISSING", message: "UI token is not configured" } };
     return new Promise<UiResponse>((resolve) => {
@@ -105,7 +134,7 @@ export class UiNamedPipeAdapter implements BackendAdapter {
       };
       socket.once("connect", () => {
         connected = true;
-        socket.write(`${JSON.stringify({ protocolVersion: 1, requestId, token: this.#token, operation, args })}\n`);
+        socket.write(`${JSON.stringify({ protocolVersion: 1, requestId, token: this.#token, operation, args, ...(routeBinding ? { routeBinding } : {}), ...(planHash ? { planHash } : {}), ...(boundOperation ? { boundOperation } : {}), ...(expectedRevision ? { expectedRevision } : {}), ...(effectiveRequestDigest ? { effectiveRequestDigest } : {}) })}\n`);
       });
       socket.on("data", (chunk) => {
         buffer += chunk.toString("utf8");

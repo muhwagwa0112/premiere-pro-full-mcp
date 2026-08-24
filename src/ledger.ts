@@ -2,7 +2,7 @@ import { mkdir, appendFile, readFile, rename, rm, writeFile } from "node:fs/prom
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { createHash } from "node:crypto";
-import type { Backend, OperationStatus, Risk } from "./contracts.js";
+import type { Backend, OperationStatus, ReconciliationLedgerEvidence, Risk } from "./contracts.js";
 
 export interface LedgerRecord {
   operationId: string;
@@ -14,6 +14,7 @@ export interface LedgerRecord {
   verificationOutcome: string;
   beforeRevision: string | null;
   afterRevision: string | null;
+  reconciliation?: ReconciliationLedgerEvidence;
 }
 
 function revisionFingerprint(value: string | null): string | null {
@@ -22,8 +23,35 @@ function revisionFingerprint(value: string | null): string | null {
   return `sha256:${createHash("sha256").update(value).digest("hex")}`;
 }
 
+function digest(value: string): string {
+  return /^sha256:[0-9a-f]{64}$/.test(value) ? value : `sha256:${createHash("sha256").update(value).digest("hex")}`;
+}
+
+function reconciliationEvidence(value: ReconciliationLedgerEvidence | undefined): ReconciliationLedgerEvidence | undefined {
+  if (!value) return undefined;
+  const phase = value.phase === "checkpoint" || value.phase === "original_dispatch" || value.phase === "output_commit" || value.phase === "local_recovery"
+    ? value.phase
+    : "local_recovery";
+  const errorCode = /^[A-Z0-9_]{1,128}$/.test(value.errorCode) ? value.errorCode : "UNSAFE_ERROR_CODE";
+  const recoveryEvidenceDigests = [...new Set((Array.isArray(value.recoveryEvidenceDigests) ? value.recoveryEvidenceDigests : []).slice(0, 64).filter((item): item is string => typeof item === "string").map(digest))].sort();
+  const lockDigest = typeof value.lockDigest === "string" ? digest(value.lockDigest) : null;
+  return { phase, errorCode, recoveryEvidenceDigests, lockDigest };
+}
+
 function privacySafe(record: LedgerRecord): LedgerRecord {
-  return { ...record, beforeRevision: revisionFingerprint(record.beforeRevision), afterRevision: revisionFingerprint(record.afterRevision) };
+  const reconciliation = reconciliationEvidence(record.reconciliation);
+  return {
+    operationId: record.operationId,
+    actionId: record.actionId,
+    backend: record.backend,
+    risk: record.risk,
+    status: record.status,
+    timestamp: record.timestamp,
+    verificationOutcome: record.verificationOutcome,
+    beforeRevision: revisionFingerprint(record.beforeRevision),
+    afterRevision: revisionFingerprint(record.afterRevision),
+    ...(reconciliation ? { reconciliation } : {}),
+  };
 }
 
 function defaultLedgerDirectory(): string {
@@ -35,6 +63,7 @@ export class OperationLedger {
   readonly #directory: string;
   readonly #file: string;
   readonly #records = new Map<string, LedgerRecord>();
+  readonly #orphanedUnfinished = new Set<string>();
   #ready: Promise<void>;
 
   constructor(directory = defaultLedgerDirectory()) {
@@ -46,13 +75,19 @@ export class OperationLedger {
   async record(entry: LedgerRecord): Promise<void> {
     await this.#ready;
     const frozen = Object.freeze(privacySafe(entry));
-    this.#records.set(entry.operationId, frozen);
     await appendFile(this.#file, `${JSON.stringify(frozen)}\n`, { encoding: "utf8", mode: 0o600 });
+    this.#records.set(entry.operationId, frozen);
+    if (entry.status !== "planned" && entry.status !== "dispatched") this.#orphanedUnfinished.delete(entry.operationId);
   }
 
   async get(operationId: string): Promise<LedgerRecord | null> {
     await this.#ready;
     return this.#records.get(operationId) ?? null;
+  }
+
+  async activeReconciliations(): Promise<LedgerRecord[]> {
+    await this.#ready;
+    return [...this.#records.values()].filter((record) => record.status === "reconciliation_required" || this.#orphanedUnfinished.has(record.operationId));
   }
 
   get directory(): string {
@@ -71,13 +106,16 @@ export class OperationLedger {
           const record = JSON.parse(line) as LedgerRecord;
           if (record.operationId && record.actionId) {
             const safe = privacySafe(record);
-            if (safe.beforeRevision !== record.beforeRevision || safe.afterRevision !== record.afterRevision) needsMigration = true;
+            if (JSON.stringify(safe) !== JSON.stringify(record)) needsMigration = true;
             migrated.push(safe);
             this.#records.set(record.operationId, safe);
           }
         } catch {
           // A truncated final line is ignored. The ledger contains no operation arguments or results.
         }
+      }
+      for (const record of this.#records.values()) {
+        if (record.status === "planned" || record.status === "dispatched") this.#orphanedUnfinished.add(record.operationId);
       }
       if (needsMigration) {
         const temporary = `${this.#file}.${process.pid}.migration.tmp`;

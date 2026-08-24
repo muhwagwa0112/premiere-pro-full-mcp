@@ -36,7 +36,7 @@
   var leaderPath = path.join(directory, "bridge-owner.lock");
   var LEADER_LEASE_MS = 60000;
   var allowed = {
-    cep: { "host.inspect": true, "project.inspect": true, "sequence.inspect": true, "project.create": true, "project.save": true, "project.open": true, "media.import": true, "timeline.sequence.create_from_media": true, "export.sequence": true, "workspace.set": true, "cep.surface.catalog": true, "cep.read": true, "cep.edit": true, "cep.filesystem": true, "cep.destructive": true },
+    cep: { "host.inspect": true, "project.inspect": true, "sequence.inspect": true, "project.create": true, "project.save": true, "project.checkpoint": true, "project.open": true, "media.import": true, "timeline.sequence.create_from_media": true, "export.sequence": true, "workspace.set": true, "cep.surface.catalog": true, "cep.read": true, "cep.edit": true, "cep.filesystem": true, "cep.destructive": true },
     qe: { "host.inspect": true, "project.inspect": true, "sequence.inspect": true, "qe.catalog": true, "qe.read": true, "qe.edit": true, "qe.destructive": true }
   };
   fs.mkdirSync(directory, { recursive: true });
@@ -192,6 +192,12 @@
     if (typeof request.issuedAt !== "number" || typeof request.expiresAt !== "number" || request.issuedAt > now + 5000 || request.expiresAt < now || request.expiresAt - request.issuedAt > 60000) throw new Error("Command freshness check failed");
     if (!verify(withoutSignature(request), request.signature)) throw new Error("Command signature is invalid");
     if (!allowed[request.backend] || !allowed[request.backend][request.operation]) throw new Error("Backend operation is not allowlisted");
+    if (request.routeBinding || request.planHash) {
+      var expectedFingerprint = crypto.createHash("sha256").update(JSON.stringify({ backend: request.backend, capabilities: cachedHost.capabilities.slice().sort(), operations: Object.keys(allowed[request.backend]) })).digest("hex");
+      var expectedEffectiveRequestDigest = "sha256:" + crypto.createHash("sha256").update(canonical({ operation: request.operation, args: request.args, expectedRevision: request.expectedRevision || null }), "utf8").digest("hex");
+      if (!request.routeBinding || typeof request.planHash !== "string" || !/^sha256:[a-f0-9]{64}$/.test(request.planHash) || request.effectiveRequestDigest !== expectedEffectiveRequestDigest) throw new Error("Command route, plan, or effective request binding is incomplete");
+      if (request.routeBinding.backend !== request.backend || String(request.routeBinding.hostVersion || "") !== String(cachedHost.hostVersion || "") || request.routeBinding.hostSessionId !== sessionId || request.routeBinding.capabilityFingerprint !== expectedFingerprint) throw new Error("Command route binding no longer matches this CEP session");
+    }
     usedNonces[request.nonce] = request.expiresAt;
     Object.keys(usedNonces).forEach(function (nonce) { if (usedNonces[nonce] < now) delete usedNonces[nonce]; });
   }
@@ -226,6 +232,8 @@
       }
       var hostRequest = { protocolVersion: 1, requestId: request.requestId, operation: request.operation, args: hostArgs };
       if (request.expectedRevision) hostRequest.expectedRevision = request.expectedRevision;
+      if (request.routeBinding) hostRequest.routeBinding = request.routeBinding;
+      if (request.planHash) hostRequest.planHash = request.planHash;
       var script = "(function(){if(typeof PPMCP!==\"object\"||typeof PPMCP.dispatch!==\"function\"){" + hostLoaderPrefix + "}return PPMCP.dispatch(" + JSON.stringify(JSON.stringify(hostRequest)) + ");}())";
       cs.evalScript(script, function (raw) {
         var response;

@@ -12,6 +12,7 @@ const actionInputShape = {
   operationId: z.uuid().optional(),
   expectedRevision: z.string().min(1).max(256).regex(/^[A-Za-z0-9._:-]+$/).optional(),
   approvalId: z.uuid().optional(),
+  planHash: z.string().regex(/^sha256:[a-f0-9]{64}$/).optional(),
 };
 
 function textResult(value: Record<string, unknown>) {
@@ -26,7 +27,7 @@ function normalizeRequest(input: Record<string, unknown>): Record<string, unknow
 }
 
 export function createServer(engine: OperationEngine): McpServer {
-  const server = new McpServer({ name: "premiere-pro-full-mcp", version: "0.2.0" });
+  const server = new McpServer({ name: "premiere-pro-full-mcp", version: "0.3.0" });
 
   server.registerTool("premiere_capabilities", {
     title: "Premiere capabilities",

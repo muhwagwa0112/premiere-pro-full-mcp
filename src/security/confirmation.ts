@@ -5,13 +5,17 @@ import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/p
 import type { ActionDescriptor, ActionRequest } from "../contracts.js";
 import { brokerProtect, brokerSign, brokerUnprotect, brokerVerify } from "./hmac-broker.js";
 import { canonicalJson } from "./signed-envelope.js";
+import type { ExecutionPlan } from "./execution-plan.js";
 
 interface ApprovalPayload {
-  version: 1;
+  version: 2;
   approvalId: string;
   state: "pending" | "approved";
+  operationId: string;
   actionId: string;
   requestDigest: string;
+  planHash: string;
+  route: { backend: string; hostVersion: string | null; hostSessionId: string | null; capabilityFingerprint: string | null };
   request: {
     actionId: string;
     target: Record<string, unknown> | null;
@@ -23,7 +27,7 @@ interface ApprovalPayload {
     risk: string;
     mutatesProject: boolean;
     undoable: boolean;
-    backendPreference: string[];
+    backend: string;
   };
   issuedAt: number;
   expiresAt: number;
@@ -95,14 +99,18 @@ export class ConfirmationService {
     this.#authenticate = authenticate;
   }
 
-  async issue(action: ActionDescriptor, request: ActionRequest, ttlMs = 5 * 60_000): Promise<{ approvalId: string; expiresAt: string; summary: Record<string, unknown>; approvalCommand: string }> {
+  async issue(action: ActionDescriptor, request: ActionRequest, plan: ExecutionPlan, ttlMs = 5 * 60_000): Promise<{ approvalId: string; expiresAt: string; summary: Record<string, unknown>; approvalCommand: string }> {
+    if (!Number.isSafeInteger(ttlMs) || ttlMs <= 0) throw new Error("Confirmation TTL must be a positive integer");
+    const binding = confirmationBinding(plan);
+    const planHash = binding.planHash;
+    if (!/^sha256:[a-f0-9]{64}$/.test(planHash)) throw new Error("Confirmation requires a valid planHash");
     await mkdir(this.#directory, { recursive: true, mode: 0o700 });
     await this.cleanupStaleRecords();
     const now = Date.now();
     const approvalId = randomUUID();
     const payload: ApprovalPayload = {
-      version: 1, approvalId, state: "pending", actionId: action.id, requestDigest: requestDigest(request), request: requestSnapshot(request),
-      summary: { title: action.title, risk: action.risk, mutatesProject: action.mutatesProject, undoable: action.undoable, backendPreference: action.preferredBackends },
+      version: 2, approvalId, state: "pending", operationId: binding.operationId, actionId: action.id, requestDigest: requestDigest(request), planHash, route: binding.route, request: requestSnapshot(request),
+      summary: { title: action.title, risk: action.risk, mutatesProject: action.mutatesProject, undoable: action.undoable, backend: binding.route.backend },
       issuedAt: now, expiresAt: now + ttlMs, approvedAt: null, nonce: randomBytes(18).toString("base64url"),
     };
     const protectedPayload = await this.#authenticate.protect(canonicalJson(payload));
@@ -110,7 +118,8 @@ export class ConfirmationService {
     return { approvalId, expiresAt: new Date(payload.expiresAt).toISOString(), summary: { actionId: action.id, ...payload.summary }, approvalCommand: `& '${installedHelperPath().replaceAll("'", "''")}' --approval approve ${approvalId}` };
   }
 
-  async consume(action: ActionDescriptor, request: ActionRequest, approvalId: string): Promise<void> {
+  async consume(action: ActionDescriptor, request: ActionRequest, approvalId: string, plan: ExecutionPlan): Promise<void> {
+    const binding = confirmationBinding(plan);
     await this.cleanupStaleRecords();
     const approvedPath = approvalPath(this.#directory, approvalId, "approved");
     const claimedPath = join(this.#directory, `claimed-${approvalId}-${randomUUID()}.json`);
@@ -121,9 +130,10 @@ export class ConfirmationService {
       const envelope = await readEnvelope(claimedPath);
       if (!await this.#authenticate.verify(envelope.payload, envelope.signature)) throw new Error("Approval signature is invalid");
       const payload = JSON.parse(await this.#authenticate.unprotect(envelope.payload)) as ApprovalPayload;
-      if (payload.version !== 1 || payload.state !== "approved" || payload.approvalId !== approvalId) throw new Error("Approval is not in the approved state");
+      if (payload.version !== 2 || payload.state !== "approved" || payload.approvalId !== approvalId) throw new Error("Approval is not a supported v2 approved record");
       if (payload.expiresAt < Date.now()) throw new Error("Approval has expired");
       if (payload.actionId !== action.id) throw new Error("Approval is for a different action");
+      if (payload.operationId !== binding.operationId || payload.planHash !== binding.planHash || canonicalJson(payload.route) !== canonicalJson(binding.route)) throw new Error("Approval does not match this exact execution plan and route");
       if (payload.requestDigest !== requestDigest(request)) throw new Error("Approval does not match this exact request");
       if (payload.request.expectedRevision !== (request.expectedRevision ?? null)) throw new Error("Approval revision mismatch");
     } finally {
@@ -140,4 +150,11 @@ export class ConfirmationService {
       if (metadata?.isFile() && metadata.mtimeMs < cutoff) await rm(path, { force: true });
     }
   }
+}
+
+function confirmationBinding(plan: ExecutionPlan): Pick<ApprovalPayload, "operationId" | "planHash" | "route"> {
+  return {
+    operationId: plan.operationId, planHash: plan.planHash,
+    route: { backend: plan.backend, hostVersion: plan.hostVersion, hostSessionId: plan.hostSessionId, capabilityFingerprint: plan.capabilityFingerprint },
+  };
 }

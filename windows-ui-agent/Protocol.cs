@@ -1,4 +1,5 @@
 using System.IO;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -10,7 +11,18 @@ public sealed record ProtocolRequest(
     string? RequestId,
     string? Token,
     string? Operation,
-    JsonElement Args);
+    JsonElement Args,
+    RouteBinding? RouteBinding = null,
+    string? PlanHash = null,
+    string? BoundOperation = null,
+    string? ExpectedRevision = null,
+    string? EffectiveRequestDigest = null);
+
+public sealed record RouteBinding(
+    string? Backend,
+    string? HostVersion,
+    string? HostSessionId,
+    string? CapabilityFingerprint);
 
 public sealed record ProtocolError(string Code, string Message, bool? Retryable = null);
 
@@ -86,6 +98,8 @@ public static class JsonLineProtocol
 
 public sealed class RequestDispatcher
 {
+    internal const string AgentVersion = "1.0.0";
+    private const string CapabilityFingerprintMaterial = "premiere-mcp-windows-ui|protocol:1|health|premiere.window.inspect|premiere.controls.catalog|ui.control.invoke";
     private static readonly HashSet<string> AllowedOperations = new(StringComparer.Ordinal)
     {
         "health",
@@ -96,11 +110,15 @@ public sealed class RequestDispatcher
 
     private readonly string _token;
     private readonly IPremiereAutomation _automation;
+    private readonly string _agentSessionId;
+    private readonly string _capabilityFingerprint;
 
-    public RequestDispatcher(string token, IPremiereAutomation automation)
+    public RequestDispatcher(string token, IPremiereAutomation automation, string? agentSessionId = null)
     {
         _token = token;
         _automation = automation;
+        _agentSessionId = string.IsNullOrWhiteSpace(agentSessionId) ? Guid.NewGuid().ToString("D") : agentSessionId;
+        _capabilityFingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(CapabilityFingerprintMaterial))).ToLowerInvariant();
     }
 
     public ProtocolResponse Dispatch(string json)
@@ -135,6 +153,20 @@ public sealed class RequestDispatcher
             return ProtocolResponse.Failure(request.RequestId, "operation_not_allowed", "Operation is not allowlisted.");
         }
 
+        if (request.Operation == "ui.control.invoke")
+        {
+            try
+            {
+                _ = ParseInvokeArgs(request.Args);
+            }
+            catch (RequestValidationException ex)
+            {
+                return ProtocolResponse.Failure(request.RequestId, "invalid_args", ex.Message);
+            }
+            var routeFailure = ValidateMutationRoute(request);
+            if (routeFailure is not null) return routeFailure;
+        }
+
         try
         {
             var result = request.Operation switch
@@ -144,6 +176,9 @@ public sealed class RequestDispatcher
                     status = "ok",
                     agent = "premiere-mcp-windows-ui",
                     protocolVersion = 1,
+                    agentVersion = AgentVersion,
+                    agentSessionId = _agentSessionId,
+                    capabilityFingerprint = _capabilityFingerprint,
                     mutatingOperationsRequirePremiereForeground = true
                 },
                 "premiere.window.inspect" => _automation.InspectWindow(),
@@ -177,6 +212,48 @@ public sealed class RequestDispatcher
         {
             return ProtocolResponse.Failure(request.RequestId, "automation_error", "Windows UI Automation could not complete the operation.");
         }
+    }
+
+    private ProtocolResponse? ValidateMutationRoute(ProtocolRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.PlanHash) || !IsPlanHash(request.PlanHash))
+            return ProtocolResponse.Failure(request.RequestId, "plan_hash_required", "Mutating UI operations require a SHA-256 execution plan hash.");
+        var route = request.RouteBinding;
+        if (route is null ||
+            !string.Equals(route.Backend, "ui", StringComparison.Ordinal) ||
+            !string.Equals(route.HostVersion, AgentVersion, StringComparison.Ordinal) ||
+            !string.Equals(route.HostSessionId, _agentSessionId, StringComparison.Ordinal) ||
+            !string.Equals(route.CapabilityFingerprint, _capabilityFingerprint, StringComparison.Ordinal))
+            return ProtocolResponse.Failure(request.RequestId, "route_binding_mismatch", "UI agent session or capability binding changed before mutation dispatch.", true);
+        if (!string.Equals(request.BoundOperation, "ui.invoke", StringComparison.Ordinal) ||
+            string.IsNullOrWhiteSpace(request.EffectiveRequestDigest) ||
+            !IsPlanHash(request.EffectiveRequestDigest) ||
+            !FixedTimeTextEquals(request.EffectiveRequestDigest, EffectiveRequestDigest(request)))
+            return ProtocolResponse.Failure(request.RequestId, "effective_request_binding_mismatch", "UI mutation arguments do not match the authorized effective request digest.");
+        return null;
+    }
+
+    private static bool IsPlanHash(string value) =>
+        value.Length == 71 && value.StartsWith("sha256:", StringComparison.Ordinal) && value[7..].All(Uri.IsHexDigit);
+
+    private static string EffectiveRequestDigest(ProtocolRequest request)
+    {
+        // ui.control.invoke has a strict four-string argument schema, so this
+        // reproduces the server's sorted-key canonical JSON without accepting
+        // a broader cross-process serialization surface.
+        var values = request.Args.EnumerateObject().ToDictionary(property => property.Name, property => property.Value.GetString(), StringComparer.Ordinal);
+        var args = "{" + string.Join(",", values.OrderBy(entry => entry.Key, StringComparer.Ordinal)
+            .Select(entry => JsonSerializer.Serialize(entry.Key) + ":" + JsonSerializer.Serialize(entry.Value))) + "}";
+        var expectedRevision = request.ExpectedRevision is null ? "null" : JsonSerializer.Serialize(request.ExpectedRevision);
+        var material = "{\"args\":" + args + ",\"expectedRevision\":" + expectedRevision + ",\"operation\":\"ui.invoke\"}";
+        return "sha256:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(material))).ToLowerInvariant();
+    }
+
+    private static bool FixedTimeTextEquals(string left, string right)
+    {
+        var leftBytes = Encoding.ASCII.GetBytes(left.ToLowerInvariant());
+        var rightBytes = Encoding.ASCII.GetBytes(right.ToLowerInvariant());
+        return leftBytes.Length == rightBytes.Length && CryptographicOperations.FixedTimeEquals(leftBytes, rightBytes);
     }
 
     private static ControlInvokeArgs ParseInvokeArgs(JsonElement args)

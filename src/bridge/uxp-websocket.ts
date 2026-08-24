@@ -3,6 +3,7 @@ import { stat } from "node:fs/promises";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { IncomingMessage } from "node:http";
 import type { BackendAdapter, BackendProbe, BridgeRequest, BridgeResponse, DispatchState, SupportDecision } from "../contracts.js";
+import { hasValidEffectiveRequestBinding, routeBindingFromProbe, sameRouteBinding } from "../security/execution-plan.js";
 import { loadAdobeApiCatalog } from "../adobe-api-catalog.js";
 
 interface AuthMessage {
@@ -127,6 +128,10 @@ export class UxpWebSocketAdapter implements BackendAdapter {
   }
 
   async execute(request: BridgeRequest): Promise<BridgeResponse> {
+    if (request.routeBinding || request.planHash || request.effectiveRequestDigest) {
+      const currentProbe = await this.probe();
+      if (!request.routeBinding || !request.planHash || !hasValidEffectiveRequestBinding(request) || !currentProbe.available || !sameRouteBinding(request.routeBinding, routeBindingFromProbe(currentProbe))) return this.failure(request.requestId, "ROUTE_BINDING_DRIFT", "UXP route, plan, or effective request binding is incomplete or changed before websocket send", true, "not_dispatched");
+    }
     const availability = await this.probe();
     if (!availability.available || !this.#socket) return this.failure(request.requestId, "UXP_UNAVAILABLE", availability.reason ?? "UXP unavailable", true, "not_dispatched");
     if (!this.#capabilities.has(request.operation)) return this.failure(request.requestId, "UXP_CAPABILITY_UNAVAILABLE", `Connected host did not advertise ${request.operation}`, false, "not_dispatched");

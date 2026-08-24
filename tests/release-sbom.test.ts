@@ -56,7 +56,7 @@ describe("release SBOM", () => {
     expect(output.packages.some((item: { name: string }) => item.name === "example-dependency")).toBe(true);
     expect(output.files.map((item: { fileName: string }) => item.fileName).sort()).toEqual(["payload.txt"]);
     expect(output.relationships).toContainEqual({
-      spdxElementId: "SPDXRef-Package-premiere-pro-full-mcp-0.2.0",
+      spdxElementId: "SPDXRef-Package-premiere-pro-full-mcp-0.3.0",
       relationshipType: "DEPENDS_ON",
       relatedSpdxElement: "SPDXRef-Package-example-dependency",
     });

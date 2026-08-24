@@ -2,6 +2,7 @@ import { access, realpath } from "node:fs/promises";
 import { constants } from "node:fs";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import type { ActionDescriptor } from "../contracts.js";
+import { createHash } from "node:crypto";
 
 function configuredRoots(): string[] {
   return (process.env.PREMIERE_MCP_APPROVED_ROOTS ?? "")
@@ -52,6 +53,16 @@ export class PathPolicy {
   constructor(roots = configuredRoots()) {
     this.#roots = roots;
   }
+
+  async approvedRootDigests(): Promise<string[]> {
+    const roots = await Promise.all(this.#roots.map(async (root) => {
+      if (!isAbsolute(root)) throw new Error("Approved filesystem roots must be absolute");
+      return canonicalize(root);
+    }));
+    return [...new Set(roots.map((root) => `sha256:${createHash("sha256").update(root, "utf8").digest("hex")}`))].sort();
+  }
+
+  roots(): readonly string[] { return [...this.#roots]; }
 
   async assert(action: ActionDescriptor, args: Record<string, unknown>): Promise<void> {
     if (action.authority !== "filesystem") return;

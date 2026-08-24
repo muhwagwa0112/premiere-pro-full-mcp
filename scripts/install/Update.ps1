@@ -6,6 +6,9 @@ param(
     [string]$ManifestPath = '',
     [string]$SignaturePath = '',
     [string]$Repository = 'muhwagwa0112/premiere-pro-full-mcp',
+    [ValidateSet('', 'interactive', 'trusted_unattended', 'TrustedUnattended', 'isolated_lab', 'IsolatedLab')][string]$AutomationMode = '',
+    [string]$TrustProfileId = '',
+    [string]$TrustProfilePath = '',
     [switch]$SkipCodexRegistration,
     [switch]$SkipCcxLaunch,
     [switch]$AllowSameVersion
@@ -50,13 +53,17 @@ try {
         $nextVersion = [version]([string]$signed.version)
         if ($nextVersion -lt $currentVersion -or ($nextVersion -eq $currentVersion -and -not $AllowSameVersion)) { throw "Update version $nextVersion is not newer than installed version $currentVersion." }
     }
+    $selectedMode = if ($AutomationMode) { Resolve-PpMcpAutomationMode -AutomationMode $AutomationMode } elseif ($current -and $current.automationMode) { Resolve-PpMcpAutomationMode -AutomationMode ([string]$current.automationMode) } else { 'interactive' }
+    $selectedProfileId = if ($TrustProfileId) { $TrustProfileId } elseif ($selectedMode -ne 'interactive' -and $current -and $current.trustProfileId) { [string]$current.trustProfileId } else { '' }
     if ([System.IO.Path]::GetFileName($package) -ne [string]$signed.assets.windowsZip.name) { throw 'Signed manifest ZIP name mismatch.' }
     if ((Get-Item -LiteralPath $package).Length -ne [long]$signed.assets.windowsZip.size -or (Get-PpMcpSha256 -Path $package) -ne [string]$signed.assets.windowsZip.sha256) { throw 'Signed update ZIP verification failed.' }
     $expanded = Join-Path $temporaryRoot 'expanded'
     Expand-PpMcpSafeArchive -ArchivePath $package -DestinationPath $expanded
     $top = @(Get-ChildItem -LiteralPath $expanded -Force)
     if ($top.Count -ne 1 -or -not $top[0].PSIsContainer -or $top[0].Name -ne "premiere-pro-full-mcp-$($signed.version)") { throw 'Authenticated archive layout is invalid.' }
-    $arguments = @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $top[0].FullName 'Install.ps1'), '-InstallRoot', $resolvedInstallRoot, '-CepInstallRoot', $resolvedCepRoot, '-PackagePath', $top[0].FullName)
+    $arguments = @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $top[0].FullName 'Install.ps1'), '-InstallRoot', $resolvedInstallRoot, '-CepInstallRoot', $resolvedCepRoot, '-PackagePath', $top[0].FullName, '-AutomationMode', $selectedMode)
+    if ($selectedProfileId) { $arguments += @('-TrustProfileId', $selectedProfileId) }
+    if ($TrustProfilePath) { $arguments += @('-TrustProfilePath', ([System.IO.Path]::GetFullPath($TrustProfilePath))) }
     if ($SkipCodexRegistration) { $arguments += '-SkipCodexRegistration' }
     if ($SkipCcxLaunch) { $arguments += '-SkipCcxLaunch' }
     Invoke-PpMcpCommand -FilePath 'powershell.exe' -Arguments $arguments -FailureMessage 'Update installation failed'

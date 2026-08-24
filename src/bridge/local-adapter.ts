@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { collectLocalInventory } from "../inventory.js";
 import type { BackendAdapter, BackendProbe, BridgeRequest, BridgeResponse, SupportDecision } from "../contracts.js";
 import { searchAdobeApiCatalog } from "../adobe-api-catalog.js";
+import { hasValidEffectiveRequestBinding, routeBindingFromProbe, sameRouteBinding } from "../security/execution-plan.js";
 
 export class LocalAdapter implements BackendAdapter {
   readonly backend = "local" as const;
@@ -22,6 +23,7 @@ export class LocalAdapter implements BackendAdapter {
   }
 
   async execute(request: BridgeRequest): Promise<BridgeResponse> {
+    if ((request.routeBinding || request.planHash || request.effectiveRequestDigest) && (!request.routeBinding || !request.planHash || !hasValidEffectiveRequestBinding(request) || !sameRouteBinding(request.routeBinding, routeBindingFromProbe(await this.probe())))) return this.failure(request, "ROUTE_BINDING_DRIFT", "Local route, plan, or effective request binding is incomplete or changed before dispatch");
     if (!["host.inspect", "plugin.catalog", "effects.catalog", "uxp.catalog"].includes(request.operation)) {
       return this.failure(request, "LOCAL_OPERATION_UNSUPPORTED", `Local adapter does not implement ${request.operation}`);
     }

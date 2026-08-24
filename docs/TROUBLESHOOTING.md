@@ -2,7 +2,7 @@
 
 ## SmartScreen or unsigned publisher warning
 
-The v0.2.0 executable and PowerShell scripts are not Authenticode-signed. Verify the release URL and published SHA-256 before proceeding. Never bypass a checksum or RSA update-signature failure.
+The v0.3.0 executable and PowerShell scripts are not Authenticode-signed. Verify the release URL and published SHA-256 before proceeding. Never bypass a checksum or RSA update-signature failure.
 
 ## The UXP panel is missing or blank
 

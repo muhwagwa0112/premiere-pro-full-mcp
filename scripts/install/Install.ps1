@@ -3,14 +3,36 @@ param(
     [string]$InstallRoot = '',
     [string]$CepInstallRoot = '',
     [string]$PackagePath = '',
+    [ValidateSet('interactive', 'trusted_unattended', 'TrustedUnattended', 'isolated_lab', 'IsolatedLab')][string]$AutomationMode = 'interactive',
+    [string]$TrustProfileId = '',
+    [string]$TrustProfilePath = '',
     [switch]$SkipCodexRegistration,
     [switch]$SkipCcxLaunch
 )
 
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Common.ps1')
+$AutomationMode = Resolve-PpMcpAutomationMode -AutomationMode $AutomationMode
 $packageRoot = if ($PackagePath) { [System.IO.Path]::GetFullPath($PackagePath) } else { [System.IO.Path]::GetFullPath((Split-Path -Parent $PSCommandPath)) }
 $resolvedInstallRoot = Get-PpMcpInstallRoot -InstallRoot $InstallRoot
+$existingMetadata = Get-PpMcpCurrentMetadata -InstallRoot $resolvedInstallRoot
+$trustEnrollment = $null
+$reuseInstalledTrustProfile = $false
+if ($AutomationMode -eq 'interactive') {
+    if ($TrustProfileId -or $TrustProfilePath) { throw 'Interactive mode cannot use a trust profile ID or enrollment file.' }
+} else {
+    if ($TrustProfilePath) {
+        $trustEnrollment = Read-PpMcpTrustProfileEnrollment -TrustProfilePath $TrustProfilePath -AutomationMode $AutomationMode
+        if ($TrustProfileId -and $TrustProfileId -cne $trustEnrollment.profileId) { throw 'Trust profile ID does not match the enrollment file.' }
+        $TrustProfileId = $trustEnrollment.profileId
+    } else {
+        $TrustProfileId = Assert-PpMcpTrustProfileId -TrustProfileId $TrustProfileId
+        if (-not $existingMetadata -or [string]$existingMetadata.automationMode -cne $AutomationMode -or [string]$existingMetadata.trustProfileId -cne $TrustProfileId) {
+            throw "$AutomationMode requires -TrustProfilePath for initial enrollment or a matching installed profile configuration."
+        }
+        $reuseInstalledTrustProfile = $true
+    }
+}
 $previousInstallRootEnvironment = $env:PREMIERE_MCP_INSTALL_ROOT
 $env:PREMIERE_MCP_INSTALL_ROOT = $resolvedInstallRoot
 $resolvedCepRoot = Get-PpMcpCepInstallRoot -CepInstallRoot $CepInstallRoot
@@ -63,6 +85,14 @@ foreach ($required in @($nativeSource, $bundleSource, $generatedSource, $runtime
     if (-not (Test-Path -LiteralPath $required -PathType Container)) { throw "Release payload is missing: $required" }
 }
 if (-not (Test-Path -LiteralPath $ccxSource -PathType Leaf)) { throw 'Release payload is missing the expected CCX package.' }
+if ($reuseInstalledTrustProfile) {
+    $existingLauncher = [string]$existingMetadata.launcher
+    $nextLauncher = Join-Path $nativeSource 'PremiereMcp.WindowsUiAgent.exe'
+    if (-not (Test-Path -LiteralPath $existingLauncher -PathType Leaf) -or -not (Test-Path -LiteralPath $nextLauncher -PathType Leaf) -or
+        (Get-PpMcpSha256 -Path $existingLauncher) -cne (Get-PpMcpSha256 -Path $nextLauncher)) {
+        throw 'The launcher identity changed; unattended mode requires -TrustProfilePath to re-enroll the profile for this update.'
+    }
+}
 
 $stageRoot = Join-Path $resolvedInstallRoot ('.install-stage-' + [Guid]::NewGuid().ToString('N'))
 $backupRoot = Join-Path $resolvedInstallRoot ('backups\install-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [Guid]::NewGuid().ToString('N'))
@@ -93,6 +123,9 @@ $activated = New-Object System.Collections.ArrayList
 $codexConfigPath = Get-PpMcpCodexConfigPath
 $codexConfigBackup = Join-Path $stageRoot 'codex-config.before'
 $hadCodexConfig = $false
+$trustProfileTarget = if ($trustEnrollment) { Join-Path (Join-Path $env:LOCALAPPDATA 'PremiereMCP\trust-profiles') ($TrustProfileId + '.dpapi') } else { '' }
+$trustProfileBackup = Join-Path $stageRoot 'trust-profile.before'
+$hadTrustProfile = $false
 try {
     New-Item -ItemType Directory -Path $stageRoot -Force | Out-Null
     Copy-Item -LiteralPath $nativeSource -Destination (Join-Path $stageRoot 'bin') -Recurse -Force
@@ -137,6 +170,7 @@ try {
         schema = 'premiere-pro-full-mcp-install/1'; product = $script:PpMcpProduct; version = $version
         installedAtUtc = [DateTime]::UtcNow.ToString('o'); launcher = $launcher; bundle = $bundle
         manifestPath = $manifest; cepPath = $resolvedCepRoot; ccxPath = $installedCcx
+        automationMode = $AutomationMode; trustProfileId = $(if ($TrustProfileId) { $TrustProfileId } else { $null })
         doctorPath = (Join-Path $destinations.app 'tools\Doctor.ps1'); updatePath = (Join-Path $destinations.app 'tools\Update.ps1')
     }
     Write-PpMcpJsonAtomic -Path (Join-Path $resolvedInstallRoot 'app\current.json') -Value $current
@@ -144,7 +178,11 @@ try {
     Invoke-PpMcpCommand -FilePath $launcher -Arguments @('--provision-uxp') -FailureMessage 'Native UXP bootstrap provisioning failed'
     if (-not $SkipCodexRegistration) {
         if ($codexConfigPath -and (Test-Path -LiteralPath $codexConfigPath -PathType Leaf)) { Copy-Item -LiteralPath $codexConfigPath -Destination $codexConfigBackup -Force; $hadCodexConfig = $true }
-        Set-PpMcpCodexRegistration -Launcher $launcher -Bundle $bundle -InstallRoot $resolvedInstallRoot
+        Set-PpMcpCodexRegistration -Launcher $launcher -Bundle $bundle -InstallRoot $resolvedInstallRoot -AutomationMode $AutomationMode -TrustProfileId $TrustProfileId
+    }
+    if ($trustEnrollment) {
+        if (Test-Path -LiteralPath $trustProfileTarget -PathType Leaf) { Copy-Item -LiteralPath $trustProfileTarget -Destination $trustProfileBackup -Force; $hadTrustProfile = $true }
+        Invoke-PpMcpCommand -FilePath $launcher -Arguments @('--trust-profile', 'enroll', $trustEnrollment.path) -FailureMessage 'Trust profile enrollment failed'
     }
     if (-not $SkipCcxLaunch) { Start-Process -FilePath $installedCcx }
 } catch {
@@ -160,6 +198,14 @@ try {
         if ($hadCodexConfig -and (Test-Path -LiteralPath $codexConfigBackup -PathType Leaf)) { Copy-Item -LiteralPath $codexConfigBackup -Destination $codexConfigPath -Force }
         elseif (-not $hadCodexConfig -and (Test-Path -LiteralPath $codexConfigPath -PathType Leaf)) { Remove-Item -LiteralPath $codexConfigPath -Force }
     }
+    if ($trustEnrollment) {
+        if ($hadTrustProfile -and (Test-Path -LiteralPath $trustProfileBackup -PathType Leaf)) {
+            New-Item -ItemType Directory -Path (Split-Path -Parent $trustProfileTarget) -Force | Out-Null
+            Copy-Item -LiteralPath $trustProfileBackup -Destination $trustProfileTarget -Force
+        } elseif (-not $hadTrustProfile -and (Test-Path -LiteralPath $trustProfileTarget -PathType Leaf)) {
+            Remove-Item -LiteralPath $trustProfileTarget -Force
+        }
+    }
     throw
 } finally {
     if (Test-Path -LiteralPath $stageRoot) { Remove-Item -LiteralPath $stageRoot -Recurse -Force }
@@ -169,6 +215,7 @@ try {
 Write-Host "Installed Premiere Pro Full MCP $version for the current Windows user."
 if (Test-Path -LiteralPath $backupRoot) { Write-Host "Previous files were backed up to: $backupRoot" }
 Write-Host "Codex registration: $(if ($SkipCodexRegistration) { 'skipped' } else { $script:PpMcpRegistration })"
+Write-Host "Automation mode: $AutomationMode"
 Write-Host "Doctor: powershell -NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $destinations.app 'tools\Doctor.ps1')`""
 if (-not $SkipCcxLaunch) {
     Write-Host 'The Premiere UXP CCX was opened in Adobe Creative Cloud Desktop. Approve the Adobe installation prompt to finish.'

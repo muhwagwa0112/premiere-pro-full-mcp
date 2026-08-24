@@ -185,6 +185,40 @@ function Get-PpMcpCurrentMetadata {
     return Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
 }
 
+function Assert-PpMcpTrustProfileId {
+    param([Parameter(Mandatory = $true)][string]$TrustProfileId)
+    if ($TrustProfileId -notmatch '^[A-Za-z0-9._-]{3,64}$') { throw 'Trust profile ID is invalid.' }
+    return $TrustProfileId
+}
+
+function Resolve-PpMcpAutomationMode {
+    param([Parameter(Mandatory = $true)][string]$AutomationMode)
+    switch ($AutomationMode.Trim().ToLowerInvariant()) {
+        'interactive' { return 'interactive' }
+        'trusted_unattended' { return 'trusted_unattended' }
+        'trustedunattended' { return 'trusted_unattended' }
+        'isolated_lab' { return 'isolated_lab' }
+        'isolatedlab' { return 'isolated_lab' }
+        default { throw 'Automation mode is invalid.' }
+    }
+}
+
+function Read-PpMcpTrustProfileEnrollment {
+    param(
+        [Parameter(Mandatory = $true)][string]$TrustProfilePath,
+        [Parameter(Mandatory = $true)][ValidateSet('trusted_unattended', 'isolated_lab')][string]$AutomationMode
+    )
+    $resolved = [System.IO.Path]::GetFullPath($TrustProfilePath)
+    if (-not (Test-Path -LiteralPath $resolved -PathType Leaf)) { throw "Trust profile enrollment file was not found: $resolved" }
+    if ((Get-Item -LiteralPath $resolved).Length -gt 1MB) { throw 'Trust profile enrollment file exceeds 1 MiB.' }
+    try { $profile = Get-Content -LiteralPath $resolved -Raw -Encoding UTF8 | ConvertFrom-Json }
+    catch { throw 'Trust profile enrollment file is not valid JSON.' }
+    if ([int]$profile.schemaVersion -ne 1) { throw 'Trust profile schemaVersion must be 1.' }
+    $profileId = Assert-PpMcpTrustProfileId -TrustProfileId ([string]$profile.profileId)
+    if ([string]$profile.mode -cne $AutomationMode) { throw 'Trust profile mode does not match the selected automation mode.' }
+    return [ordered]@{ path = $resolved; profileId = $profileId; mode = $AutomationMode }
+}
+
 function Expand-PpMcpSafeArchive {
     param(
         [Parameter(Mandatory = $true)][string]$ArchivePath,
@@ -252,8 +286,15 @@ function Set-PpMcpCodexRegistration {
     param(
         [Parameter(Mandatory = $true)][string]$Launcher,
         [Parameter(Mandatory = $true)][string]$Bundle,
-        [Parameter(Mandatory = $true)][string]$InstallRoot
+        [Parameter(Mandatory = $true)][string]$InstallRoot,
+        [Parameter(Mandatory = $true)][ValidateSet('interactive', 'trusted_unattended', 'isolated_lab')][string]$AutomationMode,
+        [string]$TrustProfileId = ''
     )
+    if ($AutomationMode -eq 'interactive') {
+        if ($TrustProfileId) { throw 'Interactive mode cannot be registered with a trust profile ID.' }
+    } else {
+        $TrustProfileId = Assert-PpMcpTrustProfileId -TrustProfileId $TrustProfileId
+    }
     if (-not (Get-Command codex -ErrorAction SilentlyContinue)) { throw 'Codex CLI was not found on PATH.' }
     $configPath = Get-PpMcpCodexConfigPath
     $backup = if ($configPath) { $configPath + ('.premiere-mcp-backup-{0}' -f [Guid]::NewGuid().ToString('N')) } else { Join-Path $InstallRoot ('.registration-backup-{0}.toml' -f [Guid]::NewGuid().ToString('N')) }
@@ -261,7 +302,14 @@ function Set-PpMcpCodexRegistration {
     if ($configPath -and (Test-Path -LiteralPath $configPath -PathType Leaf)) { Copy-Item -LiteralPath $configPath -Destination $backup -Force; $hadConfig = $true }
     try {
         if (Test-PpMcpCodexRegistration) { Invoke-PpMcpCommand -FilePath 'codex' -Arguments @('mcp', 'remove', $script:PpMcpRegistration) -FailureMessage 'Could not replace the existing Premiere MCP registration' }
-        Invoke-PpMcpCommand -FilePath 'codex' -Arguments @('mcp', 'add', '--env', "PREMIERE_MCP_INSTALL_ROOT=$InstallRoot", $script:PpMcpRegistration, '--', $Launcher, '--launch-mcp', $Bundle) -FailureMessage 'Codex MCP registration failed'
+        $arguments = @(
+            'mcp', 'add',
+            '--env', "PREMIERE_MCP_INSTALL_ROOT=$InstallRoot",
+            '--env', "PREMIERE_MCP_AUTOMATION_MODE=$AutomationMode"
+        )
+        if ($TrustProfileId) { $arguments += @('--env', "PREMIERE_MCP_TRUST_PROFILE_ID=$TrustProfileId") }
+        $arguments += @($script:PpMcpRegistration, '--', $Launcher, '--launch-mcp', $Bundle)
+        Invoke-PpMcpCommand -FilePath 'codex' -Arguments $arguments -FailureMessage 'Codex MCP registration failed'
     } catch {
         if ($configPath) {
             if ($hadConfig) { Copy-Item -LiteralPath $backup -Destination $configPath -Force }

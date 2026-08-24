@@ -3,7 +3,7 @@ const uxp = require("uxp");
 const API_CATALOG = require("./api-catalog.cjs");
 
 const CAPABILITIES = [
-  "host.inspect", "project.inspect", "sequence.inspect", "project.save", "captions.inspect",
+  "host.inspect", "project.inspect", "sequence.inspect", "project.save", "project.checkpoint", "captions.inspect",
   "export.frame", "export.sequence",
   "uxp.catalog", "uxp.read", "uxp.edit", "uxp.sensitive", "uxp.filesystem", "uxp.destructive", "uxp.handle.release",
   "uxp.page.read", "uxp.transaction.execute", "uxp.locked.batch", "uxp.events.subscribe", "uxp.events.poll", "uxp.events.unsubscribe"
@@ -17,6 +17,7 @@ const callbackEvents = [];
 const sessionPrefix = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 let handleCounter = 0;
 let socket = null;
+let authenticatedSessionId = null;
 let reconnectTimer = null;
 let liveProbe = { status: "not_run", availableRoots: 0, unavailableRoots: [], probedRootMembers: 0, unavailableRootMembers: [] };
 
@@ -483,6 +484,25 @@ async function execute(operation, args, expectedRevision) {
     const afterRevision = await snapshotRevision(after.project, after.sequence);
     return { beforeRevision, afterRevision, verification: { outcome: "verified", method: "Project.save returned true and active project remained available" }, result: { saved: true, projectGuid: String(context.project.guid || "") } };
   }
+  if (operation === "project.checkpoint") {
+    if (!context.project) throw Object.assign(new Error("No active project"), { code: "UXP_NO_ACTIVE_PROJECT" });
+    const phase = args && args.checkpoint && args.checkpoint.phase;
+    const inspectedPath = String(context.project.path || "");
+    if (!inspectedPath) throw Object.assign(new Error("Active project did not provide a path"), { code: "UXP_CHECKPOINT_PROJECT_PATH_UNAVAILABLE" });
+    const inspectedIdentity = String(context.project.guid || "");
+    if (phase === "inspect") return { beforeRevision, afterRevision: beforeRevision, verification: { outcome: "verified", method: "Active project path and identity readback before checkpoint save" }, result: { inspected: true, projectPath: inspectedPath, projectIdentity: inspectedIdentity } };
+    if (phase !== "save") throw Object.assign(new Error("Checkpoint phase must be inspect or save"), { code: "UXP_CHECKPOINT_PHASE_INVALID" });
+    const expectedPath = args.checkpoint && args.checkpoint.expectedProjectPath;
+    const expectedIdentity = args.checkpoint && args.checkpoint.expectedProjectIdentity;
+    const normalizeProjectPath = value => String(value || "").replace(/\\/g, "/").toLowerCase();
+    if (typeof expectedPath !== "string" || normalizeProjectPath(expectedPath) !== normalizeProjectPath(inspectedPath) || (expectedIdentity && String(expectedIdentity) !== inspectedIdentity)) throw Object.assign(new Error("Active project changed after checkpoint inspection"), { code: "UXP_CHECKPOINT_PROJECT_IDENTITY_DRIFT" });
+    const saved = await context.project.save();
+    if (!saved) throw Object.assign(new Error("Premiere did not confirm checkpoint save"), { code: "UXP_CHECKPOINT_SAVE_NOT_CONFIRMED" });
+    const after = await activeContext();
+    const projectPath = String(after.project && after.project.path || "");
+    if (!projectPath) throw Object.assign(new Error("Saved active project did not provide a path"), { code: "UXP_CHECKPOINT_PROJECT_PATH_UNAVAILABLE" });
+    return { beforeRevision, afterRevision: await snapshotRevision(after.project, after.sequence), verification: { outcome: "verified", method: "Project.save returned true and active project path was read back" }, result: { saved: true, projectPath } };
+  }
   if (operation === "export.frame") {
     if (!context.sequence) throw Object.assign(new Error("No active sequence"), { code: "UXP_NO_ACTIVE_SEQUENCE" });
     const outputPath = args && args.outputPath;
@@ -523,12 +543,21 @@ async function handleCommand(message) {
   const response = { type: "response", protocolVersion: 1, requestId: message.requestId, ok: false, hostVersion: uxp.host.version };
   try {
     if (!CAPABILITIES.includes(message.operation)) throw Object.assign(new Error("Operation was not advertised"), { code: "UXP_CAPABILITY_UNAVAILABLE" });
+    if (message.operation === "project.checkpoint") validateCheckpointBinding(message);
     const outcome = await execute(message.operation, message.args || {}, message.expectedRevision);
     Object.assign(response, outcome, { ok: true });
   } catch (error) {
     response.error = { code: error && error.code || "UXP_COMMAND_FAILED", message: error && error.message || "UXP command failed", retryable: false };
   }
   if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(response));
+}
+
+function validateCheckpointBinding(message) {
+  const binding = message && message.routeBinding;
+  if (!message || typeof message.planHash !== "string" || !/^sha256:[a-f0-9]{64}$/.test(message.planHash)) throw Object.assign(new Error("Checkpoint requires an exact execution plan hash"), { code: "UXP_CHECKPOINT_PLAN_HASH_REQUIRED" });
+  if (!binding || binding.backend !== "uxp" || binding.hostVersion !== uxp.host.version || binding.hostSessionId !== authenticatedSessionId || binding.capabilityFingerprint !== API_CATALOG.fingerprint) throw Object.assign(new Error("Checkpoint route binding no longer matches this UXP host session"), { code: "UXP_CHECKPOINT_ROUTE_BINDING_DRIFT" });
+  const internal = message.args && message.args.checkpoint;
+  if (!internal || (internal.phase !== "inspect" && internal.phase !== "save") || internal.planHash !== message.planHash || JSON.stringify(internal.routeBinding) !== JSON.stringify(binding)) throw Object.assign(new Error("Checkpoint internal route binding or phase does not match the execution request"), { code: "UXP_CHECKPOINT_BINDING_MISMATCH" });
 }
 
 function connect() {
@@ -553,11 +582,12 @@ function connect() {
     if (socket !== candidate) return;
     let message;
     try { message = JSON.parse(event.data); } catch (_) { return; }
-    if (message.type === "authenticated") status(`Connected\nPremiere ${uxp.host.version}\n${API_CATALOG.counts.members} generated API members`, "connected");
+    if (message.type === "authenticated") { authenticatedSessionId = typeof message.sessionId === "string" ? message.sessionId : null; status(`Connected\nPremiere ${uxp.host.version}\n${API_CATALOG.counts.members} generated API members`, "connected"); }
     else if (message.type === "command") void handleCommand(message);
   });
   candidate.addEventListener("close", () => {
     if (socket !== candidate) return;
+    authenticatedSessionId = null;
     for (const subscription of subscriptions.values()) {
       try {
         if (subscription.target) ppro.EventManager.removeEventListener(subscription.target, subscription.eventName, subscription.handler);

@@ -251,6 +251,22 @@ PPMCP.dispatch = function (requestJson) {
       var saved = project.save();
       return PPMCP.success(request, beforeRevision, { saved: saved !== false }, "committed_unverified", "ExtendScript save return; filesystem write not independently verified");
     }
+    if (request.operation === "project.checkpoint") {
+      var checkpoint = request.args && request.args.checkpoint;
+      if (!checkpoint || (checkpoint.phase !== "inspect" && checkpoint.phase !== "save") || typeof checkpoint.planHash !== "string" || !/^sha256:[a-f0-9]{64}$/.test(checkpoint.planHash) || request.planHash !== checkpoint.planHash || !request.routeBinding || !checkpoint.routeBinding || checkpoint.routeBinding.backend !== "cep" || request.routeBinding.backend !== checkpoint.routeBinding.backend || String(checkpoint.routeBinding.hostVersion || "") !== String(app.version || "unknown") || String(request.routeBinding.hostVersion || "") !== String(checkpoint.routeBinding.hostVersion || "") || String(request.routeBinding.hostSessionId || "") !== String(checkpoint.routeBinding.hostSessionId || "") || String(request.routeBinding.capabilityFingerprint || "") !== String(checkpoint.routeBinding.capabilityFingerprint || "")) return PPMCP.failure(request.requestId, "CEP_CHECKPOINT_ROUTE_BINDING_INVALID", "Checkpoint requires the exact CEP route binding, phase, and plan hash", false);
+      if (!project) return PPMCP.failure(request.requestId, "CEP_NO_ACTIVE_PROJECT", "No active project", false);
+      var inspectedCheckpointRawPath = String(project.path || "");
+      if (!inspectedCheckpointRawPath) return PPMCP.failure(request.requestId, "CEP_CHECKPOINT_PROJECT_PATH_UNAVAILABLE", "Active project did not provide a path", false);
+      var inspectedCheckpointPath = File(inspectedCheckpointRawPath).fsName;
+      if (checkpoint.phase === "inspect") return PPMCP.success(request, beforeRevision, { inspected: true, projectPath: inspectedCheckpointPath }, "verified", "active project path readback before checkpoint save");
+      if (typeof checkpoint.expectedProjectPath !== "string" || String(File(checkpoint.expectedProjectPath).fsName).toLowerCase() !== String(inspectedCheckpointPath).toLowerCase()) return PPMCP.failure(request.requestId, "CEP_CHECKPOINT_PROJECT_IDENTITY_DRIFT", "Active project changed after checkpoint inspection", false);
+      var checkpointSaved = project.save();
+      if (checkpointSaved === false) return PPMCP.failure(request.requestId, "CEP_CHECKPOINT_SAVE_NOT_CONFIRMED", "Premiere did not confirm checkpoint save", false);
+      var checkpointProject = app.project;
+      var checkpointPath = checkpointProject ? File(String(checkpointProject.path || "")).fsName : "";
+      if (!checkpointPath) return PPMCP.failure(request.requestId, "CEP_CHECKPOINT_PROJECT_PATH_UNAVAILABLE", "Saved active project did not provide a path", false);
+      return PPMCP.success(request, beforeRevision, { saved: true, projectPath: checkpointPath }, "verified", "ExtendScript project.save and active project path readback");
+    }
     if (request.operation === "project.open") {
       if (!request.args.path || typeof request.args.path !== "string") return PPMCP.failure(request.requestId, "CEP_INVALID_PATH", "path is required", false);
       var opened = app.openDocument(request.args.path);

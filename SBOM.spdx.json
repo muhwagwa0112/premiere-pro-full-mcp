@@ -2,8 +2,8 @@
   "spdxVersion": "SPDX-2.3",
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
-  "name": "premiere-pro-full-mcp@0.2.0",
-  "documentNamespace": "https://spdx.local/premiere-pro-full-mcp/54412d82cbc3b3b4a13b4dce2e0edf97156be2205fe790cf6a3b31d8e51cb9e6",
+  "name": "premiere-pro-full-mcp@0.3.0",
+  "documentNamespace": "https://spdx.local/premiere-pro-full-mcp/42f5f51d68d4d2bfc45bdd4617ccbceef54147d74728a36e00326ebe36e5edc7",
   "creationInfo": {
     "created": "2026-08-23T00:00:00.000Z",
     "creators": [
@@ -12,13 +12,13 @@
     ]
   },
   "documentDescribes": [
-    "SPDXRef-Package-premiere-pro-full-mcp-0.2.0"
+    "SPDXRef-Package-premiere-pro-full-mcp-0.3.0"
   ],
   "packages": [
     {
       "name": "premiere-pro-full-mcp",
-      "SPDXID": "SPDXRef-Package-premiere-pro-full-mcp-0.2.0",
-      "versionInfo": "0.2.0",
+      "SPDXID": "SPDXRef-Package-premiere-pro-full-mcp-0.3.0",
+      "versionInfo": "0.3.0",
       "packageFileName": "",
       "description": "Capability-gated MCP server and UXP/CEP bridges for Adobe Premiere Pro 2026 on Windows.",
       "primaryPackagePurpose": "APPLICATION",
@@ -30,7 +30,7 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:npm/premiere-pro-full-mcp@0.2.0"
+          "referenceLocator": "pkg:npm/premiere-pro-full-mcp@0.3.0"
         }
       ]
     },
@@ -4937,57 +4937,57 @@
   "relationships": [
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
-      "relatedSpdxElement": "SPDXRef-Package-premiere-pro-full-mcp-0.2.0",
+      "relatedSpdxElement": "SPDXRef-Package-premiere-pro-full-mcp-0.3.0",
       "relationshipType": "DESCRIBES"
     },
     {
       "spdxElementId": "SPDXRef-Package-modelcontextprotocol.sdk-1.30.0",
-      "relatedSpdxElement": "SPDXRef-Package-premiere-pro-full-mcp-0.2.0",
+      "relatedSpdxElement": "SPDXRef-Package-premiere-pro-full-mcp-0.3.0",
       "relationshipType": "DEPENDENCY_OF"
     },
     {
       "spdxElementId": "SPDXRef-Package-ws-8.21.3",
-      "relatedSpdxElement": "SPDXRef-Package-premiere-pro-full-mcp-0.2.0",
+      "relatedSpdxElement": "SPDXRef-Package-premiere-pro-full-mcp-0.3.0",
       "relationshipType": "DEPENDENCY_OF"
     },
     {
       "spdxElementId": "SPDXRef-Package-zod-4.4.3",
-      "relatedSpdxElement": "SPDXRef-Package-premiere-pro-full-mcp-0.2.0",
+      "relatedSpdxElement": "SPDXRef-Package-premiere-pro-full-mcp-0.3.0",
       "relationshipType": "DEPENDENCY_OF"
     },
     {
       "spdxElementId": "SPDXRef-Package-adobe.premierepro-26.3.0",
-      "relatedSpdxElement": "SPDXRef-Package-premiere-pro-full-mcp-0.2.0",
+      "relatedSpdxElement": "SPDXRef-Package-premiere-pro-full-mcp-0.3.0",
       "relationshipType": "DEV_DEPENDENCY_OF"
     },
     {
       "spdxElementId": "SPDXRef-Package-types.node-24.13.3",
-      "relatedSpdxElement": "SPDXRef-Package-premiere-pro-full-mcp-0.2.0",
+      "relatedSpdxElement": "SPDXRef-Package-premiere-pro-full-mcp-0.3.0",
       "relationshipType": "DEV_DEPENDENCY_OF"
     },
     {
       "spdxElementId": "SPDXRef-Package-types.ws-8.18.1",
-      "relatedSpdxElement": "SPDXRef-Package-premiere-pro-full-mcp-0.2.0",
+      "relatedSpdxElement": "SPDXRef-Package-premiere-pro-full-mcp-0.3.0",
       "relationshipType": "DEV_DEPENDENCY_OF"
     },
     {
       "spdxElementId": "SPDXRef-Package-vitest.coverage-v8-4.1.11",
-      "relatedSpdxElement": "SPDXRef-Package-premiere-pro-full-mcp-0.2.0",
+      "relatedSpdxElement": "SPDXRef-Package-premiere-pro-full-mcp-0.3.0",
       "relationshipType": "DEV_DEPENDENCY_OF"
     },
     {
       "spdxElementId": "SPDXRef-Package-esbuild-0.28.2",
-      "relatedSpdxElement": "SPDXRef-Package-premiere-pro-full-mcp-0.2.0",
+      "relatedSpdxElement": "SPDXRef-Package-premiere-pro-full-mcp-0.3.0",
       "relationshipType": "DEV_DEPENDENCY_OF"
     },
     {
       "spdxElementId": "SPDXRef-Package-typescript-5.9.3",
-      "relatedSpdxElement": "SPDXRef-Package-premiere-pro-full-mcp-0.2.0",
+      "relatedSpdxElement": "SPDXRef-Package-premiere-pro-full-mcp-0.3.0",
       "relationshipType": "DEV_DEPENDENCY_OF"
     },
     {
       "spdxElementId": "SPDXRef-Package-vitest-4.1.11",
-      "relatedSpdxElement": "SPDXRef-Package-premiere-pro-full-mcp-0.2.0",
+      "relatedSpdxElement": "SPDXRef-Package-premiere-pro-full-mcp-0.3.0",
       "relationshipType": "DEV_DEPENDENCY_OF"
     },
     {

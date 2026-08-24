@@ -52,11 +52,72 @@ public sealed class ProtocolTests
     public void DispatchesAllowlistedSemanticInvoke()
     {
         var automation = new FakeAutomation();
-        var json = """{"protocolVersion":1,"requestId":"r1","token":"secret","operation":"ui.control.invoke","args":{"capability":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","automationId":"exportButton","controlType":"Button","action":"invoke"}}""";
-        var response = new RequestDispatcher("secret", automation).Dispatch(json);
+        var dispatcher = new RequestDispatcher("secret", automation, "agent-session-a");
+        var response = dispatcher.Dispatch(InvokeRequest("secret", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", BindingFor(dispatcher)));
 
         Assert.True(response.Ok);
         Assert.Equal(new ControlInvokeArgs(new string('a', 64), "exportButton", "Button", "invoke"), automation.LastArgs);
+    }
+
+    [Fact]
+    public void HealthPublishesStableSessionVersionAndCapabilityBinding()
+    {
+        var dispatcher = new RequestDispatcher("secret", new FakeAutomation(), "agent-session-a");
+
+        var first = dispatcher.Dispatch(Request("secret", "health"));
+        var second = dispatcher.Dispatch(Request("secret", "health"));
+
+        Assert.True(first.Ok);
+        Assert.True(second.Ok);
+        using var firstHealth = JsonDocument.Parse(JsonSerializer.Serialize(first.Result));
+        using var secondHealth = JsonDocument.Parse(JsonSerializer.Serialize(second.Result));
+        Assert.Equal(RequestDispatcher.AgentVersion, firstHealth.RootElement.GetProperty("agentVersion").GetString());
+        Assert.Equal("agent-session-a", firstHealth.RootElement.GetProperty("agentSessionId").GetString());
+        Assert.Equal(firstHealth.RootElement.GetProperty("capabilityFingerprint").GetString(), secondHealth.RootElement.GetProperty("capabilityFingerprint").GetString());
+    }
+
+    [Fact]
+    public void RejectsMutationWithoutPlanHashAndExactAgentRouteBinding()
+    {
+        var automation = new FakeAutomation();
+        var dispatcher = new RequestDispatcher("secret", automation, "agent-session-a");
+        var missing = dispatcher.Dispatch(InvokeRequest("secret", null, null));
+        var stale = dispatcher.Dispatch(InvokeRequest("secret", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", BindingFor(new RequestDispatcher("secret", new FakeAutomation(), "agent-session-b"))));
+
+        Assert.Equal("plan_hash_required", missing.Error?.Code);
+        Assert.Equal("route_binding_mismatch", stale.Error?.Code);
+        Assert.Equal(0, automation.CallCount);
+    }
+
+    [Fact]
+    public void RejectsMutationWhoseEffectiveArgumentsDoNotMatchTheAuthorizedDigest()
+    {
+        var automation = new FakeAutomation();
+        var dispatcher = new RequestDispatcher("secret", automation, "agent-session-a");
+        var response = dispatcher.Dispatch(InvokeRequest(
+            "secret",
+            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            BindingFor(dispatcher),
+            "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"));
+
+        Assert.False(response.Ok);
+        Assert.Equal("effective_request_binding_mismatch", response.Error?.Code);
+        Assert.Equal(0, automation.CallCount);
+    }
+
+    [Fact]
+    public void RejectsRouteBindingFromRestartedAgentBeforeMutation()
+    {
+        var original = new RequestDispatcher("secret", new FakeAutomation(), "agent-session-a");
+        var restartedAutomation = new FakeAutomation();
+        var restarted = new RequestDispatcher("secret", restartedAutomation, "agent-session-b");
+        var staleRoute = BindingFor(original);
+
+        var response = restarted.Dispatch(InvokeRequest("secret", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", staleRoute));
+
+        Assert.False(response.Ok);
+        Assert.Equal("route_binding_mismatch", response.Error?.Code);
+        Assert.Equal(0, restartedAutomation.CallCount);
     }
 
     [Fact]
@@ -83,8 +144,8 @@ public sealed class ProtocolTests
     [Fact]
     public void PreservesUnknownMutationOutcomeAsNonRetryable()
     {
-        var json = """{"protocolVersion":1,"requestId":"r1","token":"secret","operation":"ui.control.invoke","args":{"capability":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","automationId":"exportButton","controlType":"Button","action":"invoke"}}""";
-        var response = new RequestDispatcher("secret", new ThrowingMutationAutomation()).Dispatch(json);
+        var dispatcher = new RequestDispatcher("secret", new ThrowingMutationAutomation(), "agent-session-a");
+        var response = dispatcher.Dispatch(InvokeRequest("secret", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", BindingFor(dispatcher)));
 
         Assert.False(response.Ok);
         Assert.Equal("automation_outcome_unknown", response.Error?.Code);
@@ -122,6 +183,39 @@ public sealed class ProtocolTests
         operation,
         args = new { }
     });
+
+    private static JsonElement BindingFor(RequestDispatcher dispatcher)
+    {
+        var health = dispatcher.Dispatch(Request("secret", "health"));
+        Assert.True(health.Ok);
+        using var document = JsonDocument.Parse(JsonSerializer.Serialize(health.Result));
+        return JsonSerializer.SerializeToElement(new
+        {
+            backend = "ui",
+            hostVersion = document.RootElement.GetProperty("agentVersion").GetString(),
+            hostSessionId = document.RootElement.GetProperty("agentSessionId").GetString(),
+            capabilityFingerprint = document.RootElement.GetProperty("capabilityFingerprint").GetString()
+        });
+    }
+
+    private static string InvokeRequest(string token, string? planHash, object? routeBinding, string? effectiveRequestDigest = null) => JsonSerializer.Serialize(new
+    {
+        protocolVersion = 1,
+        requestId = "r1",
+        token,
+        operation = "ui.control.invoke",
+        args = new { capability = new string('a', 64), automationId = "exportButton", controlType = "Button", action = "invoke" },
+        planHash,
+        routeBinding,
+        boundOperation = "ui.invoke",
+        effectiveRequestDigest = effectiveRequestDigest ?? ValidInvokeDigest()
+    });
+
+    private static string ValidInvokeDigest()
+    {
+        var material = $"{{\"args\":{{\"action\":\"invoke\",\"automationId\":\"exportButton\",\"capability\":\"{new string('a', 64)}\",\"controlType\":\"Button\"}},\"expectedRevision\":null,\"operation\":\"ui.invoke\"}}";
+        return "sha256:" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(material))).ToLowerInvariant();
+    }
 
     private sealed class FakeAutomation : IPremiereAutomation
     {

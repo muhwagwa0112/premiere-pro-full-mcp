@@ -4,12 +4,38 @@ The supported public install starts from the versioned GitHub Release ZIP, not t
 
 1. Download the Windows ZIP and its `.sha256` sidecar from the latest release.
 2. Verify the checksum with `Get-FileHash` and extract the archive.
-3. Close Premiere Pro, then run `powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1`. The installer fails closed before changing files if Premiere or the installed helper is still running.
+3. Close Premiere Pro, then select the automation boundary explicitly:
+
+   ```powershell
+   # Default: exact-plan one-shot dialogs for interactive R2/R3 operations
+   powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -AutomationMode Interactive
+
+   # Enrolled unattended execution: no per-operation approval dialog
+   powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 `
+     -AutomationMode TrustedUnattended `
+     -TrustProfilePath .\studio-profile.json
+   ```
+
+   `IsolatedLab` is also available and requires a profile whose embedded mode is exactly
+   `isolated_lab`. Interactive mode rejects profile arguments. An unattended first install
+   requires `-TrustProfilePath`; an ID alone cannot enroll authority.
 4. Approve the CCX installation in Creative Cloud Desktop, restart Premiere, and open **Window > UXP Plugins > Premiere Pro Full MCP**.
 5. Click **Pair with installed helper…** and select `%LOCALAPPDATA%\PremiereMCP\app\runtime-bootstrap.json`. The persistent UXP permission references that current-user ACL-protected file; no bootstrap is packaged in the CCX.
 6. Restart Codex and run the installed `Doctor.ps1 -CheckLive`.
 
 The installer verifies that `MANIFEST.sha256` exactly describes every file. It rejects extra/missing files, duplicate case-insensitive paths, ADS-style names, path traversal, absolute paths, and reparse points. Installation is staged before activation and restored from a timestamped backup if activation or Codex registration fails.
+
+The native broker validates and DPAPI-protects the Trust Profile after the pinned launcher is
+installed. Codex registration receives only `PREMIERE_MCP_AUTOMATION_MODE` and, for unattended
+modes, `PREMIERE_MCP_TRUST_PROFILE_ID`; its command remains the native launcher plus the exact
+`--launch-mcp` bundle. The installed `current.json` persists the selected mode/profile so Update
+does not silently reset to interactive. Because profiles bind the launcher digest, an update that
+changes the launcher requires the original profile JSON via `Update.ps1 -TrustProfilePath ...` to
+re-enroll; otherwise it fails closed before activation.
+
+The enrollment file is local policy input. Protect it as an administrative artifact and keep its
+approved roots and action/capability grants narrow. Enrollment does not make DPAPI a boundary
+against another malicious process under the same Windows account.
 
 The public plugin ID is `com.codex.premiere-pro-full-mcp`; the Codex registration is `premiere_pro_full_mcp`. The CEP compatibility extension is installed for the current user as `com.codex.premiere-pro-full-mcp.cep`.
 

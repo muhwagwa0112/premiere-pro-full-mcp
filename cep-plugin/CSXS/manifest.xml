@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<ExtensionManifest Version="7.0" ExtensionBundleId="com.codex.premiere-pro-full-mcp.cep" ExtensionBundleVersion="0.2.0" ExtensionBundleName="Premiere Pro Full MCP Capability CEP Bridge">
+<ExtensionManifest Version="7.0" ExtensionBundleId="com.codex.premiere-pro-full-mcp.cep" ExtensionBundleVersion="0.3.0" ExtensionBundleName="Premiere Pro Full MCP Capability CEP Bridge">
   <ExtensionList>
-    <Extension Id="com.codex.premiere-pro-full-mcp.cep.headless" Version="0.2.0"/>
+    <Extension Id="com.codex.premiere-pro-full-mcp.cep.headless" Version="0.3.0"/>
   </ExtensionList>
   <ExecutionEnvironment>
     <HostList><Host Name="PPRO" Version="26.3"/></HostList>

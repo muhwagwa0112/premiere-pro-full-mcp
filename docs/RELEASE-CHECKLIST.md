@@ -20,7 +20,7 @@
 ## Publication
 
 - [ ] Create public `muhwagwa0112/premiere-pro-full-mcp`, enable private vulnerability reporting, secret scanning/push protection, and Dependabot.
-- [ ] Push `main`, verify pinned CI, create `v0.2.0`, upload all release assets, and mark it latest.
+- [ ] Push `main`, verify pinned CI, create `v0.3.0`, upload all release assets, and mark it latest.
 - [ ] From a logged-out browser, verify README, Ko-fi, license, Security tab, asset names, checksums, and release notes.
 - [ ] Download the public asset and complete one final install/Doctor/fresh-process Codex smoke.
 

@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { join } from "node:path";
 
-type KeyName = "cep-hmac" | "approval-hmac";
+type KeyName = "cep-hmac" | "approval-hmac" | "lease-hmac";
 
 function installedHelper(): string {
   const localAppData = process.env.LOCALAPPDATA;

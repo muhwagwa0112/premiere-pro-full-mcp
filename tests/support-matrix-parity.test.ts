@@ -50,6 +50,26 @@ describe("generated support matrix", () => {
     expect(violations).toEqual([]);
   });
 
+  it("keeps declared semantic actions aligned with reachable concrete handlers", () => {
+    const matrix = generateSupportMatrix();
+    const action = (actionId: string) => matrix.actions.find((entry) => entry.actionId === actionId)!;
+    const implemented = (actionId: string, backend: string) => action(actionId).backends.find((entry) => entry.backend === backend)?.handlerState;
+
+    for (const actionId of ["project.create", "project.open", "media.import"]) {
+      expect(action(actionId).preferredBackends).toContain("cep");
+      expect(implemented(actionId, "cep")).toBe("implemented_unverified");
+    }
+    expect(action("effects.catalog").preferredBackends).toContain("local");
+    expect(implemented("effects.catalog", "local")).toBe("implemented_unverified");
+    expect(action("export.sequence").preferredBackends).toEqual(["uxp", "cep"]);
+    expect(implemented("export.sequence", "uxp")).toBe("implemented_unverified");
+    expect(implemented("export.sequence", "cep")).toBe("implemented_unverified");
+    for (const actionId of ["timeline.clip.insert", "effects.apply", "history.undo"]) {
+      expect(action(actionId).declaredSupport).toBe("unsupported");
+      expect(action(actionId).backends.every((entry) => entry.handlerState === "not_implemented")).toBe(true);
+    }
+  });
+
   it("matches the committed deterministic artifact", async () => {
     const committed = await readFile(resolve("generated/support-matrix.json"), "utf8");
     expect(committed).toBe(serializeSupportMatrix());

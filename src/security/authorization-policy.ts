@@ -15,7 +15,7 @@ const authorizationPlanSchema = z.object({
 
 const authorizationLeaseSchema = z.object({
   leaseId: z.string().min(1).max(128), hostVersion: z.string().min(1).max(64).optional(),
-  operationIndex: z.number().int().nonnegative().optional(), elapsedRuntimeMinutes: z.number().nonnegative().optional(),
+  operationIndex: z.number().int().nonnegative().optional(), mutationIndex: z.number().int().nonnegative().optional(), elapsedRuntimeMinutes: z.number().nonnegative().optional(),
 }).strict();
 
 export type AuthorizationPlan = z.infer<typeof authorizationPlanSchema>;
@@ -62,13 +62,14 @@ export class AuthorizationPolicy {
       if (lease.elapsedRuntimeMinutes === undefined) return deny("RUNTIME_REQUIRED", "The constrained profile requires elapsed runtime");
       if (lease.elapsedRuntimeMinutes > this.#profile.limits.maxRuntimeMinutes) return deny("RUNTIME_LIMIT_EXCEEDED", "The profile runtime limit has been reached");
     }
+    if (plan.mutation && this.#profile.checkpoint.beforeFirstMutation && lease.mutationIndex === undefined) return deny("MUTATION_INDEX_REQUIRED", "The checkpoint policy requires a mutation-specific lease index");
     const capability = deniedCapability(plan, this.#profile);
     if (capability) return deny("CAPABILITY_DENIED", `${capability} is not allowed by the trust profile`);
     try {
       if (!(await allPathsWithinApprovedRoots(plan.paths, this.#profile.approvedRoots))) return deny("PATH_DENIED", "A requested path is outside the approved roots");
     } catch { return deny("PATH_UNSAFE", "A requested path cannot be safely canonicalized or crosses a reparse point"); }
     const operationIndex = lease.operationIndex ?? 0;
-    const checkpoint = (plan.mutation && this.#profile.checkpoint.beforeFirstMutation && operationIndex === 0) ||
+    const checkpoint = (plan.mutation && this.#profile.checkpoint.beforeFirstMutation && lease.mutationIndex === 0) ||
       (plan.nonUndoable && this.#profile.checkpoint.beforeNonUndoable) ||
       (operationIndex > 0 && operationIndex % this.#profile.checkpoint.intervalOperations === 0);
     return checkpoint ? { outcome: "allow_with_checkpoint", profileId: this.#profile.profileId, leaseId: lease.leaseId }

@@ -66,6 +66,7 @@ export const actionRequestSchema = z.object({
   operationId: z.uuid().optional(),
   expectedRevision: z.string().min(1).max(256).regex(/^[A-Za-z0-9._:-]+$/).optional(),
   approvalId: z.uuid().optional(),
+  planHash: z.string().regex(/^sha256:[a-f0-9]{64}$/).optional(),
 }).strict();
 
 export type ActionRequest = z.infer<typeof actionRequestSchema>;
@@ -78,8 +79,20 @@ export const operationStatusSchema = z.enum([
   "failed",
   "cancelled",
   "blocked",
+  "reconciliation_required",
 ]);
 export type OperationStatus = z.infer<typeof operationStatusSchema>;
+
+export const reconciliationPhaseSchema = z.enum(["checkpoint", "original_dispatch", "output_commit", "local_recovery"]);
+export type ReconciliationPhase = z.infer<typeof reconciliationPhaseSchema>;
+
+/** Privacy-safe evidence persisted for an operation requiring reconciliation. */
+export interface ReconciliationLedgerEvidence {
+  phase: ReconciliationPhase;
+  errorCode: string;
+  recoveryEvidenceDigests: readonly string[];
+  lockDigest: string | null;
+}
 
 export interface VerificationEvidence {
   outcome: "verified" | "committed_unverified" | "not_applicable" | "failed";
@@ -100,6 +113,7 @@ export interface OperationResult {
   undo: { available: boolean; method: string | null };
   createdFiles: Array<{ name: string; verified: boolean }>;
   warnings: string[];
+  reconciliation?: ReconciliationLedgerEvidence;
   data?: unknown;
   error?: { code: string; message: string; retryable: boolean };
 }
@@ -110,6 +124,16 @@ export interface BridgeRequest {
   operation: string;
   args: Record<string, unknown>;
   expectedRevision?: string;
+  routeBinding?: RouteBinding;
+  planHash?: string;
+  effectiveRequestDigest?: string;
+}
+
+export interface RouteBinding {
+  backend: Backend;
+  hostVersion: string | null;
+  hostSessionId: string | null;
+  capabilityFingerprint: string | null;
 }
 
 export interface BridgeResponse {

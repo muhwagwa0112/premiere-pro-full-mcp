@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 
 export type AdobeBucket = "read" | "edit" | "sensitive" | "filesystem" | "destructive";
+export type AdobeSecurityCapability = "overwrite" | "delete" | "cloudPublish" | "cloudShare" | "purchase";
 
 export interface AdobeApiEntry {
   id: string;
@@ -18,6 +19,16 @@ export interface AdobeApiEntry {
   mutates: boolean;
   implementationStatus: string;
   requiredOperation?: string;
+}
+
+const requiredCapabilitiesByMemberId = new Map<string, readonly AdobeSecurityCapability[]>([
+  ["Project.deleteSequence", ["delete"]],
+  ["SequenceEditor.createOverwriteItemAction", ["overwrite"]],
+]);
+
+/** Derive privileges from the signed generated member identity, never caller flags. */
+export function requiredCapabilitiesForAdobeEntry(entry: AdobeApiEntry | null): readonly AdobeSecurityCapability[] {
+  return entry ? [...(requiredCapabilitiesByMemberId.get(entry.id) ?? [])] : [];
 }
 
 interface AdobeApiCatalog {

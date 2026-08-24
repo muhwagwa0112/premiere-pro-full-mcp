@@ -1,4 +1,4 @@
-# Premiere Pro Full MCP v0.2.0
+# Premiere Pro Full MCP v0.3.0
 
 [English](#english) · [한국어](#한국어)
 
@@ -24,11 +24,11 @@ Premiere Pro Full MCP is a local, capability-gated MCP server for Adobe Premiere
 
 Requirements: Windows 10/11 x64, Premiere Pro 26.3 or later, Creative Cloud Desktop, and Codex Desktop or the Codex CLI. Node.js is not required for the packaged runtime.
 
-1. Download `premiere-pro-full-mcp-v0.2.0-windows.zip` from the [latest release](https://github.com/muhwagwa0112/premiere-pro-full-mcp/releases/latest). Verify its adjacent `.sha256` file, then extract it.
-2. Close Premiere Pro, open PowerShell in the extracted `premiere-pro-full-mcp-0.2.0` folder, and run:
+1. Download `premiere-pro-full-mcp-v0.3.0-windows.zip` from the [latest release](https://github.com/muhwagwa0112/premiere-pro-full-mcp/releases/latest). Verify its adjacent `.sha256` file, then extract it.
+2. Close Premiere Pro, open PowerShell in the extracted `premiere-pro-full-mcp-0.3.0` folder, and choose the automation mode explicitly. The safe default is interactive:
 
    ```powershell
-   powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1
+   powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -AutomationMode Interactive
    ```
 
    The installer verifies every packaged file, installs only in the current user profile, registers `premiere_pro_full_mcp` with Codex, and opens the bundled CCX.
@@ -39,6 +39,20 @@ Requirements: Windows 10/11 x64, Premiere Pro 26.3 or later, Creative Cloud Desk
    ```powershell
    powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\PremiereMCP\app\tools\Doctor.ps1" -CheckLive
    ```
+
+#### Trusted unattended enrollment
+
+`trusted_unattended` removes per-operation approval dialogs only for actions already allowed by a locally enrolled Trust Profile. Enrollment is an explicit install-time act:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 `
+  -AutomationMode TrustedUnattended `
+  -TrustProfilePath .\studio-profile.json
+```
+
+The native broker validates the profile, binds it to the current Windows SID, installed product/launcher hashes, host-version range, allowed actions/risks/capabilities, and canonical approved roots, then protects it with DPAPI CurrentUser. The launcher passes only the selected mode and profile ID to the pinned MCP process. A mismatched, missing, tampered, expired, or out-of-range profile fails closed; it never falls back to interactive or broadens policy. `IsolatedLab` uses the same explicit enrollment contract with a profile whose mode is `isolated_lab`.
+
+During `trusted_unattended` and `isolated_lab` execution, the approval broker and MessageBox path are unreachable and no pending/approved approval files are created. Interactive mode retains the exact-plan, one-shot R2/R3 approval dialog. Changing modes requires rerunning the installer with the intended mode and profile.
 
 The executables and PowerShell scripts are not Authenticode-signed. Windows may show SmartScreen warnings. The release uses a separate RSA-signed update manifest, exact asset size/SHA-256 bindings, and an in-package SHA-256 manifest. The bundled CEP compatibility bridge carries an Adobe ZXP package signature, so installation does not enable CEP developer mode. The initial download still depends on GitHub HTTPS and the published checksum; do not bypass a warning if the checksum or source is unexpected.
 
@@ -57,9 +71,10 @@ Updates reject signature, repository, tag, name, size, digest, prerelease, and d
 ### Safety and capability contract
 
 - Documented UXP is preferred. CEP fills typed compatibility gaps, QE is experimental, and Windows UI Automation is the last resort.
-- Failed mutations are never replayed through another backend automatically.
-- Sequence export uses the documented UXP encoder path but does not trust a host Promise that can remain pending after rendering; success requires a changed, non-empty output file that remains stable across repeated observations. Existing outputs are rejected unless an explicitly approved overwrite policy is implemented.
-- R2/R3 operations use short-lived, scope-bound, single-use approval IDs and an independent trusted Windows dialog.
+- Only an explicit `not_dispatched` result may route to another supported backend. Accepted, completed, and unknown outcomes are never replayed automatically.
+- The first trusted mutation, configured intervals, and non-undoable mutations require a verified project checkpoint. Unknown checkpoint or mutation outcomes persist as `reconciliation_required` and quarantine later mutations across restarts.
+- An authorized sequence overwrite moves the original to a verified backup, renders to an operation-scoped temporary file, verifies a stable non-empty digest, and commits without replacing an existing path. Any unproven restore or commit keeps a durable, output-specific reconciliation journal and blocks a new operation ID from reusing that target.
+- Interactive R2/R3 operations use short-lived, scope-bound, single-use exact-plan approvals and an independent trusted Windows dialog. Enrolled unattended modes use Trust Profile authorization and never invoke that dialog.
 - Raw ExtendScript, arbitrary QE/object paths, raw UI selectors/clicks, shell commands, and credential extraction are not public MCP operations.
 - Listeners bind to localhost, CEP envelopes are HMAC authenticated through a DPAPI CurrentUser broker, and release artifacts never contain runtime bootstrap material.
 - Filesystem work is confined to explicitly approved canonical roots and rejects reparse-point escapes.
@@ -88,11 +103,11 @@ Release builds require a clean Git worktree and the dedicated private signing ke
 
 요구 사항은 Windows 10/11 x64, Premiere Pro 26.3 이상, Creative Cloud Desktop, Codex Desktop 또는 Codex CLI입니다. 배포 ZIP에는 자체 포함 네이티브 런처와 번들 MCP가 들어 있어 별도 Node.js 설치가 필요하지 않습니다.
 
-1. [최신 릴리스](https://github.com/muhwagwa0112/premiere-pro-full-mcp/releases/latest)에서 `premiere-pro-full-mcp-v0.2.0-windows.zip`과 `.sha256`을 내려받아 해시를 확인하고 압축을 풉니다.
-2. Premiere Pro를 종료하고 압축을 푼 폴더에서 다음 명령을 실행합니다.
+1. [최신 릴리스](https://github.com/muhwagwa0112/premiere-pro-full-mcp/releases/latest)에서 `premiere-pro-full-mcp-v0.3.0-windows.zip`과 `.sha256`을 내려받아 해시를 확인하고 압축을 풉니다.
+2. Premiere Pro를 종료하고 압축을 푼 폴더에서 자동화 모드를 명시해 실행합니다. 안전한 기본값은 Interactive입니다.
 
    ```powershell
-   powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1
+   powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -AutomationMode Interactive
    ```
 
 3. Creative Cloud Desktop에서 독립 플러그인 설치 경고를 승인합니다. Premiere를 재시작한 뒤 **창 > UXP 플러그인 > Premiere Pro Full MCP**를 엽니다.
@@ -104,6 +119,16 @@ Release builds require a clean Git worktree and the dedicated private signing ke
    ```
 
 설치기는 패키지 전 파일의 해시를 검증하고 현재 사용자 영역만 변경하며, 기존 설치와 Codex 설정을 실패 시 복원합니다. CCX 설치를 나중에 하려면 `-SkipCcxLaunch`, Codex 등록을 생략하려면 `-SkipCodexRegistration`을 사용합니다.
+
+`trusted_unattended`는 설치 시 명시적으로 Trust Profile을 등록한 경우에만 사용할 수 있습니다.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 `
+  -AutomationMode TrustedUnattended `
+  -TrustProfilePath .\studio-profile.json
+```
+
+프로필은 현재 Windows SID, 설치 제품과 런처 해시, Premiere 버전 범위, action/risk/capability, canonical approved roots에 결합되고 DPAPI CurrentUser로 보호됩니다. 신뢰 실행 중에는 작업별 MessageBox와 approval 파일이 0개이며, 허용 범위 밖 요청·변조·버전 불일치는 자동으로 interactive로 낮아지지 않고 차단됩니다. Interactive의 R2/R3 exact-plan 1회 승인은 그대로 유지됩니다.
 
 CEP 호환 브리지는 Adobe ZXP 방식으로 별도 서명되어 있으며, 설치기는 CEP 개발자 모드를 활성화하지 않습니다. EXE와 PowerShell 스크립트에는 Authenticode 서명이 없으므로 게시된 SHA-256과 RSA 릴리스 서명을 확인해야 합니다.
 

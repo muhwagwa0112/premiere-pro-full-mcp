@@ -7,6 +7,9 @@ import { UxpWebSocketAdapter } from "./bridge/uxp-websocket.js";
 import { CepFileAdapter } from "./bridge/cep-file.js";
 import { UiNamedPipeAdapter } from "./bridge/ui-named-pipe.js";
 import type { BackendAdapter } from "./contracts.js";
+import { AuthorizationService } from "./security/authorization-service.js";
+import { SessionLease } from "./security/session-lease.js";
+import { PathPolicy } from "./security/path-policy.js";
 
 const uxp = new UxpWebSocketAdapter();
 await uxp.start();
@@ -18,7 +21,13 @@ const adapters: BackendAdapter[] = [
   new CepFileAdapter("qe"),
   new UiNamedPipeAdapter(),
 ];
-const engine = new OperationEngine(adapters);
+// Lease creation is deliberately part of startup: an invalid launcher chain,
+// missing trust profile, or mode/profile mismatch must terminate rather than
+// silently falling back to interactive authorization.
+const lease = await SessionLease.createForCurrentProcess();
+const authorizationService = await AuthorizationService.createFromEnvironment({ lease });
+const trustedRoots = authorizationService.approvedRoots();
+const engine = new OperationEngine(adapters, { authorizationService, ...(trustedRoots ? { pathPolicy: new PathPolicy([...trustedRoots]) } : {}) });
 const server = createServer(engine);
 const transport = new StdioServerTransport();
 

@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import type { Backend, BackendAdapter, BackendProbe, BridgeRequest, BridgeResponse, DispatchState, SupportDecision } from "../contracts.js";
 import { brokerSign, brokerVerify } from "../security/hmac-broker.js";
 import { canonicalJson } from "../security/signed-envelope.js";
+import { hasValidEffectiveRequestBinding, routeBindingFromProbe, sameRouteBinding } from "../security/execution-plan.js";
 
 // CEP Chromium timers are heavily throttled while a native approval dialog owns
 // the desktop. The heartbeat remains HMAC-authenticated and session-bound, so a
@@ -12,7 +13,7 @@ import { canonicalJson } from "../security/signed-envelope.js";
 // old bridge session indefinitely.
 const heartbeatMaxAgeMs = 60_000;
 
-const cepOperations = ["host.inspect", "project.inspect", "sequence.inspect", "project.create", "project.save", "project.open", "media.import", "timeline.sequence.create_from_media", "export.sequence", "workspace.set", "cep.surface.catalog", "cep.read", "cep.edit", "cep.filesystem", "cep.destructive"] as const;
+const cepOperations = ["host.inspect", "project.inspect", "sequence.inspect", "project.create", "project.save", "project.checkpoint", "project.open", "media.import", "timeline.sequence.create_from_media", "export.sequence", "workspace.set", "cep.surface.catalog", "cep.read", "cep.edit", "cep.filesystem", "cep.destructive"] as const;
 const qeOperations = ["host.inspect", "project.inspect", "sequence.inspect", "qe.catalog", "qe.read", "qe.edit", "qe.destructive"] as const;
 
 function defaultBridgeDirectory(): string {
@@ -88,6 +89,10 @@ export class CepFileAdapter implements BackendAdapter {
   }
 
   async execute(request: BridgeRequest): Promise<BridgeResponse> {
+    if (request.routeBinding || request.planHash || request.effectiveRequestDigest) {
+      const currentProbe = await this.probe();
+      if (!request.routeBinding || !request.planHash || !hasValidEffectiveRequestBinding(request) || !currentProbe.available || !sameRouteBinding(request.routeBinding, routeBindingFromProbe(currentProbe))) return this.failure(request.requestId, "ROUTE_BINDING_DRIFT", "CEP route, plan, or effective request binding is incomplete or changed before command publication", true, "not_dispatched");
+    }
     try {
       await this.cleanupStaleQueueFiles();
     } catch {
@@ -109,6 +114,9 @@ export class CepFileAdapter implements BackendAdapter {
       operation: request.operation,
       args: request.args,
       ...(request.expectedRevision ? { expectedRevision: request.expectedRevision } : {}),
+      ...(request.routeBinding ? { routeBinding: request.routeBinding } : {}),
+      ...(request.planHash ? { planHash: request.planHash } : {}),
+      ...(request.effectiveRequestDigest ? { effectiveRequestDigest: request.effectiveRequestDigest } : {}),
       nonce,
       issuedAt,
       expiresAt: issuedAt + Math.min(this.#timeoutMs, 60_000),

@@ -643,7 +643,8 @@
       "domain": "export",
       "declaredSupport": "implemented_unverified",
       "preferredBackends": [
-        "uxp"
+        "uxp",
+        "cep"
       ],
       "backends": [
         {
@@ -669,7 +670,7 @@
         },
         {
           "backend": "cep",
-          "declaredPreferred": false,
+          "declaredPreferred": true,
           "handlerState": "implemented_unverified",
           "handler": "PPMCP.dispatch",
           "evidence": {
@@ -678,9 +679,7 @@
             "sourceFragment": "\"export.sequence\"",
             "liveEvidenceStatus": "not_run"
           },
-          "mismatches": [
-            "handler_not_declared_preferred"
-          ]
+          "mismatches": []
         },
         {
           "backend": "qe",
@@ -699,9 +698,7 @@
           "mismatches": []
         }
       ],
-      "mismatches": [
-        "handler_not_declared_preferred"
-      ]
+      "mismatches": []
     },
     {
       "actionId": "history.undo",
@@ -2639,6 +2636,6 @@
     "actionCount": 45,
     "backendCellCount": 225,
     "implementedHandlerCount": 46,
-    "mismatchCount": 17
+    "mismatchCount": 16
   }
 }

@@ -68,7 +68,7 @@ describe("authorization policy", () => {
   it("allows canonical non-existent children and requests configured checkpoints", async () => {
     const policy = new AuthorizationPolicy(profile);
     expect(await policy.authorize(plan("project.open"), lease)).toEqual({ outcome: "allow", profileId: profile.profileId, leaseId: "lease-1" });
-    expect((await policy.authorize(plan("project.save"), { ...lease, operationIndex: 0 })).outcome).toBe("allow_with_checkpoint");
+    expect((await policy.authorize(plan("project.save"), { ...lease, operationIndex: 0, mutationIndex: 0 })).outcome).toBe("allow_with_checkpoint");
   });
 
   it("denies action, capability, risk, and canonical path violations", async () => {

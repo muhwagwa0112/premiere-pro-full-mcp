@@ -18,7 +18,7 @@ For the public CCX, add `uxp-plugin/manifest.json` to Adobe UXP Developer Tool a
 
 ```powershell
 npm run compliance:generate
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Build-Release.ps1 -CcxPath .\artifacts\premiere-pro-full-mcp-v0.2.0.ccx
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Build-Release.ps1 -CcxPath .\artifacts\premiere-pro-full-mcp-v0.3.0.ccx
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Verify-Release.ps1
 ```
 
@@ -47,5 +47,5 @@ The updater is pinned to `muhwagwa0112/premiere-pro-full-mcp`. It downloads the 
 2. Complete live UXP/CEP/QE/UI validation on Premiere 26.3+.
 3. Verify the final signed artifacts with `Verify-Release.ps1`.
 4. Complete independent security and completion review.
-5. Push the clean noreply-authored history, create `v0.2.0`, and upload every bound asset.
+5. Push the clean noreply-authored history, create `v0.3.0`, and upload every bound asset.
 6. Verify the repository and download from a logged-out browser and reinstall the downloaded ZIP.
