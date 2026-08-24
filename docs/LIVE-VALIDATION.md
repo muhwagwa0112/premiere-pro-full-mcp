@@ -60,7 +60,9 @@ same CCX successfully and listed `Premiere Pro Full MCP Bridge` v0.3.0 as enable
 26.3.2. All six installed files matched the CCX entries byte-for-byte by SHA-256. Adobe UDT IPC
 `showPanel()` opened that exact installed plug-in. Premiere's accessibility tree then exposed the UXP
 panel, Port and Token fields, Pair and Connect buttons, and the named panel tab. The floating window
-measured 340x326 outer / 324x287 client pixels at 96 DPI, with every primary control present. A docked
+measured 340x326 outer / 324x287 client pixels at 96 DPI; its nested UXP content view measured the
+manifest minimum of exactly 320x260 pixels, with every primary control present. The retained
+file-hash and window-geometry record is `docs/evidence/ccx-install-layout-v0.3.0.json`. A docked
 observation and a non-100% Windows-scale observation remain blocking, so the complete
 minimum/docked/floating/scaled layout gate is not yet claimed as successful.
 

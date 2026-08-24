@@ -41,8 +41,9 @@ The CCX was packaged with Adobe UXP Developer Tool and the same package passed U
 and installation through Adobe Unified Plugin Installer Agent 8.5.0.13. Premiere Pro 26.3.2 loaded
 the installed v0.3.0 plug-in, and all six installed files matched the CCX byte-for-byte by SHA-256.
 The floating packaged panel exposed every primary control at 340x326 outer / 324x287 client pixels
-and 96 DPI. Docked and non-100% Windows-scale observations remain required and are not represented as
-passed release gates.
+and 96 DPI, including an exact 320x260 nested UXP content view matching the manifest minimum. The
+comparison is retained in `docs/evidence/ccx-install-layout-v0.3.0.json`. Docked and non-100% Windows-
+scale observations remain required and are not represented as passed release gates.
 
 ## Assets
 

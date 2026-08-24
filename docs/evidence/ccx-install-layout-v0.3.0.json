@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-08-24T20:33:49.5969159+09:00",
+  "releaseVersion": "0.3.0",
+  "host": {
+    "application": "Adobe Premiere Pro",
+    "version": "26.3.2",
+    "windowsVersion": "10.0.19045",
+    "systemDpi": 96
+  },
+  "installer": {
+    "name": "Adobe Unified Plugin Installer Agent",
+    "version": "8.5.0.13",
+    "pluginId": "com.codex.premiere-pro-full-mcp",
+    "pluginVersion": "0.3.0",
+    "enabled": true
+  },
+  "ccx": {
+    "name": "premiere-pro-full-mcp-v0.3.0.ccx",
+    "sha256": "a958fa4d52f8248e68612b1fabf32ec9faa63da77496f0a9dc30bc18d5685c2f",
+    "entryCount": 6,
+    "installedFilesEqual": true,
+    "files": [
+      {
+        "path": "manifest.json",
+        "size": 778,
+        "sha256": "498784ce715a7d519d31d3d1e4e52ebecb1f0be9a98e66846632aeeab0327b1a"
+      },
+      {
+        "path": "api-catalog.cjs",
+        "size": 426702,
+        "sha256": "c91de9ef23f0fef896d84c47da71a07083f50f998f7015923d3468d0fa2fdfaf"
+      },
+      {
+        "path": "index.html",
+        "size": 2987,
+        "sha256": "9e241f7367eaef6139c54bb1bb11ff7370bfbdf5b91e0376e84b487d46f8d411"
+      },
+      {
+        "path": "main.cjs",
+        "size": 62640,
+        "sha256": "df6dc36650384ab39999defb9f9ee99ddcbb0ca3a6d95f42f1bfbd9f00dfa1f9"
+      },
+      {
+        "path": "main.js",
+        "size": 1740,
+        "sha256": "c3e847c4633c4a80fb6030e93213c28fcd5866d427b4de873cce5ae2668357cc"
+      },
+      {
+        "path": "README.md",
+        "size": 754,
+        "sha256": "6fe87267696aeaae272c0e5dc80397aec6c098ca9859a7c4bf7286c7b8f9e4f2"
+      }
+    ]
+  },
+  "panel": {
+    "outerWindow": {
+      "width": 340,
+      "height": 326
+    },
+    "clientFrame": {
+      "width": 324,
+      "height": 287
+    },
+    "uxpContent": {
+      "width": 320,
+      "height": 260
+    },
+    "primaryControlsObserved": [
+      "port",
+      "token",
+      "pair",
+      "connect",
+      "panel-tab"
+    ]
+  },
+  "gates": {
+    "installation": "passed",
+    "minimumContent": "passed",
+    "floating": "passed",
+    "docked": "pending",
+    "non100PercentWindowsScale": "pending"
+  }
+}
