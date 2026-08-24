@@ -54,11 +54,15 @@ codes only; it does not record returned values, messages, absolute paths, or sec
 
 ## Explicit release boundary
 
-The UDT-produced v0.3.0 CCX passed manifest/identity validation and UDT developer loading. Creative
-Cloud Desktop did not complete the public CCX installation on this machine: it first reported update
-error 190 and then reported that no compatible application was installed, despite Premiere 26.3.2
-being present. Therefore Creative Cloud installation and the minimum/docked/floating/scaled packaged
-panel layout checks remain blocking and are not claimed as successful.
+The UDT-produced v0.3.0 CCX passed manifest/identity validation and UDT developer loading. After the
+stale v0.2.0 installation was removed, Adobe Unified Plugin Installer Agent 8.5.0.13 installed the
+same CCX successfully and listed `Premiere Pro Full MCP Bridge` v0.3.0 as enabled for Premiere Pro
+26.3.2. All six installed files matched the CCX entries byte-for-byte by SHA-256. Adobe UDT IPC
+`showPanel()` opened that exact installed plug-in. Premiere's accessibility tree then exposed the UXP
+panel, Port and Token fields, Pair and Connect buttons, and the named panel tab. The floating window
+measured 340x326 outer / 324x287 client pixels at 96 DPI, with every primary control present. A docked
+observation and a non-100% Windows-scale observation remain blocking, so the complete
+minimum/docked/floating/scaled layout gate is not yet claimed as successful.
 
 The live fixture above verifies only the listed interactive create/import/sequence/export/save paths.
 It does not promote trusted-unattended enrollment, durable jobs, checkpoint workflows, disposable

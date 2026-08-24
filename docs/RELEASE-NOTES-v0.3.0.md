@@ -37,10 +37,12 @@ documented in `LIVE-VALIDATION.md`. Unattended, durable-job, checkpoint, semanti
 clip, recoverable-overwrite, cloud/service, third-party, modal, and entitlement-dependent paths do
 not inherit that evidence and retain their generated support states.
 
-The CCX was packaged with Adobe UXP Developer Tool and the same plugin source passed UDT developer
-loading. Creative Cloud Desktop installation and packaged-panel layout checks remain blocked on this
-machine by Creative Cloud update error 190 followed by a no-compatible-application result. They are
-not represented as passed release gates.
+The CCX was packaged with Adobe UXP Developer Tool and the same package passed UDT developer loading
+and installation through Adobe Unified Plugin Installer Agent 8.5.0.13. Premiere Pro 26.3.2 loaded
+the installed v0.3.0 plug-in, and all six installed files matched the CCX byte-for-byte by SHA-256.
+The floating packaged panel exposed every primary control at 340x326 outer / 324x287 client pixels
+and 96 DPI. Docked and non-100% Windows-scale observations remain required and are not represented as
+passed release gates.
 
 ## Assets
 
