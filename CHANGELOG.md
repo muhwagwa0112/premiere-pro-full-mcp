@@ -8,6 +8,11 @@ All notable changes to this project are documented here.
   linear step sequence (`premiere_flows`) and each step commits as its own observable transaction
   with its own undo unit; safety is automatic checkpoints plus automatic undo.
 - Added a step event bus so clients can relay live progress while the user watches the editor.
+- Live-validated against a real Premiere Pro 26.3.2 host on Windows: a real project was opened, its
+  project/sequence/caption snapshots were read over the UXP bridge, a verified pre-mutation
+  checkpoint whose SHA-256 matched the saved project was created, and the live project was written
+  to disk through `project.save`. Updated README with the live-run evidence and the UXP-vs-CEP
+  notes for `sequence.inspect`.
 - Fixed the single-UXP-listener problem: multiple MCP instances now share the leader's panel session
   as authenticated relays, with follower-to-leader promotion and a keep-alive retry when an
   incompatible owner holds the port.

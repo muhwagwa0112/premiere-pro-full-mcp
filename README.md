@@ -91,6 +91,16 @@ Updates reject signature, repository, tag, name, size, digest, prerelease, and d
 
 The generated Adobe 26.3 inventory contains 69 roots and 761 callable members. The final live full-surface baseline matched all 761 IDs. Of 312 deterministic read-only calls attempted, 281 succeeded and 31 failed closed because the required method, root, or session handle was unavailable. Another 151 risk-bearing entries were preview-only and 298 context-dependent entries were skipped with explicit reasons. See [live validation](docs/LIVE-VALIDATION.md).
 
+The v0.4.0 release was also exercised against a real running Premiere Pro 26.3.2 host on Windows.
+With the UXP bridge connected as a leader relay, the MCP tools opened a real project, read back its
+project/sequence/caption snapshots over UXP, created a verified pre-mutation checkpoint whose
+SHA-256 matched the saved project file, and saved the live project to disk through `project.save`.
+The live run confirmed that read-only inspection and the checkpoint+save mutation path work against
+the installed host; `sequence.inspect` remains more robust over the UXP backend than the CEP bridge,
+which requires an explicit sequence id. See [live validation](docs/LIVE-VALIDATION.md) for the
+exact host version, backend, and evidence digests. The UXP panel must be open in Premiere for full
+live mutation; without it the server still routes read-only inspection through CEP/QE/UI.
+
 The generated capability artifacts additionally contain 51 public semantic actions across five
 backend columns and 150 broader post-production/collaboration/native feature records. Compound work
 is planned through `premiere_jobs`; the implemented-unverified inspection/delivery workflow places
@@ -159,6 +169,17 @@ v0.4 최신본에는 durable `premiere_jobs` DAG, 전·후 프로젝트 체크�
 프로젝트/미디어/타임라인 semantic action, 고정 fingerprint UI adapter, 기능 레지스트리가
 포함됩니다. 목록에 존재한다는 이유만으로 지원 상태를 올리지 않으며, 실호스트 증거가 없는 기능은
 `UNVERIFIED`, `PLAN_ONLY`, `ENTITLEMENT_BLOCKED`, `UNSUPPORTED` 상태를 유지합니다.
+
+v0.4.0 릴리스는 Windows에서 실행 중인 실제 Premiere Pro 26.3.2 호스트를 대상으로도 검증했습니다.
+UXP 브리지를 리더 릴레이로 연결한 상태에서 MCP 도구가 실제 프로젝트를 열고, UXP로
+프로젝트/시퀀스/캡션 스냅샷을 읽어왔으며, 저장된 프로젝트 파일과 SHA-256이 일치하는
+검증된 사전변경 체크포인트를 만들고, `project.save`로 라이브 프로젝트를 디스크에 저장했습니다.
+이 라이브 실행은 읽기 전용 검사와 체크포인트+저장 뮤테이션 경로가 설치된 호스트에서 동작함을
+확인했습니다. `sequence.inspect`는 CEP 브리지에서 명시적 시퀀스 id를 요구하는 대신
+UXP 백엔드에서 더 안정적입니다. 자세한 호스트 버전/백엔드/증거 다이제스트는
+[live validation](docs/LIVE-VALIDATION.md)을 참조하세요. 완전한 라이브 뮤테이션을 위해서는
+Premiere에서 UXP 패널이 열려 있어야 하며, 그렇지 않아도 서버는 CEP/QE/UI로 읽기 전용 검사를 계속
+라우팅합니다.
 
 CEP 호환 브리지는 Adobe ZXP 방식으로 별도 서명되어 있으며, 설치기는 CEP 개발자 모드를 활성화하지 않습니다. EXE와 PowerShell 스크립트에는 Authenticode 서명이 없으므로 게시된 SHA-256과 RSA 릴리스 서명을 확인해야 합니다.
 
