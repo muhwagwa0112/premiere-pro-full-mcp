@@ -115,6 +115,22 @@ describe("release packaging contract", () => {
     expect(entry).toContain("throw error");
   });
 
+  test("plugin-marketplace MCP server name matches the installer registration", () => {
+    // The Codex connector (.mcp.json) and the installer (Common.ps1) must both
+    // register the bridge under the same server name so a fresh Codex thread
+    // discovers the exact same tools as the installed Doctor path.
+    const mcpJson = JSON.parse(readFileSync(resolve(root, ".mcp.json"), "utf8")) as {
+      mcpServers: Record<string, { command: string }>;
+    };
+    const common = readFileSync(resolve(root, "scripts", "install", "Common.ps1"), "utf8");
+    const registration = common.match(/\$script:PpMcpRegistration = '([^']+)'/)?.[1];
+    expect(registration).toBeTruthy();
+    expect(Object.keys(mcpJson.mcpServers)).toEqual([registration]);
+    const entry = mcpJson.mcpServers[registration];
+    expect(entry.command).toContain("PremiereMcp.WindowsUiAgent.exe");
+    expect(JSON.stringify(entry)).toContain("--launch-mcp");
+  });
+
   test("trust profile enrollment validates exact mode and profile ID before installation", () => {
     const directory = mkdtempSync(join(tmpdir(), "ppmcp-installer-profile-"));
     const profilePath = join(directory, "profile.json");

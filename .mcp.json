@@ -1,8 +1,8 @@
 {
   "mcpServers": {
-    "premiere-pro-full-mcp": {
-      "title": "Premiere Pro Full MCP",
-      "description": "Watch & Run control of the local Adobe Premiere Pro through the recommended full MCP bridge.",
+    "premiere_pro_full_mcp": {
+      "title": "Premiere Pro Full MCP (Watch & Run)",
+      "description": "Watch & Run control of the local Adobe Premiere Pro through the recommended full MCP bridge: no-approval flow engine, typed CEP/QE handlers, and live step events.",
       "command": "C:\\Users\\lufth\\AppData\\Local\\PremiereMCP\\bin\\PremiereMcp.WindowsUiAgent.exe",
       "args": [
         "--launch-mcp",
