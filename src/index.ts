@@ -2,6 +2,7 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createServer } from "./server.js";
 import { OperationEngine } from "./operation-engine.js";
+import { FlowRunner } from "./flows/flow-runner.js";
 import { LocalAdapter } from "./bridge/local-adapter.js";
 import { UxpWebSocketAdapter } from "./bridge/uxp-websocket.js";
 import { CepFileAdapter } from "./bridge/cep-file.js";
@@ -28,7 +29,8 @@ const lease = await SessionLease.createForCurrentProcess();
 const authorizationService = await AuthorizationService.createFromEnvironment({ lease });
 const trustedRoots = authorizationService.approvedRoots();
 const engine = new OperationEngine(adapters, { authorizationService, ...(trustedRoots ? { pathPolicy: new PathPolicy([...trustedRoots]) } : {}) });
-const server = createServer(engine);
+const flows = new FlowRunner(engine, { authorizationService });
+const server = createServer(engine, undefined, flows);
 const transport = new StdioServerTransport();
 
 const shutdown = async () => {

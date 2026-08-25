@@ -68,10 +68,12 @@ describe("generated support matrix", () => {
     expect(action("export.sequence").preferredBackends).toEqual(["uxp", "cep"]);
     expect(implemented("export.sequence", "uxp")).toBe("implemented_unverified");
     expect(implemented("export.sequence", "cep")).toBe("implemented_unverified");
-    for (const actionId of ["effects.apply", "history.undo"]) {
-      expect(action(actionId).declaredSupport).toBe("unsupported");
-      expect(action(actionId).backends.every((entry) => entry.handlerState === "not_implemented")).toBe(true);
-    }
+    // effects.apply is now a real QE-backed typed action (experimental until
+    // live evidence is recorded), while history.undo remains unsupported.
+    expect(action("effects.apply").declaredSupport).toBe("experimental");
+    expect(implemented("effects.apply", "qe")).toBe("implemented_unverified");
+    expect(action("history.undo").declaredSupport).toBe("unsupported");
+    expect(action("history.undo").backends.every((entry) => entry.handlerState === "not_implemented")).toBe(true);
     expect(action("timeline.clip.insert").declaredSupport).toBe("implemented_unverified");
     expect(implemented("timeline.clip.insert", "uxp")).toBe("implemented_unverified");
   });

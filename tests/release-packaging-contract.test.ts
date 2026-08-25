@@ -8,17 +8,18 @@ import { describe, expect, test } from "vitest";
 const root = resolve(import.meta.dirname, "..");
 
 describe("release packaging contract", () => {
-  test("publishes version 0.3.0 consistently across package and Adobe manifests", () => {
+  test("publishes the package version consistently across package and Adobe manifests", () => {
     const packageJson = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8")) as { version: string };
     const packageLock = JSON.parse(readFileSync(resolve(root, "package-lock.json"), "utf8")) as { version: string; packages: Record<string, { version?: string }> };
     const uxpManifest = JSON.parse(readFileSync(resolve(root, "uxp-plugin", "manifest.json"), "utf8")) as { version: string };
     const cepManifest = readFileSync(resolve(root, "cep-plugin", "CSXS", "manifest.xml"), "utf8");
-    expect(packageJson.version).toBe("0.3.0");
+    // package.json is the single version source; every artifact must match it.
+    expect(packageJson.version).toMatch(/^\d+\.\d+\.\d+$/);
     expect(packageLock.version).toBe(packageJson.version);
     expect(packageLock.packages[""]?.version).toBe(packageJson.version);
     expect(uxpManifest.version).toBe(packageJson.version);
-    expect(cepManifest).toContain('ExtensionBundleVersion="0.3.0"');
-    expect(cepManifest).toContain('Version="0.3.0"/>');
+    expect(cepManifest).toContain(`ExtensionBundleVersion="${packageJson.version}"`);
+    expect(cepManifest).toContain(`Version="${packageJson.version}"/>`);
   });
 
   test("requires an explicit Adobe UDT CCX before checking the worktree", () => {
@@ -88,7 +89,8 @@ describe("release packaging contract", () => {
     const doctor = readFileSync(resolve(root, "scripts", "install", "Doctor.ps1"), "utf8");
     expect(doctor).toContain("Add-Check 'uxp-listener'");
     expect(doctor).toContain("Add-Check 'uxp-panel-session'");
-    expect(doctor).toContain("Get-NetTCPConnection -LocalAddress '127.0.0.1' -LocalPort 17777");
+    expect(doctor).toContain("Get-NetTCPConnection -LocalAddress '127.0.0.1' -LocalPort $uxpPort");
+    expect(doctor).toContain("$env:PREMIERE_MCP_UXP_PORT");
   });
 
   test("trust profile enrollment validates exact mode and profile ID before installation", () => {

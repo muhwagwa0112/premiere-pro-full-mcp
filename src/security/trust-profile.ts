@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const automationModes = ["interactive", "trusted_unattended", "isolated_lab"] as const;
+export const automationModes = ["interactive", "trusted_unattended", "isolated_lab", "watch"] as const;
 export const riskLevels = ["R0", "R1", "R2", "R3"] as const;
 
 const capabilitySchema = z.object({

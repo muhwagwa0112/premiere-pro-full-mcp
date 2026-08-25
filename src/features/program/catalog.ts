@@ -24,7 +24,10 @@ const enhanceSpeech = { key: "adobe.enhance_speech", product: "Adobe Enhance Spe
 
 export const postProductionProgram: readonly ProgramFeatureContract[] = [
   feature("effects.catalog", "effects", "handler_unverified"),
-  feature("effects.apply", "effects", "not_implemented", { mutatesProject: true }),
+  // effects.apply now has a real typed QE-backed handler (see cep-plugin/host.jsx
+  // PPMCP.semantic.applyEffect). It is unverified against live host evidence,
+  // so it stays below "implemented_unverified" but is no longer "not_implemented".
+  feature("effects.apply", "effects", "handler_unverified", { mutatesProject: true }),
   feature("effects.parameters", "effects", "not_implemented", { mutatesProject: true }),
   feature("effects.keyframes", "effects", "not_implemented", { mutatesProject: true }),
   feature("transitions.manage", "effects", "not_implemented", { mutatesProject: true }),

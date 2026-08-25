@@ -24,6 +24,13 @@ export class AuthorizationService {
   constructor(options: { mode: AutomationMode; lease: SessionLease; confirmations?: ConfirmationService; profile?: TrustProfile }) {
     this.mode = options.mode; this.#lease = options.lease; this.#confirmations = options.confirmations ?? new ConfirmationService();
     this.#profile = options.profile ?? null;
+    if (this.mode === "watch") {
+      // Watch mode is no-dialog by design: it never requires an interactive
+      // approval, never blocks on a trust profile, and never opens a dialog.
+      this.#profile = null;
+      this.#policy = null;
+      return;
+    }
     if (this.mode !== "interactive" && (!this.#profile || this.#profile.mode !== this.mode)) throw new AuthorizationError("TRUST_PROFILE_MODE_MISMATCH", "Unattended mode requires a validated trust profile with the exact same mode");
     if (this.mode === "interactive" && this.#profile && this.#profile.mode !== "interactive") throw new AuthorizationError("TRUST_PROFILE_MODE_MISMATCH", "Interactive mode cannot use an unattended trust profile");
     this.#policy = this.#profile ? new AuthorizationPolicy(this.#profile) : null;
@@ -31,9 +38,28 @@ export class AuthorizationService {
 
   approvedRoots(): readonly string[] | undefined { return this.#profile ? [...this.#profile.approvedRoots] : undefined; }
 
+  /**
+   * In watch mode, never ask for confirmation. Still require the safety
+   * checkpoint policy to mirror trusted_unattended (auto-checkpoint before
+   * the first mutation and before non-undoable mutations).
+   */
+  static watchMode(): Partial<TrustProfile> {
+    return {
+      schemaVersion: 1,
+      profileId: "watch",
+      mode: "watch",
+      riskCeiling: "R3",
+      actionAllow: ["*"],
+      actionDeny: [],
+      approvedRoots: [],
+      capabilities: { overwrite: true, delete: true, thirdPartyPluginUi: true, cloudPublish: true, cloudShare: true, purchase: true },
+      checkpoint: { beforeFirstMutation: true, beforeNonUndoable: true, intervalOperations: 100, retainCount: 10 },
+    };
+  }
+
   async executionRequirements(action: ActionDescriptor): Promise<ExecutionRequirements> {
     const checkpointRetention = this.#profile?.checkpoint.retainCount ?? 10;
-    if (action.id === "project.checkpoint" || this.mode === "interactive" || !this.#profile || !action.mutatesProject) return { checkpointRequired: false, checkpointRetention };
+    if (action.id === "project.checkpoint" || this.mode === "interactive" || this.mode === "watch" || !this.#profile || !action.mutatesProject) return { checkpointRequired: false, checkpointRetention };
     const next = await this.#lease.previewNextIndexes(true).catch((error) => { throw leaseAuthorizationError(error); });
     const checkpoint = this.#profile.checkpoint;
     const checkpointRequired = (checkpoint.beforeFirstMutation && next.mutationIndex === 0) ||
@@ -44,9 +70,13 @@ export class AuthorizationService {
 
   static async createFromEnvironment(options: { store?: TrustProfileStore; confirmations?: ConfirmationService; lease?: SessionLease } = {}): Promise<AuthorizationService> {
     const rawMode = process.env.PREMIERE_MCP_AUTOMATION_MODE ?? "interactive";
-    if (!(["interactive", "trusted_unattended", "isolated_lab"] as const).includes(rawMode as AutomationMode)) throw new AuthorizationError("INVALID_AUTOMATION_MODE", "PREMIERE_MCP_AUTOMATION_MODE is invalid");
+    if (!(["interactive", "trusted_unattended", "isolated_lab", "watch"] as const).includes(rawMode as AutomationMode)) throw new AuthorizationError("INVALID_AUTOMATION_MODE", "PREMIERE_MCP_AUTOMATION_MODE is invalid");
     const mode = rawMode as AutomationMode;
     const lease = options.lease ?? await SessionLease.createForCurrentProcess();
+    if (mode === "watch") {
+      // Watch mode never requires an enrolled trust profile or approval.
+      return new AuthorizationService({ mode, lease, ...(options.confirmations ? { confirmations: options.confirmations } : {}) });
+    }
     if (mode === "interactive") return new AuthorizationService({ mode, lease, ...(options.confirmations ? { confirmations: options.confirmations } : {}) });
     const profileId = process.env.PREMIERE_MCP_TRUST_PROFILE_ID;
     if (!profileId) throw new AuthorizationError("TRUST_PROFILE_REQUIRED", `${mode} requires PREMIERE_MCP_TRUST_PROFILE_ID`);
@@ -65,6 +95,14 @@ export class AuthorizationService {
   async authorize(action: ActionDescriptor, request: ActionRequest, plan: ExecutionPlan, paths: readonly string[]): Promise<AuthorizationGrant> {
     const reservation = await this.#lease.reserve(plan.planHash, action.mutatesProject, plan.checkpointRequired).catch((error) => { throw leaseAuthorizationError(error); });
     try {
+      if (this.mode === "watch") {
+        // Watch mode: no dialog, no trust profile, no confirmation. Safety is
+        // provided by the code-level guards in the operation engine (path
+        // policy, output overwrite policy, recovery journal) and by automatic
+        // checkpoints managed by the flow runner.
+        if (plan.checkpointRequired) throw new AuthorizationError("PLAN_CHECKPOINT_DRIFT", "Watch execution plans manage checkpoints through the flow runner, not per-operation grants");
+        return { reservation, profileId: null, mode: this.mode, checkpointRequired: false, checkpointRetention: 10 };
+      }
       if (this.mode === "interactive") {
         if (action.risk === "R2" || action.risk === "R3") {
           if (!request.approvalId) throw new AuthorizationError("CONFIRMATION_REQUIRED", "Preview and approve this exact execution plan before apply");

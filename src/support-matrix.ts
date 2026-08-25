@@ -53,6 +53,7 @@ export interface SupportMatrix {
 const localHandler = "LocalAdapter.execute";
 const uxpHandler = "execute";
 const cepHandler = "PPMCP.dispatch";
+const qeHandler = "PPMCP.dispatch";
 const uiHandler = "UiNamedPipeAdapter.execute";
 
 function evidence(
@@ -116,6 +117,27 @@ const handlerEvidence: HandlerEvidence[] = [
     actionId === "qe.catalog" ? `\"qe.catalog\"` : "/^(cep|qe)\\.(read|edit|filesystem|destructive)$/",
     actionId === "qe.catalog" || actionId === "qe.read" ? "verified" : "committed_unverified",
   )),
+
+  // Typed QE semantic edits are dispatched through the same host dispatcher.
+  // They are declared experimental until live evidence is recorded, matching
+  // the catalog's truthful support state.
+  ...[
+    "timeline.ripple_delete", "timeline.clip.move", "timeline.clip.delete", "timeline.clip.link_group", "effects.apply",
+  ].map((actionId) => evidence(
+    "qe",
+    actionId,
+    qeHandler,
+    "cep-plugin/host.jsx",
+    "/^(cep|qe)\\.(read|edit|filesystem|destructive)$/",
+    "committed_unverified",
+  )),
+
+  // Typed UXP/CEP semantic timeline/adjustment actions dispatched by their
+  // host bridge dispatchers (markers/in-out/playhead).
+  ...["timeline.markers", "timeline.in_out", "timeline.playhead"].flatMap((actionId) => [
+    evidence("uxp", actionId, uxpHandler, "uxp-plugin/main.cjs", `if (operation === \"${actionId}\")`, "committed_unverified"),
+    evidence("cep", actionId, cepHandler, "cep-plugin/host.jsx", `\"${actionId}\"`, "committed_unverified"),
+  ]),
 
   ...[
     ["host.inspect", "premiere.window.inspect", "verified"],

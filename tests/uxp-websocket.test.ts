@@ -2,9 +2,9 @@ import { createHmac, randomBytes } from "node:crypto";
 import { dirname, join } from "node:path";
 import WebSocket from "ws";
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { UxpWebSocketAdapter } from "../src/bridge/uxp-websocket.js";
+import { BRIDGE_SETTINGS_FILE_NAME, UxpWebSocketAdapter } from "../src/bridge/uxp-websocket.js";
 import { loadAdobeApiCatalog } from "../src/adobe-api-catalog.js";
 
 const AUTH_FILE_NAME = "premiere-mcp-bridge-key-v1";
@@ -75,6 +75,9 @@ describe("UXP websocket bridge", () => {
   it("starts without a user-managed token and requires an authenticated plugin-data handshake", async () => {
     const port = 23000 + Math.floor(Math.random() * 5000);
     const { adapter, authRoot } = await testAdapter(port);
+    const settingsFile = join(authRoot, "26", "External", UXP_PLUGIN_ID, "PluginData", BRIDGE_SETTINGS_FILE_NAME);
+    const settings = JSON.parse(await readFile(settingsFile, "utf8")) as { schemaVersion?: number; port?: number };
+    expect(settings.port).toBe(port);
     expect((await adapter.availability()).available).toBe(false);
     const { socket } = await authenticatedSocket(port, authRoot, ["host.inspect"]);
     expect((await adapter.availability()).available).toBe(true);

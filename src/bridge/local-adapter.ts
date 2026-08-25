@@ -3,13 +3,17 @@ import { collectLocalInventory } from "../inventory.js";
 import type { BackendAdapter, BackendProbe, BridgeRequest, BridgeResponse, SupportDecision } from "../contracts.js";
 import { searchAdobeApiCatalog } from "../adobe-api-catalog.js";
 import { hasValidEffectiveRequestBinding, routeBindingFromProbe, sameRouteBinding } from "../security/execution-plan.js";
+import { runtimeConfig } from "../config.js";
 
 export class LocalAdapter implements BackendAdapter {
   readonly backend = "local" as const;
   static readonly operations = ["host.inspect", "plugin.catalog", "effects.catalog", "uxp.catalog"] as const;
 
   async probe(): Promise<BackendProbe> {
-    return { backend: this.backend, available: true, hostVersion: "26.3.2-target", operations: LocalAdapter.operations };
+    // The local adapter itself is not a Premiere process; it reports the
+    // host product/minimum version from runtime configuration and marks the
+    // host as not-connected until a real backend reports its actual version.
+    return { backend: this.backend, available: true, hostVersion: `${runtimeConfig.product} (${runtimeConfig.minimumHostVersion}+)`, operations: LocalAdapter.operations };
   }
 
   async supports(operation: string, _context: Record<string, unknown>): Promise<SupportDecision> {
@@ -19,7 +23,7 @@ export class LocalAdapter implements BackendAdapter {
   }
 
   async availability(): Promise<{ available: boolean; hostVersion?: string }> {
-    return { available: true, hostVersion: "26.3.2-target" };
+    return { available: true, hostVersion: `${runtimeConfig.product} (${runtimeConfig.minimumHostVersion}+)` };
   }
 
   async execute(request: BridgeRequest): Promise<BridgeResponse> {
@@ -33,7 +37,7 @@ export class LocalAdapter implements BackendAdapter {
         requestId: request.requestId,
         ok: true,
         dispatchState: "completed",
-        hostVersion: "26.3.2-target",
+        hostVersion: `${runtimeConfig.product} (${runtimeConfig.minimumHostVersion}+)`,
         verification: { outcome: "verified", method: "generated Adobe declaration catalog" },
         result: await searchAdobeApiCatalog(request.args),
       };

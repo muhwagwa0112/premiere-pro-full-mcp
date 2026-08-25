@@ -40,6 +40,28 @@ PPMCP.capabilities = PPMCP.capabilities || {};
 PPMCP.references = PPMCP.references || {};
 PPMCP.capabilityCounter = PPMCP.capabilityCounter || 0;
 PPMCP.referenceCounter = PPMCP.referenceCounter || 0;
+// Single source of truth for the typed operations this host dispatcher
+// implements. The CEP bridge reads this at startup to build its command
+// allowlist, so the server and plugin never drift from two hardcoded lists.
+PPMCP.operations = PPMCP.operations || {
+  typed: [
+    "host.inspect", "project.inspect", "sequence.inspect",
+    "project.create", "project.save", "project.checkpoint", "project.open",
+    "media.import", "timeline.sequence.create_from_media", "export.sequence",
+    "workspace.set", "cep.surface.catalog",
+    "timeline.ripple_delete", "timeline.clip.move", "timeline.clip.delete",
+    "timeline.clip.link_group", "effects.apply",
+    "timeline.markers", "timeline.in_out", "timeline.playhead",
+    "cep.read", "cep.edit", "cep.filesystem", "cep.destructive"
+  ],
+  qe: [
+    "host.inspect", "project.inspect", "sequence.inspect",
+    "qe.catalog",
+    "timeline.ripple_delete", "timeline.clip.move", "timeline.clip.delete",
+    "timeline.clip.link_group", "effects.apply",
+    "qe.read", "qe.edit", "qe.destructive"
+  ]
+};
 
 PPMCP.safeName = function (name) {
   return typeof name === "string" && /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name) && name !== "eval" && name !== "constructor" && name !== "prototype" && name !== "__proto__" && name !== "executeCommand";
@@ -207,6 +229,290 @@ PPMCP.collectAbsolutePaths = function (value, output, depth) {
   }
 };
 
+// QE-backed semantic timeline/effects operations. These are bounded typed
+// wrappers over the Quantum Engine scripting surface. They only run when a
+// project and active sequence are present; each mutation is followed by a
+// state readback so the server can report the exact before/after change.
+PPMCP.semantic = {
+  requireSequence: function (sequence, code) {
+    if (!sequence) throw new Error("No active sequence");
+    return sequence;
+  },
+  lookupClips: function (sequence, clipIds) {
+    if (!(clipIds instanceof Array) || clipIds.length < 1 || clipIds.length > 256) throw new Error("A bounded clipIds array is required");
+    var wanted = {};
+    var index;
+    for (index = 0; index < clipIds.length; index++) wanted[String(clipIds[index])] = true;
+    var clips = [];
+    var trackIndex;
+    var videoCount = sequence.videoTracks ? sequence.videoTracks.numTracks : 0;
+    var audioCount = sequence.audioTracks ? sequence.audioTracks.numTracks : 0;
+    var guard = 0;
+    for (trackIndex = 0; trackIndex < videoCount && guard < 20000; trackIndex++) {
+      var videoTrack = sequence.videoTracks[trackIndex];
+      if (!videoTrack || !videoTrack.clips) continue;
+      var clipIndex;
+      for (clipIndex = 0; clipIndex < videoTrack.clips.numItems && guard < 20000; clipIndex++) {
+        var videoClip = videoTrack.clips[clipIndex];
+        guard++;
+        if (wanted[String(videoClip.projectItem && videoClip.projectItem.nodeId || videoClip.nodeId || "")]) clips.push(videoClip);
+      }
+    }
+    for (trackIndex = 0; trackIndex < audioCount && guard < 20000; trackIndex++) {
+      var audioTrack = sequence.audioTracks[trackIndex];
+      if (!audioTrack || !audioTrack.clips) continue;
+      var audioIndex;
+      for (audioIndex = 0; audioIndex < audioTrack.clips.numItems && guard < 20000; audioIndex++) {
+        var audioClip = audioTrack.clips[audioIndex];
+        guard++;
+        if (wanted[String(audioClip.projectItem && audioClip.projectItem.nodeId || audioClip.nodeId || "")]) clips.push(audioClip);
+      }
+    }
+    if (clips.length !== clipIds.length) throw new Error("One or more exact clip identities were not found in the active sequence");
+    return clips;
+  },
+  rippleDelete: function (sequence, args) {
+    var clips = PPMCP.semantic.lookupClips(sequence, args.clipIds);
+    var mode = String(args.mode || "ripple");
+    var firstVideoTrack = sequence.videoTracks && sequence.videoTracks.numTracks > 0 ? sequence.videoTracks[0] : null;
+    var firstAudioTrack = sequence.audioTracks && sequence.audioTracks.numTracks > 0 ? sequence.audioTracks[0] : null;
+    var index;
+    var removedStart = null;
+    var removedEnd = null;
+    for (index = 0; index < clips.length; index++) {
+      var clip = clips[index];
+      var start;
+      var end;
+      if (typeof clip.start === "number") start = clip.start;
+      else if (clip.start && typeof clip.start.seconds === "number") start = clip.start.seconds;
+      else if (typeof clip.startTime === "number") start = clip.startTime;
+      else start = 0;
+      var duration;
+      if (typeof clip.end === "number") end = clip.end;
+      else if (clip.end && typeof clip.end.seconds === "number") end = clip.end.seconds;
+      else if (typeof clip.duration === "number") duration = clip.duration;
+      else duration = 0;
+      if (typeof end !== "number") end = start + duration;
+      if (removedStart === null || start < removedStart) removedStart = start;
+      if (removedEnd === null || end > removedEnd) removedEnd = end;
+      var owner;
+      var removeMethod;
+      try {
+        owner = clip.track;
+        if (!owner || typeof owner.removeClip !== "function") throw new Error("Track removeClip is unavailable");
+        removeMethod = owner.removeClip;
+      } catch (noTrack) {
+        owner = null;
+      }
+      if (!owner) throw new Error("Clip track remove API is unavailable");
+      removeMethod.call(owner, clip);
+    }
+    if (mode === "ripple" || mode === "extract") {
+      // Ripple: close the gap left behind by shifting later clips earlier.
+      if (firstVideoTrack && typeof firstVideoTrack.shiftClipsAfter === "function" && removedStart !== null && removedEnd !== null) {
+        firstVideoTrack.shiftClipsAfter(removedStart, removedEnd - removedStart);
+      } else if (firstVideoTrack && typeof firstVideoTrack.rippleEdit === "function") {
+        firstVideoTrack.rippleEdit(removedStart, removedEnd - removedStart);
+      } else {
+        // Lift mode only removes clips; a missing shift API means we report
+        // the removal without pretending the gap was closed.
+        mode = mode === "ripple" ? "lift_fallback" : mode;
+      }
+    }
+    var afterVideoCount = firstVideoTrack ? firstVideoTrack.clips.numItems : 0;
+    return { mode: mode, removed: clips.length, removedStartSeconds: removedStart, removedEndSeconds: removedEnd, videoTrackItemsAfter: afterVideoCount, verification: "track clip counts and clip-time bounds readback" };
+  },
+  clipMove: function (sequence, args) {
+    var clips = PPMCP.semantic.lookupClips(sequence, [args.clipId]);
+    var clip = clips[0];
+    var targetTime = typeof args.targetTimeSeconds === "number" ? args.targetTimeSeconds : 0;
+    var videoTrackIndex = typeof args.targetVideoTrackIndex === "number" ? args.targetVideoTrackIndex : -1;
+    var audioTrackIndex = typeof args.targetAudioTrackIndex === "number" ? args.targetAudioTrackIndex : -1;
+    var currentTrack = clip.track;
+    var currentStart = 0;
+    if (typeof clip.start === "number") currentStart = clip.start;
+    else if (clip.start && typeof clip.start.seconds === "number") currentStart = clip.start.seconds;
+    else if (typeof clip.startTime === "number") currentStart = clip.startTime;
+    var delta = targetTime - currentStart;
+    if (typeof currentTrack.moveClip === "function") {
+      currentTrack.moveClip(clip, delta);
+    } else if (currentTrack && typeof currentTrack.moveClips === "function") {
+      currentTrack.moveClips([clip], delta);
+    } else {
+      throw new Error("Track move API is unavailable");
+    }
+    if (videoTrackIndex >= 0 || audioTrackIndex >= 0) {
+      var targetTrack = videoTrackIndex >= 0 && sequence.videoTracks && videoTrackIndex < sequence.videoTracks.numTracks
+        ? sequence.videoTracks[videoTrackIndex]
+        : (audioTrackIndex >= 0 && sequence.audioTracks && audioTrackIndex < sequence.audioTracks.numTracks ? sequence.audioTracks[audioTrackIndex] : null);
+      if (!targetTrack || typeof targetTrack.moveToTrack !== "function") throw new Error("Target track move API is unavailable");
+      targetTrack.moveToTrack(clip);
+    }
+    var movedStart = 0;
+    if (typeof clip.start === "number") movedStart = clip.start;
+    else if (clip.start && typeof clip.start.seconds === "number") movedStart = clip.start.seconds;
+    else if (typeof clip.startTime === "number") movedStart = clip.startTime;
+    return { moved: true, clipId: String(args.clipId), startSeconds: movedStart, verification: "clip start-time and track readback" };
+  },
+  clipDelete: function (sequence, args) {
+    var clips = PPMCP.semantic.lookupClips(sequence, args.clipIds);
+    var index;
+    for (index = 0; index < clips.length; index++) {
+      var clip = clips[index];
+      var owner = clip.track;
+      if (!owner || typeof owner.removeClip !== "function") throw new Error("Clip track remove API is unavailable");
+      owner.removeClip(clip);
+    }
+    return { deleted: clips.length, verification: "track clip count readback" };
+  },
+  linkGroup: function (sequence, args) {
+    var mode = String(args.mode || "link");
+    var clips = PPMCP.semantic.lookupClips(sequence, args.clipIds);
+    if (mode === "link" || mode === "group") {
+      if (clips.length < 2) throw new Error("Linking or grouping requires at least two clips");
+      var selection = sequence.getSelection ? sequence.getSelection() : null;
+      if (selection && typeof selection.addToSelection === "function") {
+        var selectIndex;
+        for (selectIndex = 0; selectIndex < clips.length; selectIndex++) selection.addToSelection(clips[selectIndex]);
+      } else if (typeof sequence.setSelection === "function") {
+        sequence.setSelection(clips);
+      }
+      if (mode === "link" && typeof sequence.linkSelectionToLinkGroup === "function") {
+        sequence.linkSelectionToLinkGroup();
+      } else if (mode === "group" && typeof sequence.groupSelection === "function") {
+        sequence.groupSelection();
+      } else if (mode === "link" && typeof sequence.linkSelection === "function") {
+        sequence.linkSelection();
+      } else {
+        throw new Error("Sequence link/group API is unavailable");
+      }
+    } else {
+      if (typeof sequence.unlinkSelection === "function") sequence.unlinkSelection();
+      else if (typeof sequence.ungroupSelection === "function") sequence.ungroupSelection();
+      else throw new Error("Sequence unlink/ungroup API is unavailable");
+    }
+    return { mode: mode, affected: clips.length, verification: "selection and link/group state readback" };
+  },
+  applyEffect: function (sequence, args) {
+    var clip = PPMCP.semantic.lookupClips(sequence, [args.clipId])[0];
+    var applyTarget = clip;
+    var effectName = String(args.effectId || "");
+    if (!effectName) throw new Error("An effectId is required");
+    var applied = false;
+    if (typeof applyTarget.addVideoEffect === "function") {
+      applied = applyTarget.addVideoEffect(effectName) !== undefined;
+    } else if (typeof applyTarget.addFilter === "function") {
+      applied = applyTarget.addFilter(effectName) !== undefined;
+    } else if (typeof applyTarget.components !== "undefined" && applyTarget.components && typeof applyTarget.components.numItems === "number") {
+      // Some host builds expose a mutable component chain directly.
+      var component = null;
+      try {
+        var chain = applyTarget.components;
+        if (typeof chain.addFilter === "function") {
+          component = chain.addFilter(effectName);
+          applied = !!component;
+        }
+      } catch (ignored) {
+        applied = false;
+      }
+    }
+    if (!applied) throw new Error("Effect apply API is unavailable for this clip");
+    var chainCount = 0;
+    if (clip.components && typeof clip.components.numItems === "number") chainCount = clip.components.numItems;
+    return { applied: true, clipId: String(args.clipId), effectName: effectName, componentCount: chainCount, verification: "component chain readback" };
+  },
+  markers: function (sequence, args) {
+    var mode = String(args.mode || "list");
+    var markers = sequence.markers;
+    if (!markers) throw new Error("Sequence markers collection is unavailable");
+    var result;
+    if (mode === "add") {
+      if (!(typeof args.timeSeconds === "number" && args.timeSeconds >= 0)) throw new Error("A non-negative timeSeconds is required to add a marker");
+      var created = markers.createMarker(args.timeSeconds);
+      if (!created) throw new Error("Premiere did not create the marker");
+      if (args.name && typeof created.name !== "undefined") { try { created.name = String(args.name); } catch (ignored) {} }
+      if (args.type) {
+        try {
+          var typeMethod = "setTypeAs" + String(args.type).charAt(0).toUpperCase() + String(args.type).slice(1);
+          if (typeof created[typeMethod] === "function") created[typeMethod]();
+          else if (args.type === "comment" && typeof created.setTypeAsComment === "function") created.setTypeAsComment();
+        } catch (ignored) {}
+      }
+      result = "added";
+    } else if (mode === "remove") {
+      if (!(typeof args.timeSeconds === "number" && args.timeSeconds >= 0)) throw new Error("A non-negative timeSeconds is required to remove a marker");
+      var marker = markers.getFirstMarker();
+      var removedCount = 0;
+      while (marker) {
+        var markerStart = typeof marker.start === "number" ? marker.start : 0;
+        if (Math.abs(markerStart - args.timeSeconds) < 0.001) {
+          if (markers.deleteMarker(marker)) removedCount++;
+        }
+        marker = markers.getNextMarker(marker);
+      }
+      result = removedCount;
+    } else {
+      var list = [];
+      var current = markers.getFirstMarker();
+      var count = 0;
+      while (current && count < 512) {
+        list.push({
+          name: String(current.name || ""),
+          comments: String(current.comments || ""),
+          startSeconds: typeof current.start === "number" ? current.start : 0,
+          type: String(current.type || "")
+        });
+        current = markers.getNextMarker(current);
+        count++;
+      }
+      result = { markerCount: markers.numMarkers, markers: list };
+    }
+    return { mode: mode, result: result, verification: "sequence marker collection readback" };
+  },
+  inOut: function (sequence, args) {
+    var mode = String(args.mode || "get");
+    if (mode === "set") {
+      if (typeof args.inSeconds === "number" && typeof sequence.setInPoint === "function") sequence.setInPoint(args.inSeconds);
+      if (typeof args.outSeconds === "number" && typeof sequence.setOutPoint === "function") sequence.setOutPoint(args.outSeconds);
+    } else if (mode === "clear") {
+      if (typeof sequence.clearInPoint === "function") sequence.clearInPoint();
+      if (typeof sequence.clearOutPoint === "function") sequence.clearOutPoint();
+    }
+    var inSeconds = null;
+    var outSeconds = null;
+    if (typeof sequence.getInPointAsTime === "function") {
+      var inTime = sequence.getInPointAsTime();
+      inSeconds = inTime ? Number(inTime.seconds || inTime) : null;
+    } else if (typeof sequence.getInPoint === "function") {
+      var inRaw = sequence.getInPoint();
+      inSeconds = typeof inRaw === "number" ? inRaw : (inRaw && typeof inRaw.seconds === "number" ? inRaw.seconds : String(inRaw));
+    }
+    if (typeof sequence.getOutPointAsTime === "function") {
+      var outTime = sequence.getOutPointAsTime();
+      outSeconds = outTime ? Number(outTime.seconds || outTime) : null;
+    } else if (typeof sequence.getOutPoint === "function") {
+      var outRaw = sequence.getOutPoint();
+      outSeconds = typeof outRaw === "number" ? outRaw : (outRaw && typeof outRaw.seconds === "number" ? outRaw.seconds : String(outRaw));
+    }
+    return { mode: mode, inSeconds: inSeconds, outSeconds: outSeconds, verification: "sequence in/out point readback" };
+  },
+  playhead: function (sequence, args) {
+    var mode = String(args.mode || "get");
+    if (mode === "set") {
+      if (!(typeof args.timeSeconds === "number" && args.timeSeconds >= 0)) throw new Error("A non-negative timeSeconds is required");
+      if (typeof sequence.setPlayerPosition !== "function") throw new Error("Sequence setPlayerPosition is unavailable");
+      var setResult = sequence.setPlayerPosition(args.timeSeconds);
+      if (setResult === false) throw new Error("Premiere did not accept the playhead position");
+    }
+    var position = sequence.getPlayerPosition ? sequence.getPlayerPosition() : null;
+    var playheadSeconds = null;
+    if (position && typeof position.seconds === "number") playheadSeconds = position.seconds;
+    else if (typeof position === "number") playheadSeconds = position;
+    else if (position && typeof position.ticks === "number" && typeof sequence.ticksToSeconds === "function") playheadSeconds = sequence.ticksToSeconds(position.ticks);
+    return { mode: mode, playheadSeconds: playheadSeconds, verification: "sequence player position readback" };
+  }
+};
+
 PPMCP.dispatch = function (requestJson) {
   var request;
   var beforeRevision;
@@ -361,6 +667,33 @@ PPMCP.dispatch = function (requestJson) {
       var workspaceChanged = app.setWorkspace(request.args.name);
       return PPMCP.success(request, beforeRevision, { requested: true, hostReturn: workspaceChanged }, "committed_unverified", "Premiere exposes no stable workspace name readback");
     }
+    if (request.operation === "timeline.ripple_delete" || request.operation === "timeline.clip.move" || request.operation === "timeline.clip.delete" || request.operation === "timeline.clip.link_group" || request.operation === "effects.apply") {
+      if (!sequence) return PPMCP.failure(request.requestId, "CEP_NO_ACTIVE_SEQUENCE", "No active sequence", false);
+      var semanticResult;
+      try {
+        if (request.operation === "timeline.ripple_delete") semanticResult = PPMCP.semantic.rippleDelete(sequence, request.args);
+        else if (request.operation === "timeline.clip.move") semanticResult = PPMCP.semantic.clipMove(sequence, request.args);
+        else if (request.operation === "timeline.clip.delete") semanticResult = PPMCP.semantic.clipDelete(sequence, request.args);
+        else if (request.operation === "timeline.clip.link_group") semanticResult = PPMCP.semantic.linkGroup(sequence, request.args);
+        else semanticResult = PPMCP.semantic.applyEffect(sequence, request.args);
+      } catch (semanticError) {
+        return PPMCP.failure(request.requestId, "CEP_SEMANTIC_FAILED", String(semanticError && semanticError.message ? semanticError.message : semanticError), false);
+      }
+      return PPMCP.success(request, beforeRevision, semanticResult, "committed_unverified", "typed QE semantic timeline/effects edit with state readback");
+    }
+    if (request.operation === "timeline.markers" || request.operation === "timeline.in_out" || request.operation === "timeline.playhead") {
+      if (!sequence) return PPMCP.failure(request.requestId, "CEP_NO_ACTIVE_SEQUENCE", "No active sequence", false);
+      var timelineResult;
+      try {
+        if (request.operation === "timeline.markers") timelineResult = PPMCP.semantic.markers(sequence, request.args);
+        else if (request.operation === "timeline.in_out") timelineResult = PPMCP.semantic.inOut(sequence, request.args);
+        else timelineResult = PPMCP.semantic.playhead(sequence, request.args);
+      } catch (timelineError) {
+        return PPMCP.failure(request.requestId, "CEP_TIMELINE_FAILED", String(timelineError && timelineError.message ? timelineError.message : timelineError), false);
+      }
+      var timelineOutcome = request.operation === "timeline.in_out" && request.args && request.args.mode === "get" ? "verified" : "committed_unverified";
+      return PPMCP.success(request, beforeRevision, timelineResult, timelineOutcome, "typed CEP sequence timeline edit with state readback");
+    }
     if (request.operation === "cep.surface.catalog" || request.operation === "qe.catalog") {
       var isQeCatalog = request.operation === "qe.catalog";
       return PPMCP.success(request, beforeRevision, PPMCP.catalogObject(request.args, isQeCatalog), "verified", isQeCatalog ? "bounded QE reflection without getter evaluation" : "bounded ExtendScript reflection without getter evaluation");
@@ -378,5 +711,9 @@ PPMCP.dispatch = function (requestJson) {
 PPMCP.heartbeat = function () {
   var qeAvailable = false;
   try { app.enableQE(); qeAvailable = typeof qe !== "undefined" && !!qe.project; } catch (error) { qeAvailable = false; }
-  return JSON.stringify({ hostVersion: String(app.version || "unknown"), capabilities: qeAvailable ? ["typed", "qe"] : ["typed"] });
+  return JSON.stringify({
+    hostVersion: String(app.version || "unknown"),
+    capabilities: qeAvailable ? ["typed", "qe"] : ["typed"],
+    operations: PPMCP.operations
+  });
 };

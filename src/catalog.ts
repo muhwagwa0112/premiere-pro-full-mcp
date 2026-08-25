@@ -9,6 +9,13 @@ const projectPath = z.object({ path: z.string().min(1).max(4096) }).strict();
 const mediaImport = z.object({ paths: z.array(z.string().min(1).max(4096)).min(1).max(128) }).strict();
 const sequenceFromMedia = z.object({ name: z.string().min(1).max(256), projectItemIds: z.array(z.string().min(1).max(256)).min(1).max(128) }).strict();
 const effectAction = z.object({ clipId: z.string().min(1), effectId: z.string().min(1), parameters: z.record(z.string(), z.unknown()).optional() }).strict();
+const clipMove = z.object({ clipId: z.string().min(1), targetTimeSeconds: z.number().nonnegative(), targetVideoTrackIndex: z.number().int().nonnegative().optional(), targetAudioTrackIndex: z.number().int().nonnegative().optional() }).strict();
+const clipDelete = z.object({ clipIds: z.array(z.string().min(1)).min(1).max(256) }).strict();
+const rippleEdit = z.object({ clipIds: z.array(z.string().min(1)).min(1).max(256), mode: z.enum(["ripple", "lift", "extract"]).default("ripple") }).strict();
+const linkGroup = z.object({ clipIds: z.array(z.string().min(1)).min(2).max(256), mode: z.enum(["link", "unlink", "group", "ungroup"]).default("link") }).strict();
+const markerArgs = z.object({ timeSeconds: z.number().nonnegative().optional(), durationSeconds: z.number().nonnegative().optional(), name: z.string().min(1).max(256).optional(), comment: z.string().max(1024).optional(), type: z.enum(["comment", "chapter", "segmentation", "flash"]).default("comment"), mode: z.enum(["add", "list", "remove"]).default("list") }).strict();
+const inOutArgs = z.object({ inSeconds: z.number().nonnegative().optional(), outSeconds: z.number().nonnegative().optional(), mode: z.enum(["set", "clear", "get"]).default("get") }).strict();
+const playheadArgs = z.object({ timeSeconds: z.number().nonnegative().optional(), mode: z.enum(["get", "set"]).default("get") }).strict();
 const exportFrame = z.object({ outputPath: z.string().min(1).max(4096), timeSeconds: z.number().nonnegative() }).strict();
 const exportSequence = z.object({ outputPath: z.string().min(1).max(4096), presetPath: z.string().min(1).max(4096), overwrite: z.boolean().default(false) }).strict();
 const workspaceSet = z.object({ name: z.string().min(1).max(128) }).strict();
@@ -159,9 +166,39 @@ const actions: ActionDescriptor[] = [
     verification: "sequence count and active sequence identity readback", support: "implemented_unverified", argsSchema: sequenceFromMedia,
   },
   {
-    id: "timeline.ripple_delete", domain: "timeline", title: "Ripple delete", description: "Experimental QE-backed ripple delete with boundary verification.",
+    id: "timeline.ripple_delete", domain: "timeline", title: "Ripple delete, lift, and extract", description: "QE-backed ripple delete, lift, or extract of one or more clips with boundary verification.",
     risk: "R2", authority: "experimental", preferredBackends: ["qe"], minimumPremiereVersion: "26.3.2", mutatesProject: true, undoable: true,
-    verification: "sequence structure readback", support: "experimental", argsSchema: z.object({ clipId: z.string().min(1) }).strict(),
+    verification: "sequence structure readback", support: "experimental", argsSchema: rippleEdit,
+  },
+  {
+    id: "timeline.clip.move", domain: "timeline", title: "Move or copy clip", description: "Move (or copy) a clip to a new time and/or track via QE-backed transactional sequencing.",
+    risk: "R2", authority: "experimental", preferredBackends: ["qe"], minimumPremiereVersion: "26.3.2", mutatesProject: true, undoable: true,
+    verification: "clip position and track readback", support: "experimental", argsSchema: clipMove,
+  },
+  {
+    id: "timeline.clip.delete", domain: "timeline", title: "Delete clips", description: "Delete one or more clips from the timeline with boundary verification.",
+    risk: "R2", authority: "experimental", preferredBackends: ["qe"], minimumPremiereVersion: "26.3.2", mutatesProject: true, undoable: true,
+    verification: "track clip count readback", support: "experimental", argsSchema: clipDelete,
+  },
+  {
+    id: "timeline.clip.link_group", domain: "timeline", title: "Link/unlink/group/ungroup clips", description: "Create or break link/group relationships between selected clips.",
+    risk: "R1", authority: "edit", preferredBackends: ["qe"], minimumPremiereVersion: "26.3.2", mutatesProject: true, undoable: true,
+    verification: "link/group state readback", support: "experimental", argsSchema: linkGroup,
+  },
+  {
+    id: "timeline.markers", domain: "timeline", title: "Sequence markers", description: "Add, list, or remove sequence markers at a bounded timeline time.",
+    risk: "R1", authority: "edit", preferredBackends: ["uxp", "cep"], minimumPremiereVersion: "26.3.0", mutatesProject: true, undoable: true,
+    verification: "marker collection readback", support: "implemented_unverified", argsSchema: markerArgs,
+  },
+  {
+    id: "timeline.in_out", domain: "timeline", title: "Sequence in/out points", description: "Get, set, or clear the active sequence in/out points.",
+    risk: "R1", authority: "edit", preferredBackends: ["uxp", "cep"], minimumPremiereVersion: "26.3.0", mutatesProject: true, undoable: true,
+    verification: "exact in/out time readback", support: "implemented_unverified", argsSchema: inOutArgs,
+  },
+  {
+    id: "timeline.playhead", domain: "timeline", title: "Playhead position", description: "Read or set the active sequence playhead position.",
+    risk: "R1", authority: "edit", preferredBackends: ["uxp", "cep"], minimumPremiereVersion: "26.3.0", mutatesProject: false, undoable: false,
+    verification: "playhead time readback", support: "implemented_unverified", argsSchema: playheadArgs,
   },
   {
     id: "effects.catalog", domain: "effects_audio", title: "List effects and transitions", description: "Discover first- and third-party effects and transitions from the host.",
@@ -170,8 +207,8 @@ const actions: ActionDescriptor[] = [
   },
   {
     id: "effects.apply", domain: "effects_audio", title: "Apply effect", description: "Apply a discovered effect and read back the component chain.",
-    risk: "R1", authority: "edit", preferredBackends: ["uxp", "cep"], minimumPremiereVersion: "26.3.0", mutatesProject: true, undoable: true,
-    verification: "component chain readback", support: "unsupported", argsSchema: effectAction,
+    risk: "R2", authority: "experimental", preferredBackends: ["qe"], minimumPremiereVersion: "26.3.2", mutatesProject: true, undoable: true,
+    verification: "component chain readback", support: "experimental", argsSchema: effectAction,
   },
   {
     id: "captions.inspect", domain: "text_captions", title: "Inspect captions", description: "Read caption-track structure without transcript content.",

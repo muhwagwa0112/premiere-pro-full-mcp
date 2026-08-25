@@ -827,13 +827,12 @@
     "featureId": "effects.apply",
     "domain": "public-effects_audio",
     "title": "Apply effect",
-    "status": "UNSUPPORTED",
+    "status": "PREVIEW_ONLY",
     "backends": [
-      "uxp",
-      "cep"
+      "qe"
     ],
-    "risk": "R1",
-    "minimumPremiereVersion": "26.3.0",
+    "risk": "R2",
+    "minimumPremiereVersion": "26.3.2",
     "maximumPremiereVersion": null,
     "preconditions": [
       "connected host session"
@@ -2628,13 +2627,12 @@
     "featureId": "timeline.clip.delete",
     "domain": "sequence-track-clip",
     "title": "Delete clips",
-    "status": "UNVERIFIED",
+    "status": "PREVIEW_ONLY",
     "backends": [
-      "uxp",
       "qe"
     ],
     "risk": "R2",
-    "minimumPremiereVersion": "26.3.0",
+    "minimumPremiereVersion": "26.3.2",
     "maximumPremiereVersion": null,
     "preconditions": [
       "active disposable sequence",
@@ -2677,6 +2675,28 @@
     ]
   },
   {
+    "featureId": "timeline.clip.link_group",
+    "domain": "public-timeline",
+    "title": "Link/unlink/group/ungroup clips",
+    "status": "PREVIEW_ONLY",
+    "backends": [
+      "qe"
+    ],
+    "risk": "R1",
+    "minimumPremiereVersion": "26.3.2",
+    "maximumPremiereVersion": null,
+    "preconditions": [
+      "connected host session"
+    ],
+    "verification": [
+      "link/group state readback"
+    ],
+    "fixture": null,
+    "limitations": [
+      "Public action is registered from the catalog; live v0.3 evidence has not been recorded."
+    ]
+  },
+  {
     "featureId": "timeline.clip.link_group_nest",
     "domain": "sequence-track-clip",
     "title": "Link, group, and nest clips",
@@ -2699,6 +2719,28 @@
     "fixture": null,
     "limitations": [
       "No live v0.3 evidence has been recorded for this feature family."
+    ]
+  },
+  {
+    "featureId": "timeline.clip.move",
+    "domain": "public-timeline",
+    "title": "Move or copy clip",
+    "status": "PREVIEW_ONLY",
+    "backends": [
+      "qe"
+    ],
+    "risk": "R2",
+    "minimumPremiereVersion": "26.3.2",
+    "maximumPremiereVersion": null,
+    "preconditions": [
+      "connected host session"
+    ],
+    "verification": [
+      "clip position and track readback"
+    ],
+    "fixture": null,
+    "limitations": [
+      "Public action is registered from the catalog; live v0.3 evidence has not been recorded."
     ]
   },
   {
@@ -2780,7 +2822,7 @@
     "featureId": "timeline.in_out",
     "domain": "sequence-track-clip",
     "title": "Sequence in and out points",
-    "status": "PREVIEW_ONLY",
+    "status": "SUPPORTED_CONTEXTUAL",
     "backends": [
       "uxp",
       "cep"
@@ -2804,7 +2846,7 @@
     "featureId": "timeline.markers",
     "domain": "sequence-track-clip",
     "title": "Sequence and clip markers",
-    "status": "PREVIEW_ONLY",
+    "status": "SUPPORTED_CONTEXTUAL",
     "backends": [
       "uxp",
       "cep"
@@ -2828,7 +2870,7 @@
     "featureId": "timeline.playhead",
     "domain": "sequence-track-clip",
     "title": "Playhead positioning",
-    "status": "PREVIEW_ONLY",
+    "status": "SUPPORTED_CONTEXTUAL",
     "backends": [
       "uxp",
       "cep"
@@ -2851,7 +2893,7 @@
   {
     "featureId": "timeline.ripple_delete",
     "domain": "public-timeline",
-    "title": "Ripple delete",
+    "title": "Ripple delete, lift, and extract",
     "status": "PREVIEW_ONLY",
     "backends": [
       "qe"

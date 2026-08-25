@@ -51,7 +51,7 @@ describe("UXP bridge deployment contract", () => {
 
   it("connects with one button, automatic mutual authentication, and no user token or bootstrap picker", async () => {
     const source = await readFile(resolve("uxp-plugin/main.cjs"), "utf8");
-    expect(source).toContain('new WebSocket("ws://localhost:17777/uxp")');
+    expect(source).toContain("new WebSocket(`ws://localhost:${identity.bridgePort}/uxp`)");
     expect(source).toContain('type: "hello", protocolVersion: 3');
     expect(source).toContain('type: "connect", protocolVersion: 3');
     expect(source).toContain("localFileSystem.getDataFolder()");

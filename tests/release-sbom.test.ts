@@ -51,14 +51,17 @@ describe("release SBOM", () => {
     ]);
     const outputText = readFileSync(outputPath, "utf8");
     const output = JSON.parse(outputText);
+    const packageJson = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8")) as { name: string; version: string };
+    const mainId = `SPDXRef-Package-${packageJson.name}-${packageJson.version}`;
     expect(outputText).not.toContain("D:\\\\PP_MCP");
     expect(outputText).not.toContain("SPDXRef-DocumentRoot-");
     expect(output.packages.some((item: { name: string }) => item.name === "example-dependency")).toBe(true);
     expect(output.files.map((item: { fileName: string }) => item.fileName).sort()).toEqual(["payload.txt"]);
     expect(output.relationships).toContainEqual({
-      spdxElementId: "SPDXRef-Package-premiere-pro-full-mcp-0.3.0",
+      spdxElementId: mainId,
       relationshipType: "DEPENDS_ON",
       relatedSpdxElement: "SPDXRef-Package-example-dependency",
     });
+    expect(output.documentDescribes).toContain(mainId);
   });
 });

@@ -7,6 +7,7 @@ import { JobEngine } from "./workflows/job-engine.js";
 import { jobPlanInputSchema } from "./workflows/job-contracts.js";
 import { listFeatureRegistry } from "./features/registry.js";
 import { buildPostProductionJobPlanInput } from "./features/program/workflows.js";
+import type { FlowRunner } from "./flows/flow-runner.js";
 
 const jsonRecord = z.record(z.string(), z.unknown());
 const actionInputShape = {
@@ -30,8 +31,8 @@ function normalizeRequest(input: Record<string, unknown>): Record<string, unknow
   return { ...input, args: input.args ?? {} };
 }
 
-export function createServer(engine: OperationEngine, jobs?: JobEngine): McpServer {
-  const server = new McpServer({ name: "premiere-pro-full-mcp", version: "0.3.0" });
+export function createServer(engine: OperationEngine, jobs?: JobEngine, flows?: FlowRunner): McpServer {
+  const server = new McpServer({ name: "premiere-pro-full-mcp", version: "0.4.0" });
   let jobEngine = jobs;
   const durableJobs = () => jobEngine ??= new JobEngine(engine);
 
@@ -137,6 +138,76 @@ export function createServer(engine: OperationEngine, jobs?: JobEngine): McpServ
       return textResult({ status: "failed", error: { code: "JOB_REQUEST_REJECTED", message: (error as Error).message } });
     }
   });
+
+  if (flows) {
+    server.registerTool("premiere_flows", {
+      title: "Watch & Run flow lifecycle",
+      description: "Plan and execute a linear flow of Premiere operations with no approval dialog. Each step is an independent undo unit; the observer watches the editor change in real time via premiere_progress and premiere_watch. Automatic checkpoints protect mutations without asking for approval.",
+      inputSchema: {
+        mode: z.enum(["plan", "exec", "status", "stop", "progress"]),
+        flow: z.object({
+          flowId: z.uuid().optional(),
+          name: z.string().min(1).max(200).optional(),
+          paceMs: z.number().int().nonnegative().max(60_000).optional(),
+          steps: z.array(z.object({
+            stepId: z.string().min(1).max(128).regex(/^[A-Za-z0-9._:-]+$/),
+            actionId: z.string().min(3).max(128),
+            label: z.string().min(1).max(200).optional(),
+            args: z.record(z.string(), z.unknown()).default({}),
+            target: z.record(z.string(), z.unknown()).optional(),
+            expectedRevision: z.string().min(1).max(256).regex(/^[A-Za-z0-9._:-]+$/).optional(),
+          })).min(1).max(128),
+        }).optional(),
+        flowId: z.string().min(1).max(128).optional(),
+        afterEventId: z.string().min(1).max(128).optional(),
+      },
+      annotations: { openWorldHint: false },
+    }, async ({ mode, flow, flowId, afterEventId }) => {
+      try {
+        if (mode === "plan") {
+          if (!flow) throw new Error("flow is required for plan");
+          return textResult({ ...(await flows.plan(flow)) });
+        }
+        if (!flowId) throw new Error("flowId is required");
+        if (mode === "exec") return textResult({ ...(await flows.run(flowId)) });
+        if (mode === "status") return textResult({ ...(await flows.status(flowId)) });
+        if (mode === "stop") return textResult({ ...(await flows.stop(flowId)) });
+        return textResult({ ...(await flows.progress(afterEventId ? { afterEventId } : {})) });
+      } catch (error) {
+        return textResult({ status: "failed", error: { code: "FLOW_REQUEST_REJECTED", message: (error as Error).message } });
+      }
+    });
+
+    server.registerTool("premiere_watch", {
+      title: "Watch current Premiere state",
+      description: "Return a current snapshot of the active project and/or sequence so the observer can see what changed after a flow step, without any approval dialog.",
+      inputSchema: { scope: z.enum(["host", "project", "sequence", "captions"]).default("sequence") },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    }, async ({ scope }) => {
+      try {
+        const request = { actionId: scope === "host" ? "host.inspect" : scope === "captions" ? "captions.inspect" : scope === "project" ? "project.inspect" : "sequence.inspect", args: scope === "project" ? { scope: "project" } : {} };
+        return textResult({ ...(await engine.execute(request)) });
+      } catch (error) {
+        return textResult({ status: "failed", error: { code: "WATCH_READ_FAILED", message: (error as Error).message } });
+      }
+    });
+
+    server.registerTool("premiere_progress", {
+      title: "Read flow progress events",
+      description: "Drain buffered flow step events (queued/executing/committed/reverted) since the last cursor, so the Watch & Run observer can relay what the editor just did.",
+      inputSchema: {
+        flowId: z.string().min(1).max(128).optional(),
+        afterEventId: z.string().min(1).max(128).optional(),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    }, async ({ afterEventId }) => {
+      try {
+        return textResult({ ...(await flows.progress(afterEventId ? { afterEventId } : {})) });
+      } catch (error) {
+        return textResult({ status: "failed", error: { code: "PROGRESS_READ_FAILED", message: (error as Error).message } });
+      }
+    });
+  }
 
   server.registerResource("premiere-capabilities", "premiere://capabilities", {
     title: "Premiere capability catalog",

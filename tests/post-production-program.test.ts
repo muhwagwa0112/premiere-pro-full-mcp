@@ -73,7 +73,7 @@ describe("post-production program contracts", () => {
     expect(postProductionProgram.every((feature) => feature.evidenceState === "none")).toBe(true);
     expect(postProductionProgram.every((feature) => !(["verified", "verified_automated"] as string[]).includes(feature.availability))).toBe(true);
     expect(postProductionProgram.filter((feature) => feature.availability === "handler_unverified").map((feature) => feature.actionId).sort()).toEqual([
-      "captions.inspect", "effects.catalog", "export.frame", "export.sequence",
+      "captions.inspect", "effects.apply", "effects.catalog", "export.frame", "export.sequence",
     ]);
   });
 

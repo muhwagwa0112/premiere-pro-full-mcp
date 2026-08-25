@@ -3,6 +3,7 @@ import { access, readFile, readdir } from "node:fs/promises";
 import { constants } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { homedir } from "node:os";
+import { runtimeConfig } from "./config.js";
 
 export interface InstalledPlugin {
   id: string;
@@ -88,7 +89,9 @@ async function parseManifest(path: string, kind: "cep" | "uxp"): Promise<Install
 export async function collectLocalInventory(): Promise<LocalInventory> {
   const programFiles = process.env.ProgramFiles ?? "C:\\Program Files";
   const appData = process.env.APPDATA ?? join(homedir(), "AppData", "Roaming");
-  const premiereRoot = join(programFiles, "Adobe", "Adobe Premiere Pro 2026");
+  // The host root can be overridden for other install locations; the default
+  // is the standard Adobe folder for the current product family.
+  const premiereRoot = process.env.PREMIERE_MCP_PREMIERE_ROOT ?? join(programFiles, "Adobe", runtimeConfig.product);
   const executable = join(premiereRoot, "Adobe Premiere Pro.exe");
   const effectRoots = [
     join(premiereRoot, "PlugIns"),
@@ -134,12 +137,12 @@ export async function collectLocalInventory(): Promise<LocalInventory> {
   };
   const warnings: string[] = [];
   if (effectPaths.length >= MAX_DISCOVERED_FILES) warnings.push("Effect scan reached its safety limit");
-  if (!(await exists(executable))) warnings.push("Adobe Premiere Pro 2026 executable was not found");
+  if (!(await exists(executable))) warnings.push(`${runtimeConfig.product} executable was not found`);
   return {
     generatedAt: new Date().toISOString(),
     platform: process.platform,
     architecture: process.arch,
-    supportedHost: { product: "Adobe Premiere Pro 2026", expectedVersion: "26.3.2", executablePresent: await exists(executable) },
+    supportedHost: { product: runtimeConfig.product, expectedVersion: runtimeConfig.minimumHostVersion, executablePresent: await exists(executable) },
     plugins: unique,
     counts,
     revision,

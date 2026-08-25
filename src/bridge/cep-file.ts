@@ -13,9 +13,6 @@ import { hasValidEffectiveRequestBinding, routeBindingFromProbe, sameRouteBindin
 // old bridge session indefinitely.
 const heartbeatMaxAgeMs = 60_000;
 
-const cepOperations = ["host.inspect", "project.inspect", "sequence.inspect", "project.create", "project.save", "project.checkpoint", "project.open", "media.import", "timeline.sequence.create_from_media", "export.sequence", "workspace.set", "cep.surface.catalog", "cep.read", "cep.edit", "cep.filesystem", "cep.destructive"] as const;
-const qeOperations = ["host.inspect", "project.inspect", "sequence.inspect", "qe.catalog", "qe.read", "qe.edit", "qe.destructive"] as const;
-
 function defaultBridgeDirectory(): string {
   const localAppData = process.env.LOCALAPPDATA;
   return join(localAppData && localAppData.length > 0 ? localAppData : join(homedir(), "AppData", "Local"), "PremiereMCP", "cep-public-v1");
@@ -50,7 +47,7 @@ export class CepFileAdapter implements BackendAdapter {
   async probe(): Promise<BackendProbe> {
     try {
       await this.cleanupStaleQueueFiles();
-      const heartbeat = JSON.parse(await readFile(join(this.#directory, "heartbeat.json"), "utf8")) as { timestamp?: number; hostVersion?: string; capabilities?: string[]; nonce?: string; sessionId?: string; signature?: string };
+      const heartbeat = JSON.parse(await readFile(join(this.#directory, "heartbeat.json"), "utf8")) as { timestamp?: number; hostVersion?: string; capabilities?: string[]; operations?: { typed?: string[]; qe?: string[] }; nonce?: string; sessionId?: string; signature?: string };
       if (!heartbeat.timestamp || Date.now() - heartbeat.timestamp > heartbeatMaxAgeMs) return this.unavailableProbe("CEP heartbeat is stale");
       if (heartbeat.timestamp > Date.now() + 5_000 || typeof heartbeat.nonce !== "string" || typeof heartbeat.sessionId !== "string") return this.unavailableProbe("CEP heartbeat timestamp or session is invalid");
       const { signature, ...unsigned } = heartbeat;
@@ -58,11 +55,20 @@ export class CepFileAdapter implements BackendAdapter {
       if (this.backend === "qe" && !heartbeat.capabilities?.includes("qe")) return this.unavailableProbe("CEP host did not advertise QE capability");
       this.#sessionId = heartbeat.sessionId;
       this.#hostVersion = heartbeat.hostVersion ?? null;
-      const operations = this.backend === "qe"
-        ? qeOperations
-        : heartbeat.capabilities?.includes("typed") ? cepOperations : [];
+      // The host dispatcher is the single source of truth for operations; the
+      // server never hardcodes a CEP/QE allowlist that could drift from it.
+      let operations: string[];
+      if (this.backend === "qe") {
+        const advertisedQe = heartbeat.operations?.qe instanceof Array ? heartbeat.operations.qe : [];
+        operations = heartbeat.capabilities?.includes("qe") ? advertisedQe : [];
+      } else {
+        const advertisedCep = heartbeat.operations?.typed instanceof Array ? heartbeat.operations.typed : [];
+        operations = heartbeat.capabilities?.includes("typed") ? advertisedCep : [];
+      }
       this.#operations = new Set(operations);
-      this.#capabilityFingerprint = createHash("sha256").update(JSON.stringify({ backend: this.backend, capabilities: [...(heartbeat.capabilities ?? [])].sort(), operations })).digest("hex");
+      // Fingerprint must match the bridge's own computation (sorted keys) so
+      // route bindings stay comparable across the signing boundary.
+      this.#capabilityFingerprint = createHash("sha256").update(JSON.stringify({ backend: this.backend, capabilities: [...(heartbeat.capabilities ?? [])].sort(), operations: [...operations].sort() })).digest("hex");
       return {
         backend: this.backend,
         available: true,

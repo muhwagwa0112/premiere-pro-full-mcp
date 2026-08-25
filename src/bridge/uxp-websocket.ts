@@ -1,13 +1,14 @@
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { homedir } from "node:os";
-import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { lstat, realpath, stat } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { lstat, mkdir, realpath, stat, writeFile } from "node:fs/promises";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { IncomingMessage } from "node:http";
 import type { BackendAdapter, BackendProbe, BridgeRequest, BridgeResponse, DispatchState, SupportDecision } from "../contracts.js";
 import { hasValidEffectiveRequestBinding, routeBindingFromProbe, sameRouteBinding } from "../security/execution-plan.js";
 import { loadAdobeApiCatalog } from "../adobe-api-catalog.js";
 import { brokerProvisionUxpAuthentication, type UxpAuthenticationIdentity } from "../security/hmac-broker.js";
+import { runtimeConfig } from "../config.js";
 
 interface HelloMessage {
   type: "hello";
@@ -28,6 +29,7 @@ interface ConnectMessage {
 }
 
 const AUTH_FILE_NAME = "premiere-mcp-bridge-key-v1";
+export const BRIDGE_SETTINGS_FILE_NAME = "bridge-settings-v1.json";
 const UXP_PLUGIN_ID = "com.codex.premiere-pro-full-mcp";
 
 function authenticationTranscript(role: "client" | "server", clientNonce: string, serverNonce: string, apiFingerprint: string): string {
@@ -98,8 +100,8 @@ export class UxpWebSocketAdapter implements BackendAdapter {
   readonly #failedHandshakesByAddress = new Map<string, number[]>();
   #authenticationIdentity: UxpAuthenticationIdentity | null = null;
 
-  constructor(port = Number.parseInt(process.env.PREMIERE_MCP_UXP_PORT ?? "17777", 10), authRoot = join(process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"), "Adobe", "UXP", "PluginsStorage", "PPRO"), provisionAuthentication: () => Promise<UxpAuthenticationIdentity> = brokerProvisionUxpAuthentication) {
-    this.#port = Number.isInteger(port) && port > 1024 && port < 65536 ? port : 17777;
+  constructor(port = runtimeConfig.uxpPort, authRoot = join(process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"), "Adobe", "UXP", runtimeConfig.uxpPluginsStorage), provisionAuthentication: () => Promise<UxpAuthenticationIdentity> = brokerProvisionUxpAuthentication) {
+    this.#port = Number.isInteger(port) && port > 1024 && port < 65536 ? port : runtimeConfig.uxpPort;
     this.#authRoot = resolve(authRoot);
     this.#provisionAuthentication = provisionAuthentication;
   }
@@ -111,6 +113,17 @@ export class UxpWebSocketAdapter implements BackendAdapter {
       ...provisionedIdentity,
       authFilePath: await realpath(provisionedIdentity.authFilePath),
     };
+    // The UXP panel sandbox cannot read process environment variables, so the
+    // server publishes the local bridge port into the same plug-in data folder
+    // where the panel already reads its authentication key. This removes the
+    // hardcoded 17777 from the panel and keeps config as the single source.
+    const pluginDataDirectory = dirname(this.#authenticationIdentity.authFilePath);
+    await mkdir(pluginDataDirectory, { recursive: true });
+    await writeFile(
+      join(pluginDataDirectory, BRIDGE_SETTINGS_FILE_NAME),
+      `${JSON.stringify({ schemaVersion: 1, port: this.#port })}\n`,
+      { encoding: "utf8" },
+    );
     this.#apiFingerprint = (await loadAdobeApiCatalog()).fingerprint;
     await new Promise<void>((resolve, reject) => {
       const server = new WebSocketServer({

@@ -3,9 +3,11 @@ const uxp = require("uxp");
 const API_CATALOG = require("./api-catalog.cjs");
 const { AUTH_FILE_NAME, authenticationTranscript, constantTimeHexEqual, hmacSha256Hex, randomHex } = require("./auth.cjs");
 
+const BRIDGE_SETTINGS_FILE_NAME = "bridge-settings-v1.json";
+
 const CAPABILITIES = [
   "host.inspect", "project.inspect", "sequence.inspect", "project.save", "project.close_disposable", "project.checkpoint", "captions.inspect",
-  "media.relink", "media.proxy.attach", "timeline.track.set_mute", "timeline.clip.insert",
+  "media.relink", "media.proxy.attach", "timeline.track.set_mute", "timeline.clip.insert", "timeline.markers", "timeline.in_out", "timeline.playhead",
   "export.frame", "export.sequence",
   "uxp.catalog", "uxp.read", "uxp.edit", "uxp.sensitive", "uxp.filesystem", "uxp.destructive", "uxp.handle.release",
   "uxp.page.read", "uxp.transaction.execute", "uxp.locked.batch", "uxp.events.subscribe", "uxp.events.poll", "uxp.events.unsubscribe"
@@ -35,12 +37,24 @@ async function bridgeIdentity() {
   bridgeIdentityPromise = (async () => {
     const localFileSystem = uxp.storage.localFileSystem;
     const dataFolder = await localFileSystem.getDataFolder();
+    // The server publishes the local bridge port into this same plug-in data
+    // folder, so the panel never hardcodes a listener port.
+    let bridgePort = 17777;
+    try {
+      const settingsFile = await dataFolder.getEntry(BRIDGE_SETTINGS_FILE_NAME);
+      const settings = JSON.parse(String(await settingsFile.read()));
+      const candidatePort = settings && typeof settings.port === "number" ? settings.port : 0;
+      if (Number.isInteger(candidatePort) && candidatePort > 0 && candidatePort < 65536) bridgePort = candidatePort;
+    } catch (_) {
+      // Fall back to the default port if the settings file has not been
+      // published yet; the server still owns the authoritative value.
+    }
     const keyFile = await dataFolder.getEntry(AUTH_FILE_NAME);
     const secret = String(await keyFile.read()).trim().toLowerCase();
     if (!/^[a-f0-9]{64}$/.test(secret)) throw new Error("Local authentication data is invalid");
     const authFilePath = localFileSystem.getNativePath(keyFile);
     if (typeof authFilePath !== "string" || !authFilePath) throw new Error("UXP authentication data path is unavailable");
-    return { authFilePath, secret, keyFile };
+    return { authFilePath, secret, keyFile, bridgePort };
   })().catch((error) => {
     bridgeIdentityPromise = null;
     throw error;
@@ -724,6 +738,65 @@ async function execute(operation, args, expectedRevision) {
       throw Object.assign(new Error(`Insert outcome could not be verified after dispatch: ${String(error && error.message || error)}`), { code: insertDispatched ? "UXP_INSERT_NOT_VERIFIED" : "UXP_INSERT_FAILED" });
     }
   }
+  if (operation === "timeline.markers") {
+    if (!context.sequence) throw Object.assign(new Error("No active sequence"), { code: "UXP_NO_ACTIVE_SEQUENCE" });
+    const mode = args && args.mode ? String(args.mode) : "list";
+    const markMethods = { add: ["addMarker", context.sequence], list: ["getMarkers", context.sequence], remove: ["removeMarker", context.sequence] };
+    const methodName = markMethods[mode] && markMethods[mode][0];
+    const owner = markMethods[mode] && markMethods[mode][1];
+    if (!methodName || !owner || typeof owner[methodName] !== "function") throw Object.assign(new Error(`Sequence marker API is unavailable for mode ${mode}`), { code: "UXP_MARKER_API_UNAVAILABLE" });
+    let result;
+    if (mode === "add") {
+      const time = ppro.TickTime.createWithSeconds(Number(args.timeSeconds) || 0);
+      const duration = args.durationSeconds ? ppro.TickTime.createWithSeconds(Number(args.durationSeconds)) : null;
+      result = typeof owner.addMarker === "function" && duration
+        ? await owner.addMarker(time, args.name ? String(args.name) : "", duration)
+        : await owner.addMarker(time, args.name ? String(args.name) : "");
+    } else if (mode === "remove") {
+      const time = ppro.TickTime.createWithSeconds(Number(args.timeSeconds) || 0);
+      result = await owner.removeMarker(time);
+    } else {
+      result = await owner.getMarkers();
+    }
+    const after = await activeContext();
+    return { beforeRevision, afterRevision: await snapshotRevision(after.project, after.sequence), verification: { outcome: "verified", method: "sequence marker collection readback" }, result: { mode, markerCount: Array.isArray(result) ? result.length : undefined, markers: Array.isArray(result) ? result.map((marker) => ({ name: String(marker && marker.name || ""), type: String(marker && marker.type || "") })).slice(0, 200) : result } };
+  }
+  if (operation === "timeline.in_out") {
+    if (!context.sequence) throw Object.assign(new Error("No active sequence"), { code: "UXP_NO_ACTIVE_SEQUENCE" });
+    const mode = args && args.mode ? String(args.mode) : "get";
+    const hasIn = typeof context.sequence.setInPoint === "function";
+    const hasOut = typeof context.sequence.setOutPoint === "function";
+    if (mode !== "get" && (!hasIn || !hasOut)) throw Object.assign(new Error("Sequence in/out point API is unavailable"), { code: "UXP_IN_OUT_API_UNAVAILABLE" });
+    let inSeconds = null;
+    let outSeconds = null;
+    if (mode === "set") {
+      if (typeof args.inSeconds === "number" && hasIn) await context.sequence.setInPoint(ppro.TickTime.createWithSeconds(args.inSeconds));
+      if (typeof args.outSeconds === "number" && hasOut) await context.sequence.setOutPoint(ppro.TickTime.createWithSeconds(args.outSeconds));
+    } else if (mode === "clear") {
+      if (hasIn) await context.sequence.clearInPoint();
+      if (hasOut) await context.sequence.clearOutPoint();
+    }
+    const getIn = typeof context.sequence.getInPoint === "function" ? await context.sequence.getInPoint() : null;
+    const getOut = typeof context.sequence.getOutPoint === "function" ? await context.sequence.getOutPoint() : null;
+    inSeconds = getIn && typeof getIn.seconds === "number" ? getIn.seconds : inSeconds;
+    outSeconds = getOut && typeof getOut.seconds === "number" ? getOut.seconds : outSeconds;
+    const after = await activeContext();
+    return { beforeRevision, afterRevision: await snapshotRevision(after.project, after.sequence), verification: { outcome: mode === "get" ? "verified" : "verified", method: "sequence in/out point readback" }, result: { mode, inSeconds, outSeconds } };
+  }
+  if (operation === "timeline.playhead") {
+    if (!context.sequence) throw Object.assign(new Error("No active sequence"), { code: "UXP_NO_ACTIVE_SEQUENCE" });
+    const mode = args && args.mode ? String(args.mode) : "get";
+    if (mode === "set") {
+      if (typeof context.sequence.setPlayerPosition !== "function") throw Object.assign(new Error("Sequence setPlayerPosition API is unavailable"), { code: "UXP_PLAYHEAD_API_UNAVAILABLE" });
+      if (typeof args.timeSeconds !== "number" || !Number.isFinite(args.timeSeconds) || args.timeSeconds < 0) throw Object.assign(new Error("A non-negative playhead time is required"), { code: "UXP_INVALID_PLAYHEAD_TIME" });
+      await context.sequence.setPlayerPosition(ppro.TickTime.createWithSeconds(args.timeSeconds));
+    } else if (typeof context.sequence.getPlayerPosition !== "function") {
+      throw Object.assign(new Error("Sequence getPlayerPosition API is unavailable"), { code: "UXP_PLAYHEAD_API_UNAVAILABLE" });
+    }
+    const position = await context.sequence.getPlayerPosition();
+    const playheadSeconds = position && typeof position.seconds === "number" ? position.seconds : null;
+    return { beforeRevision, afterRevision: beforeRevision, verification: { outcome: "verified", method: "sequence player position readback" }, result: { playheadSeconds } };
+  }
   if (operation === "export.frame") {
     if (!context.sequence) throw Object.assign(new Error("No active sequence"), { code: "UXP_NO_ACTIVE_SEQUENCE" });
     const outputPath = args && args.outputPath;
@@ -795,7 +868,7 @@ async function connect() {
     reconnectTimer = setTimeout(() => { reconnectTimer = null; void connect(); }, 2000);
     return;
   }
-  const candidate = new WebSocket("ws://localhost:17777/uxp");
+  const candidate = new WebSocket(`ws://localhost:${identity.bridgePort}/uxp`);
   socket = candidate;
   const clientNonce = randomHex(32);
   let serverNonce = null;

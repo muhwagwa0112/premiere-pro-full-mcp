@@ -13,6 +13,7 @@ import type { ActionDescriptor } from "./contracts.js";
 import { CheckpointError, checkpointEvidenceBindingDigest, createCheckpoint } from "./workflows/checkpoint.js";
 import { canonicalRecoverableOutputPaths, RecoverableOutput, RecoverableOutputError, type RecoverableOutputPaths } from "./workflows/recoverable-output.js";
 import { verifyCoreSemanticResult } from "./verifiers/core-semantic.js";
+import { runtimeConfig } from "./config.js";
 
 interface AdobeInventorySummary {
   source: unknown;
@@ -122,9 +123,14 @@ export class OperationEngine {
       return [backend, probe] as const;
     }));
     const backends = Object.fromEntries(backendEntries);
+    const liveHost = Object.values(backends).find((probe: BackendProbe) => probe.available && typeof probe.hostVersion === "string" && probe.hostVersion.length > 0) as BackendProbe | undefined;
     return {
-      server: { name: "premiere-pro-full-mcp", version: "0.3.0", transport: "stdio" },
-      target: { product: "Adobe Premiere Pro 2026", version: "26.3.2", platform: "win32" },
+      server: { name: "premiere-pro-full-mcp", version: "0.4.0", transport: "stdio" },
+      target: {
+        product: runtimeConfig.product,
+        version: liveHost?.hostVersion ?? `${runtimeConfig.minimumHostVersion}+`,
+        platform: process.platform,
+      },
       authorities: [...this.#authorities].sort(),
       backends,
       adobeUxpInventory: await adobeInventorySummary(),

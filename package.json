@@ -1,6 +1,6 @@
 {
   "name": "premiere-pro-full-mcp",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "Capability-gated MCP server and UXP/CEP bridges for Adobe Premiere Pro 2026 on Windows.",
   "type": "module",

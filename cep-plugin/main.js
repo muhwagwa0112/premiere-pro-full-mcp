@@ -35,10 +35,20 @@
   var writeCounter = 0;
   var leaderPath = path.join(directory, "bridge-owner.lock");
   var LEADER_LEASE_MS = 60000;
-  var allowed = {
-    cep: { "host.inspect": true, "project.inspect": true, "sequence.inspect": true, "project.create": true, "project.save": true, "project.checkpoint": true, "project.open": true, "media.import": true, "timeline.sequence.create_from_media": true, "export.sequence": true, "workspace.set": true, "cep.surface.catalog": true, "cep.read": true, "cep.edit": true, "cep.filesystem": true, "cep.destructive": true },
-    qe: { "host.inspect": true, "project.inspect": true, "sequence.inspect": true, "qe.catalog": true, "qe.read": true, "qe.edit": true, "qe.destructive": true }
-  };
+  // The command allowlist is no longer hardcoded here. It is derived from the
+  // operations the host dispatcher advertises in PPMCP.operations at startup,
+  // so the bridge and host can never drift apart.
+  var allowed = { cep: {}, qe: {} };
+  function buildAllowlist(operations) {
+    var next = { cep: {}, qe: {} };
+    var typed = operations && operations.typed instanceof Array ? operations.typed : [];
+    var qe = operations && operations.qe instanceof Array ? operations.qe : [];
+    var i;
+    for (i = 0; i < typed.length; i++) if (typeof typed[i] === "string") next.cep[typed[i]] = true;
+    for (i = 0; i < qe.length; i++) if (typeof qe[i] === "string") next.qe[qe[i]] = true;
+    allowed = next;
+  }
+  buildAllowlist({ typed: ["host.inspect", "project.inspect", "sequence.inspect"], qe: ["host.inspect", "project.inspect", "sequence.inspect"] });
   fs.mkdirSync(directory, { recursive: true });
 
   function processIsAlive(pid) {
@@ -170,7 +180,7 @@
   function heartbeat() {
     if (!renewLeadership()) return;
     try {
-      var unsigned = { timestamp: Date.now(), hostVersion: cachedHost.hostVersion, capabilities: cachedHost.capabilities, nonce: base64url(crypto.randomBytes(18)), sessionId: sessionId };
+      var unsigned = { timestamp: Date.now(), hostVersion: cachedHost.hostVersion, capabilities: cachedHost.capabilities, operations: cachedHost.operations, nonce: base64url(crypto.randomBytes(18)), sessionId: sessionId };
       unsigned.signature = sign(unsigned);
       atomicWrite(path.join(directory, "heartbeat.json"), unsigned);
       lastHeartbeatAt = Date.now();
@@ -193,7 +203,7 @@
     if (!verify(withoutSignature(request), request.signature)) throw new Error("Command signature is invalid");
     if (!allowed[request.backend] || !allowed[request.backend][request.operation]) throw new Error("Backend operation is not allowlisted");
     if (request.routeBinding || request.planHash) {
-      var expectedFingerprint = crypto.createHash("sha256").update(JSON.stringify({ backend: request.backend, capabilities: cachedHost.capabilities.slice().sort(), operations: Object.keys(allowed[request.backend]) })).digest("hex");
+      var expectedFingerprint = crypto.createHash("sha256").update(JSON.stringify({ backend: request.backend, capabilities: cachedHost.capabilities.slice().sort(), operations: Object.keys(allowed[request.backend]).sort() })).digest("hex");
       var expectedEffectiveRequestDigest = "sha256:" + crypto.createHash("sha256").update(canonical({ operation: request.operation, args: request.args, expectedRevision: request.expectedRevision || null }), "utf8").digest("hex");
       if (!request.routeBinding || typeof request.planHash !== "string" || !/^sha256:[a-f0-9]{64}$/.test(request.planHash) || request.effectiveRequestDigest !== expectedEffectiveRequestDigest) throw new Error("Command route, plan, or effective request binding is incomplete");
       if (request.routeBinding.backend !== request.backend || String(request.routeBinding.hostVersion || "") !== String(cachedHost.hostVersion || "") || request.routeBinding.hostSessionId !== sessionId || request.routeBinding.capabilityFingerprint !== expectedFingerprint) throw new Error("Command route binding no longer matches this CEP session");
@@ -278,7 +288,8 @@
         return;
       }
       if (started) return;
-      cachedHost = { hostVersion: host.hostVersion, capabilities: host.capabilities.slice(0, 16) };
+      cachedHost = { hostVersion: host.hostVersion, capabilities: host.capabilities.slice(0, 16), operations: host.operations || null };
+      buildAllowlist(cachedHost.operations || { typed: [], qe: [] });
       started = true;
       heartbeat();
       setInterval(heartbeat, 2000);
