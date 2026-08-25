@@ -14,22 +14,11 @@ import { PathPolicy } from "./security/path-policy.js";
 
 const uxp = new UxpWebSocketAdapter();
 // The UXP panel bridge binds a single local port (default 17777). When another
-// instance of this MCP server is already listening there (for example a second
-// Codex thread or CLI), starting would fail with EADDRINUSE and kill this
-// instance before any tool is registered. The panel can only connect to one
-// bridge at a time, so the portable behaviour is: keep this instance alive and
-// truthfully report the UXP backend as unavailable rather than dying at boot.
-try {
-  await uxp.start();
-} catch (error) {
-  const causeMessage = error instanceof Error ? error.message : String(error);
-  const eaddrinuse = causeMessage.includes("EADDRINUSE") || causeMessage.includes("address already in use");
-  if (eaddrinuse) {
-    process.stderr.write(`[premiere-mcp] UXP bridge port is already owned by another instance; continuing with the local UXP backend unavailable (${causeMessage}).\n`);
-  } else {
-    throw error;
-  }
-}
+// instance of this MCP server is already listening there, this instance joins
+// that leader as a relay and shares its live panel session instead of failing
+// at boot. A leader that loses its panel session is replaced transparently the
+// next time a follower connects.
+await uxp.start();
 
 const adapters: BackendAdapter[] = [
   new LocalAdapter(),

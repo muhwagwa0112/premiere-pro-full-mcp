@@ -105,14 +105,16 @@ describe("release packaging contract", () => {
 
   test("multiple MCP instances share the single UXP listener instead of dying at boot", () => {
     const entry = readFileSync(resolve(root, "src", "index.ts"), "utf8");
+    const bridge = readFileSync(resolve(root, "src", "bridge", "uxp-websocket.ts"), "utf8");
     // A second instance must not crash when the UXP bridge port is already owned
-    // by another instance; it degrades to a local-only backend and keeps serving.
+    // by another instance. Instead of degrading to a local-only backend, the new
+    // instance joins the leader as a relay and shares its live panel session.
     expect(entry).toContain("await uxp.start()");
-    expect(entry).toContain('EADDRINUSE');
-    expect(entry).toContain("address already in use");
-    expect(entry).toContain("UXP bridge port is already owned by another instance");
-    expect(entry).toContain("continuing with the local UXP backend unavailable");
-    expect(entry).toContain("throw error");
+    expect(entry).toContain("that leader as a relay and shares its live panel session");
+    expect(bridge).toContain("connectAsFollower");
+    expect(bridge).toContain('role: "relay"');
+    expect(bridge).toContain('"peer-accepted"');
+    expect(bridge).toContain("broadcastPeerUpdate");
   });
 
   test("plugin-marketplace MCP server name matches the installer registration", () => {
@@ -125,8 +127,10 @@ describe("release packaging contract", () => {
     const common = readFileSync(resolve(root, "scripts", "install", "Common.ps1"), "utf8");
     const registration = common.match(/\$script:PpMcpRegistration = '([^']+)'/)?.[1];
     expect(registration).toBeTruthy();
+    if (!registration) throw new Error("Common.ps1 lacks a PpMcpRegistration constant");
     expect(Object.keys(mcpJson.mcpServers)).toEqual([registration]);
     const entry = mcpJson.mcpServers[registration];
+    if (!entry) throw new Error(`MCP server ${registration} is missing from .mcp.json`);
     expect(entry.command).toContain("PremiereMcp.WindowsUiAgent.exe");
     expect(JSON.stringify(entry)).toContain("--launch-mcp");
   });

@@ -231,4 +231,70 @@ describe("UXP websocket bridge", () => {
     expect(code).toBe(1008);
     expect((await adapter.availability()).available).toBe(false);
   });
+
+  it("lets a second instance share the leader's panel session as a relay", async () => {
+    const port = 39000 + Math.floor(Math.random() * 1000);
+    const { adapter, authRoot } = await testAdapter(port);
+    const { socket: panel, sessionId } = await authenticatedSocket(port, authRoot, ["host.inspect", "project.save"]);
+    expect((await adapter.availability()).available).toBe(true);
+
+    // A second adapter tries to bind the same port, fails, and becomes a
+    // follower that relays commands through the leader's panel session.
+    const follower = new UxpWebSocketAdapter(port, authRoot, async () => identities.get(authRoot) ?? (() => { throw new Error("Test UXP authentication identity is missing"); })());
+    adapters.push(follower);
+    await follower.start();
+    const followerProbe = await follower.probe();
+    expect(followerProbe.available).toBe(true);
+    expect(followerProbe.hostVersion).toBe("26.3.2");
+    expect(followerProbe.operations).toContain("host.inspect");
+
+    // A command issued on the follower is forwarded to the leader's panel.
+    const relayedCommand = new Promise<Record<string, unknown>>((resolve) => panel.once("message", (data) => resolve(JSON.parse(data.toString()))));
+    const requestId = crypto.randomUUID();
+    const relayPromise = follower.execute({ protocolVersion: 1, requestId, operation: "host.inspect", args: {} });
+    const sent = await relayedCommand;
+    expect(sent.requestId).toBe(requestId);
+    expect(sent.operation).toBe("host.inspect");
+    expect(sent.sessionId).toBe(sessionId);
+
+    // The panel answers with the leader session id and the follower resolves.
+    panel.send(JSON.stringify({ type: "response", protocolVersion: 1, sessionId, requestId, ok: true, hostVersion: "26.3.2" }));
+    const response = await relayPromise;
+    expect(response.ok).toBe(true);
+    expect(response.hostVersion).toBe("26.3.2");
+    expect(response.dispatchState).toBe("completed");
+  });
+
+  it("returns UXP_UNAVAILABLE from a follower whose leader has no panel session", async () => {
+    const port = 38000 + Math.floor(Math.random() * 1000);
+    const { adapter, authRoot } = await testAdapter(port);
+    const follower = new UxpWebSocketAdapter(port, authRoot, async () => identities.get(authRoot) ?? (() => { throw new Error("Test UXP authentication identity is missing"); })());
+    adapters.push(follower);
+    await follower.start();
+    expect((await follower.probe()).available).toBe(false);
+    const response = await follower.execute({ protocolVersion: 1, requestId: crypto.randomUUID(), operation: "host.inspect", args: {} });
+    expect(response.ok).toBe(false);
+    expect(response.error?.code).toBe("UXP_UNAVAILABLE");
+    adapter.close();
+  });
+
+  it("promotes a follower to leader when the original leader closes", async () => {
+    const port = 37000 + Math.floor(Math.random() * 1000);
+    const { adapter, authRoot } = await testAdapter(port);
+    const follower = new UxpWebSocketAdapter(port, authRoot, async () => identities.get(authRoot) ?? (() => { throw new Error("Test UXP authentication identity is missing"); })());
+    adapters.push(follower);
+    await follower.start();
+    expect((await follower.probe()).available).toBe(false);
+
+    // The leader shuts down; the follower should retry binding the port and
+    // become the new leader.
+    await adapter.close();
+    adapters.splice(adapters.indexOf(adapter), 1);
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    expect((await follower.probe()).available).toBe(false); // no panel session yet
+    // A panel can now connect to the promoted leader.
+    const { socket } = await authenticatedSocket(port, authRoot, ["host.inspect"]);
+    expect((await follower.probe()).available).toBe(true);
+    socket.close();
+  }, 20_000);
 });
