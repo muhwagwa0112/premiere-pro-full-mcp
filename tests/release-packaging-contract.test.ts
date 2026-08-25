@@ -93,6 +93,28 @@ describe("release packaging contract", () => {
     expect(doctor).toContain("$env:PREMIERE_MCP_UXP_PORT");
   });
 
+  test("Doctor accepts the plugin-marketplace registration name as well as the installer name", () => {
+    const doctor = readFileSync(resolve(root, "scripts", "install", "Doctor.ps1"), "utf8");
+    // Both the underscore installer registration and the hyphen plugin-marketplace
+    // registration must be probed, and a failed probe must not surface as output.
+    expect(doctor).toContain('$acceptedNames = @($script:PpMcpRegistration, $script:PpMcpProduct)');
+    expect(doctor).toContain('Read-PpMcpCodexRegistration $candidate');
+    expect(doctor).toContain("Add-Check 'codex-registration'");
+    expect(doctor).toContain("return $null");
+  });
+
+  test("multiple MCP instances share the single UXP listener instead of dying at boot", () => {
+    const entry = readFileSync(resolve(root, "src", "index.ts"), "utf8");
+    // A second instance must not crash when the UXP bridge port is already owned
+    // by another instance; it degrades to a local-only backend and keeps serving.
+    expect(entry).toContain("await uxp.start()");
+    expect(entry).toContain('EADDRINUSE');
+    expect(entry).toContain("address already in use");
+    expect(entry).toContain("UXP bridge port is already owned by another instance");
+    expect(entry).toContain("continuing with the local UXP backend unavailable");
+    expect(entry).toContain("throw error");
+  });
+
   test("trust profile enrollment validates exact mode and profile ID before installation", () => {
     const directory = mkdtempSync(join(tmpdir(), "ppmcp-installer-profile-"));
     const profilePath = join(directory, "profile.json");

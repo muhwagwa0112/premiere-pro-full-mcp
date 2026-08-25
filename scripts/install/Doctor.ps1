@@ -45,11 +45,38 @@ else {
     Add-Check 'premiere-pro' ($premierePaths.Count -gt 0) ($(if ($premierePaths.Count) { $premierePaths -join ', ' } else { 'Adobe Premiere Pro was not found in the standard Program Files locations.' }))
 }
 
+function Read-PpMcpCodexRegistration([string]$Name) {
+    # codex mcp get prints "Error: ..." to the error stream when a server is
+    # missing; behave like a boolean probe instead of surfacing that record.
+    $previousErrorPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'SilentlyContinue'
+    try {
+        $captured = New-Object System.Collections.ArrayList
+        $null = & codex mcp get $Name 2>&1 | ForEach-Object { [void]$captured.Add([string]$_) }
+        if ($LASTEXITCODE -eq 0) { return (-join $captured) }
+        return $null
+    } finally {
+        $ErrorActionPreference = $previousErrorPreference
+    }
+}
+
 if ($SkipCodexRegistration) { Add-Check 'codex-registration' $true 'Skipped for isolated verification.' $false }
 elseif ($metadata -and (Get-Command codex -ErrorAction SilentlyContinue)) {
-    $registration = @(& codex mcp get $script:PpMcpRegistration 2>$null) -join "`n"
-    $ok = $LASTEXITCODE -eq 0 -and $registration.Contains([string]$metadata.launcher) -and $registration.Contains([string]$metadata.bundle)
-    Add-Check 'codex-registration' $ok ($(if ($ok) { "$($script:PpMcpRegistration) points to the installed launcher and bundle." } else { 'Registration is missing or points to another runtime.' }))
+    # Accept both the installer's underscore registration and the plugin-marketplace
+    # hyphen registration. Either one must point at the installed launcher and bundle.
+    $acceptedNames = @($script:PpMcpRegistration, $script:PpMcpProduct)
+    $matchedName = $null
+    foreach ($candidate in $acceptedNames) {
+        $registration = Read-PpMcpCodexRegistration $candidate
+        if ($null -ne $registration) {
+            if ($registration.Contains([string]$metadata.launcher) -and $registration.Contains([string]$metadata.bundle)) {
+                $matchedName = $candidate
+                break
+            }
+        }
+    }
+    $ok = $null -ne $matchedName
+    Add-Check 'codex-registration' $ok ($(if ($ok) { "$matchedName points to the installed launcher and bundle." } else { 'Registration is missing or points to another runtime.' }))
 } else { Add-Check 'codex-registration' $false 'Codex CLI or installed metadata is unavailable.' }
 
 if ($CheckLive -and $metadata) {
