@@ -18,16 +18,16 @@ For the public CCX, add `uxp-plugin/manifest.json` to Adobe UXP Developer Tool a
 
 ```powershell
 npm run compliance:generate
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Build-Release.ps1 -CcxPath .\artifacts\premiere-pro-full-mcp-v0.3.0.ccx
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Build-Release.ps1 -CcxPath .\artifacts\premiere-pro-full-mcp-v0.4.0.ccx
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Verify-Release.ps1
 ```
 
 `Build-Release.ps1` has no CCX fallback: `-CcxPath` is mandatory and is checked before release staging. `npm run uxp:dev-archive` creates only a non-installable `.zip` for source inspection/CI and refuses a `.ccx` output name. The release build rejects a development ZIP renamed to `.ccx` unless every file retains the pinned regular-file attributes produced by the validated Adobe UDT package path. It also refuses a dirty worktree, mismatched private/public key, wrong repository, wrong CCX filename or identity, generated UXP bootstrap, or failed MCP/native build. The signed manifest binds the exact commit, repository, tag, version, platform, architecture, ZIP, CCX, SBOM, and notices. The UDT attribute check is a fail-closed packaging contract, while the retained UDT/UPIA installation evidence establishes the actual packager and installed identity.
 
-The current v0.3 payload also includes the generated 51-action backend support matrix, 150-entry
-feature registry, semantic-action and connector-boundary guides, durable-job runtime, and
-post-production fixture manifests. Regenerate both inventories and run their `--check` forms before
-packaging; never reuse generated files or a CCX from an earlier commit.
+The current v0.4 payload also includes the generated feature registry, semantic-action and
+connector-boundary guides, durable-job runtime, step-flow engine, and post-production fixture
+manifests. Regenerate inventories and run their `--check` forms before packaging; never reuse
+generated files or a CCX from an earlier commit.
 
 ## Installation layout
 
@@ -39,7 +39,7 @@ packaging; never reuse generated files or a CCX from an earlier commit.
 - `%LOCALAPPDATA%\PremiereMCP\app\tools` — Doctor, Update, Uninstall, public release key, and CCX
 - `%APPDATA%\Adobe\CEP\extensions\com.codex.premiere-pro-full-mcp.cep` — Adobe ZXP-signed CEP/QE compatibility bridge; installer does not enable CEP developer mode
 
-Existing active targets are moved to timestamped backups before activation. Failure restores the previous targets and Codex configuration. The UXP panel uses an automatic per-user mutual-authentication handshake; no user token, runtime bootstrap, or pairing file is generated or shipped.
+Existing active targets are moved to timestamped backups before activation. Failure restores the previous targets and Codex configuration. The UXP panel uses an automatic per-user mutual-authentication handshake; no user token, runtime bootstrap, or pairing file is generated or shipped. Multiple MCP instances share the single UXP bridge port as authenticated relays: the first instance binds the port as leader and later instances relay their commands through its live panel session, with follower-to-leader promotion when the leader closes.
 
 ## Update trust chain
 
@@ -51,7 +51,7 @@ The updater is pinned to `muhwagwa0112/premiere-pro-full-mcp`. It downloads the 
 2. Complete live UXP/CEP/QE/UI validation on Premiere 26.3+.
 3. Verify the final signed artifacts with `Verify-Release.ps1`.
 4. Complete independent security and completion review.
-5. Push the clean noreply-authored history, create `v0.3.0`, and upload every bound asset.
+5. Push the clean noreply-authored history, create `v0.4.0`, and upload every bound asset.
 6. Verify the repository and download from a logged-out browser and reinstall the downloaded ZIP.
 
 Upload exactly these ten versioned files; never glob the `artifacts` directory, which may also hold

@@ -13,6 +13,16 @@ update/repair Creative Cloud Desktop and confirm Premiere 26.3+ is detected befo
 rename a development ZIP to `.ccx` or treat UXP Developer Tool loading as proof that the public CCX
 installer and packaged layout gates passed.
 
+## A second Codex thread or CLI does not see its tools
+
+The UXP bridge binds a single local port (`localhost:17777`). When another instance already owns it,
+the new instance now joins that leader as an authenticated relay instead of dying or degrading to a
+dead backend. Restart the affected thread/CLI after updating the server so it loads the relay-aware
+bundle (`premiere-mcp.bundle.mjs`) on both the leader and the new instance. If the leader itself
+closes, the remaining follower promotes to leader and the panel reconnects automatically. Only the
+panel connection still requires the **Window > UXP Plugins > Premiere Pro Full MCP** panel to be open
+in Premiere.
+
 ## CEP heartbeat is stale
 
 Restart Premiere after installing or updating. Confirm that `%APPDATA%\Adobe\CEP\extensions\com.codex.premiere-pro-full-mcp.cep` contains `CSXS\manifest.xml`, `META-INF\signatures.xml`, and `mimetype`. Do not enable CEP developer mode or copy CEP files from an older release because the package signature, authenticated protocol, and extension ID must match the native broker.

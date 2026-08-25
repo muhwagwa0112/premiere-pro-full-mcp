@@ -2,6 +2,22 @@
 
 All notable changes to this project are documented here.
 
+## 0.4.0 - 2026-08-25
+
+- Removed the approval/cancel dialog from the normal path: high-level instructions compile to a
+  linear step sequence (`premiere_flows`) and each step commits as its own observable transaction
+  with its own undo unit; safety is automatic checkpoints plus automatic undo.
+- Added a step event bus so clients can relay live progress while the user watches the editor.
+- Fixed the single-UXP-listener problem: multiple MCP instances now share the leader's panel session
+  as authenticated relays, with follower-to-leader promotion and a keep-alive retry when an
+  incompatible owner holds the port.
+- Registered Premiere Pro Full MCP as a Codex connector and unified the plugin-marketplace MCP server
+  name with the installer registration so fresh threads discover the same tools as the Doctor path.
+- Kept the truthful capability surface: features that cannot be driven by local scripting remain
+  explicitly blocked/manual instead of being registered but non-functional.
+- Added a signed v0.4.0 Windows release package with the bundled runtime, launcher, bridges,
+  registries, guides, SBOM, notices, and signed integrity manifests.
+
 ## 0.3.0 - 2026-08-24
 
 - Added explicit `interactive`, `trusted_unattended`, and `isolated_lab` install/launch modes with SID/product/launcher-bound, DPAPI-protected Trust Profiles.

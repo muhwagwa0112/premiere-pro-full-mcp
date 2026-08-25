@@ -1,4 +1,4 @@
-# Premiere Pro Full MCP v0.3.0
+# Premiere Pro Full MCP v0.4.0
 
 [English](#english) · [한국어](#한국어)
 
@@ -18,11 +18,14 @@ Premiere Pro Full MCP is a local, capability-gated MCP server for Adobe Premiere
 
 > This is an unofficial community project and is not affiliated with or endorsed by Adobe Inc. “Full” means the supported API surface is inventoried and routed; it does not mean every UI feature is scriptable in every host state.
 
-The v0.3 release adds durable `premiere_jobs` DAG execution, route-bound project checkpoints,
-typed semantic project/media/timeline actions, fixed-fingerprint UI adapters, a 150-entry feature
-registry, and explicit connector/native extension boundaries. Runtime evidence remains authoritative:
-catalog entries marked unverified, plan-only, entitlement-dependent, or unsupported are never
-promoted merely because they are inventoried. See the [v0.3 release notes](docs/RELEASE-NOTES-v0.3.0.md).
+The v0.4 release runs high-level instructions as a linear, observable step sequence with no
+approval/cancel dialog on the normal path: each step commits as its own transaction and undo unit,
+and the client relays live progress while you watch the editor. Multiple Codex threads/CLIs now
+share the single UXP bridge as an authenticated leader relay instead of losing tools. Typed
+project/media/timeline/effects/audio handlers plus automatic checkpoints and automatic undo replace
+interactive confirmation, while irreversible risks are blocked in code. Runtime evidence remains
+authoritative: catalog entries marked unverified, plan-only, entitlement-dependent, or unsupported
+are never promoted merely because they are inventoried. See the [v0.4 release notes](docs/RELEASE-NOTES-v0.4.0.md).
 
 ## English
 
@@ -30,8 +33,8 @@ promoted merely because they are inventoried. See the [v0.3 release notes](docs/
 
 Requirements: Windows 10/11 x64, Premiere Pro 26.3 or later, Creative Cloud Desktop, and Codex Desktop or the Codex CLI. Node.js is not required for the packaged runtime.
 
-1. Download `premiere-pro-full-mcp-v0.3.0-windows.zip` from the [latest release](https://github.com/muhwagwa0112/premiere-pro-full-mcp/releases/latest). Verify its adjacent `.sha256` file, then extract it.
-2. Close Premiere Pro, open PowerShell in the extracted `premiere-pro-full-mcp-0.3.0` folder, and choose the automation mode explicitly. The safe default is interactive:
+1. Download `premiere-pro-full-mcp-v0.4.0-windows.zip` from the [latest release](https://github.com/muhwagwa0112/premiere-pro-full-mcp/releases/latest). Verify its adjacent `.sha256` file, then extract it.
+2. Close Premiere Pro, open PowerShell in the extracted `premiere-pro-full-mcp-0.4.0` folder, and choose the automation mode explicitly. The safe default is interactive:
 
    ```powershell
    powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -AutomationMode Interactive
@@ -40,7 +43,7 @@ Requirements: Windows 10/11 x64, Premiere Pro 26.3 or later, Creative Cloud Desk
    The installer verifies every packaged file, installs only in the current user profile, registers `premiere_pro_full_mcp` with Codex, and opens the bundled CCX.
 3. Approve the independent-plugin warning in Creative Cloud Desktop. Restart Premiere, then open **Window > UXP Plugins > Premiere Pro Full MCP**.
 4. The panel connects automatically to the installed bridge at `localhost:17777`; **Connect** retries it manually with one click. No token entry, file picker, or pairing step is required. The installed native runtime provisions a per-user key inside Adobe UXP plug-in storage and authenticates both ends automatically.
-5. Restart Codex and call the host/capability inspection tools. Run Doctor if the bridge is not connected:
+5. Restart Codex and call the host/capability inspection tools. Additional Codex threads/CLIs relay through the same leader session, so you can watch Premiere while a flow runs from any enabled instance. Run Doctor if the bridge is not connected:
 
    ```powershell
    powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\PremiereMCP\app\tools\Doctor.ps1" -CheckLive
@@ -58,7 +61,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 `
 
 The native broker validates the profile, binds it to the current Windows SID, installed product/launcher hashes, host-version range, allowed actions/risks/capabilities, and canonical approved roots, then protects it with DPAPI CurrentUser. The launcher passes only the selected mode and profile ID to the pinned MCP process. A mismatched, missing, tampered, expired, or out-of-range profile fails closed; it never falls back to interactive or broadens policy. `IsolatedLab` uses the same explicit enrollment contract with a profile whose mode is `isolated_lab`.
 
-During `trusted_unattended` and `isolated_lab` execution, the approval broker and MessageBox path are unreachable and no pending/approved approval files are created. Interactive mode retains the exact-plan, one-shot R2/R3 approval dialog. Changing modes requires rerunning the installer with the intended mode and profile.
+During `trusted_unattended` and `isolated_lab` execution, the approval broker and MessageBox path are unreachable and no pending/approved approval files are created. The v0.4 "Watch & Run" flow also removes the approval/cancel dialog from the normal interactive path: high-level instructions compile to a linear step sequence, each step commits as its own undo unit, and safety is automatic checkpoints plus automatic undo (irreversible risks such as overwriting an existing export are blocked in code). Changing modes requires rerunning the installer with the intended mode and profile.
 
 The executables and PowerShell scripts are not Authenticode-signed. Windows may show SmartScreen warnings. The release uses a separate RSA-signed update manifest, exact asset size/SHA-256 bindings, and an in-package SHA-256 manifest. The bundled CEP compatibility bridge carries an Adobe ZXP package signature, so installation does not enable CEP developer mode. The initial download still depends on GitHub HTTPS and the published checksum; do not bypass a warning if the checksum or source is unexpected.
 
@@ -116,7 +119,7 @@ Release builds require a clean Git worktree and the dedicated private signing ke
 
 요구 사항은 Windows 10/11 x64, Premiere Pro 26.3 이상, Creative Cloud Desktop, Codex Desktop 또는 Codex CLI입니다. 배포 ZIP에는 자체 포함 네이티브 런처와 번들 MCP가 들어 있어 별도 Node.js 설치가 필요하지 않습니다.
 
-1. [최신 릴리스](https://github.com/muhwagwa0112/premiere-pro-full-mcp/releases/latest)에서 `premiere-pro-full-mcp-v0.3.0-windows.zip`과 `.sha256`을 내려받아 해시를 확인하고 압축을 풉니다.
+1. [최신 릴리스](https://github.com/muhwagwa0112/premiere-pro-full-mcp/releases/latest)에서 `premiere-pro-full-mcp-v0.4.0-windows.zip`과 `.sha256`을 내려받아 해시를 확인하고 압축을 풉니다.
 2. Premiere Pro를 종료하고 압축을 푼 폴더에서 자동화 모드를 명시해 실행합니다. 안전한 기본값은 Interactive입니다.
 
    ```powershell
@@ -125,7 +128,7 @@ Release builds require a clean Git worktree and the dedicated private signing ke
 
 3. Creative Cloud Desktop에서 독립 플러그인 설치 경고를 승인합니다. Premiere를 재시작한 뒤 **창 > UXP 플러그인 > Premiere Pro Full MCP**를 엽니다.
 4. 패널은 설치된 `localhost:17777` 브리지에 자동 연결되며, **Connect** 한 번으로 수동 재연결할 수 있습니다. 토큰 입력, 파일 선택, 페어링 단계가 없습니다. 설치된 네이티브 런타임이 Adobe UXP 플러그인 저장소 안에 사용자별 키를 안전하게 준비해 양쪽을 자동 상호 인증합니다.
-5. Codex를 재시작합니다. 연결되지 않으면 다음 Doctor를 실행합니다.
+5. Codex를 재시작합니다. 추가 Codex 스레드/CLI는 같은 리더 세션을 릴레이로 공유하므로, 어느 인스턴스에서든 플로우를 실행하며 Premiere 화면을 함께 관찰할 수 있습니다. 연결되지 않으면 다음 Doctor를 실행합니다.
 
    ```powershell
    powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\PremiereMCP\app\tools\Doctor.ps1" -CheckLive
@@ -141,10 +144,19 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 `
   -TrustProfilePath .\studio-profile.json
 ```
 
-프로필은 현재 Windows SID, 설치 제품과 런처 해시, Premiere 버전 범위, action/risk/capability, canonical approved roots에 결합되고 DPAPI CurrentUser로 보호됩니다. 신뢰 실행 중에는 작업별 MessageBox와 approval 파일이 0개이며, 허용 범위 밖 요청·변조·버전 불일치는 자동으로 interactive로 낮아지지 않고 차단됩니다. Interactive의 R2/R3 exact-plan 1회 승인은 그대로 유지됩니다.
+프로필은 현재 Windows SID, 설치 제품과 런처 해시, Premiere 버전 범위, action/risk/capability, canonical approved roots에 결합되고 DPAPI CurrentUser로 보호됩니다. 신뢰 실행 중에는 작업별 MessageBox와 approval 파일이 0개이며, 허용 범위 밖 요청·변조·버전 불일치는 자동으로 interactive로 낮아지지 않고 차단됩니다.
 
-v0.3 최신본에는 durable `premiere_jobs` DAG, 전·후 프로젝트 체크포인트 증거,
-프로젝트/미디어/타임라인 semantic action, 고정 fingerprint UI adapter, 150개 기능 레지스트리가
+v0.4 "Watch & Run"에서는 정상 경로의 승인/취소 다이얼로그도 제거됩니다. 높은 수준 지시는 선형
+스텝 시퀀스로 컴파일되고, 각 스텝은 하나의 undo 단위로 화면에 순차 반영되며, 클라이언트가
+진행 상황을 실시간으로 중계합니다. 안전은 대화식 승인 대신 자동 체크포인트와 자동 undo로
+대체되고, 기존 결과물 덮어쓰기 같은 되돌릴 수 없는 위험만 코드 차원에서 차단합니다.
+
+여러 Codex 스레드/CLI는 하나의 UXP 브리지(17777)를 인증 릴레이로 공유합니다. 첫 인스턴스가
+리더가 되고 이후 인스턴스는 같은 로컬 키로 인증해 리더의 라이브 패널 세션을 통해 명령을
+전달합니다. 리더가 닫히면 나머지 인스턴스 중 하나가 리더로 승격되고 패널이 자동 재연결됩니다.
+
+v0.4 최신본에는 durable `premiere_jobs` DAG, 전·후 프로젝트 체크포인트 증거,
+프로젝트/미디어/타임라인 semantic action, 고정 fingerprint UI adapter, 기능 레지스트리가
 포함됩니다. 목록에 존재한다는 이유만으로 지원 상태를 올리지 않으며, 실호스트 증거가 없는 기능은
 `UNVERIFIED`, `PLAN_ONLY`, `ENTITLEMENT_BLOCKED`, `UNSUPPORTED` 상태를 유지합니다.
 
