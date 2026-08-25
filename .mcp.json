@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "premiere-pro-full-mcp": {
+      "title": "Premiere Pro Full MCP",
+      "description": "Watch & Run control of the local Adobe Premiere Pro through the recommended full MCP bridge.",
+      "command": "C:\\Users\\lufth\\AppData\\Local\\PremiereMCP\\bin\\PremiereMcp.WindowsUiAgent.exe",
+      "args": [
+        "--launch-mcp",
+        "C:\\Users\\lufth\\AppData\\Local\\PremiereMCP\\bundle\\premiere-mcp.bundle.mjs"
+      ],
+      "env": {
+        "PREMIERE_MCP_AUTOMATION_MODE": "interactive",
+        "PREMIERE_MCP_INSTALL_ROOT": "C:\\Users\\lufth\\AppData\\Local\\PremiereMCP"
+      }
+    }
+  }
+}

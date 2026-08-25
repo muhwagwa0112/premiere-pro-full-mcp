@@ -1,0 +1,39 @@
+{
+  "name": "premiere-pro-full-mcp",
+  "version": "0.4.0",
+  "description": "Watch & Run control of local Adobe Premiere Pro through the recommended full MCP bridge: no-approval flow engine for import, timeline edit, effects, markers, and sequence export.",
+  "author": {
+    "name": "Premiere Pro Full MCP"
+  },
+  "homepage": "https://github.com/muhwagwa0112/premiere-pro-full-mcp",
+  "repository": "https://github.com/muhwagwa0112/premiere-pro-full-mcp",
+  "license": "MIT",
+  "keywords": [
+    "premiere-pro",
+    "video-editing",
+    "mcp",
+    "timeline",
+    "captions",
+    "export"
+  ],
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Premiere Pro Full MCP",
+    "shortDescription": "Watch & Run Premiere Pro control",
+    "longDescription": "Connect Codex to the local Premiere Pro Full MCP bridge with a no-approval flow engine. Imports media, builds sequences, edits timelines, applies effects, and exports without dialogs while you watch each change commit in the editor. Local hosting only.",
+    "developerName": "Premiere Pro Full MCP",
+    "category": "Creativity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/muhwagwa0112/premiere-pro-full-mcp",
+    "defaultPrompt": [
+      "Inspect my open Premiere project and summarize its current edit",
+      "Run the Watch & Run flow to import media and build a sequence",
+      "Verify this sequence and export the final deliverable"
+    ],
+    "brandColor": "#4A4A8A"
+  }
+}
