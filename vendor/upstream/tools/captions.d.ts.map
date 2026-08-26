@@ -1,0 +1,1 @@
+{"version":3,"file":"captions.d.ts","sourceRoot":"","sources":["../../../src/upstream/tools/captions.ts"],"names":[],"mappings":"AACA,OAAO,EAAe,aAAa,EAAE,MAAM,0BAA0B,CAAC;AAEtE,wBAAgB,eAAe,CAAC,aAAa,EAAE,aAAa;;;;;;;;;;;;;;;;;;;;;wBA0BhC;YACpB,OAAO,EAAE,MAAM,CAAC;YAChB,aAAa,CAAC,EAAE,MAAM,CAAC;YACvB,cAAc,CAAC,EAAE,MAAM,CAAC;SACzB;;EA8BN"}

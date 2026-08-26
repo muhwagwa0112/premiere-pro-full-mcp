@@ -1,47 +1,52 @@
 #!/usr/bin/env node
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { createServer } from "./server.js";
-import { OperationEngine } from "./operation-engine.js";
-import { FlowRunner } from "./flows/flow-runner.js";
-import { LocalAdapter } from "./bridge/local-adapter.js";
-import { UxpWebSocketAdapter } from "./bridge/uxp-websocket.js";
-import { CepFileAdapter } from "./bridge/cep-file.js";
-import { UiNamedPipeAdapter } from "./bridge/ui-named-pipe.js";
-import type { BackendAdapter } from "./contracts.js";
-import { AuthorizationService } from "./security/authorization-service.js";
-import { SessionLease } from "./security/session-lease.js";
-import { PathPolicy } from "./security/path-policy.js";
+import { BridgeClient } from "./bridge/ws-client.js";
+import { createMcpServer } from "./server.js";
+import { WsHost, DEFAULT_DAEMON_PORT, readBridgeEndpoint } from "./bridge/ws-host.js";
 
-const uxp = new UxpWebSocketAdapter();
-// The UXP panel bridge binds a single local port (default 17777). When another
-// instance of this MCP server is already listening there, this instance joins
-// that leader as a relay and shares its live panel session instead of failing
-// at boot. A leader that loses its panel session is replaced transparently the
-// next time a follower connects.
-await uxp.start();
+/**
+ * MCP stdio server entry point.
+ *
+ * Connects to the always-on bridge daemon (which is either already running or
+ * started here if the port is free) and serves the full tool surface to the
+ * agent. Premiere's CEP extension connects to the same daemon independently,
+ * so the bridge is always ready once Premiere is open — no manual setup.
+ */
+async function main(): Promise<void> {
+  // Ensure the daemon is up. If it is already listening (started at logon),
+  // connect to it as a client; otherwise start it in-process for this session.
+  const existing = readBridgeEndpoint();
+  let connectedToDaemon = false;
+  if (existing && existing.port === DEFAULT_DAEMON_PORT) {
+    try {
+      const probe = await BridgeClient.connect(existing.port);
+      await probe.close();
+      connectedToDaemon = true;
+    } catch {
+      // Stale endpoint file — daemon is not actually reachable. Start fresh.
+    }
+  }
 
-const adapters: BackendAdapter[] = [
-  new LocalAdapter(),
-  uxp,
-  new CepFileAdapter("cep"),
-  new CepFileAdapter("qe"),
-  new UiNamedPipeAdapter(),
-];
-// Lease creation is deliberately part of startup: an invalid launcher chain,
-// missing trust profile, or mode/profile mismatch must terminate rather than
-// silently falling back to interactive authorization.
-const lease = await SessionLease.createForCurrentProcess();
-const authorizationService = await AuthorizationService.createFromEnvironment({ lease });
-const trustedRoots = authorizationService.approvedRoots();
-const engine = new OperationEngine(adapters, { authorizationService, ...(trustedRoots ? { pathPolicy: new PathPolicy([...trustedRoots]) } : {}) });
-const flows = new FlowRunner(engine, { authorizationService });
-const server = createServer(engine, undefined, flows);
-const transport = new StdioServerTransport();
+  if (!connectedToDaemon) {
+    try {
+      await WsHost.start(DEFAULT_DAEMON_PORT);
+      connectedToDaemon = true;
+    } catch (error) {
+      // Another process bound the port (a real daemon). Use it as a client.
+      connectedToDaemon = true;
+    }
+  }
 
-const shutdown = async () => {
-  await Promise.all(adapters.map(async (adapter) => adapter.close?.()));
-};
-process.once("SIGINT", () => void shutdown().finally(() => process.exit(0)));
-process.once("SIGTERM", () => void shutdown().finally(() => process.exit(0)));
+  const bridge = await BridgeClient.connect(DEFAULT_DAEMON_PORT);
+  const server = createMcpServer(bridge);
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
 
-await server.connect(transport);
+  process.stderr.write(`[premiere-pro-full-mcp] connected to bridge ws://127.0.0.1:${bridge.port}/bridge\n`);
+  process.stderr.write("[premiere-pro-full-mcp] ready\n");
+}
+
+main().catch((error) => {
+  process.stderr.write(`[premiere-pro-full-mcp] fatal: ${error.stack ?? String(error)}\n`);
+  process.exit(1);
+});

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<ExtensionManifest Version="7.0" ExtensionBundleId="com.codex.premiere-pro-full-mcp.cep" ExtensionBundleVersion="0.4.0" ExtensionBundleName="Premiere Pro Full MCP Capability CEP Bridge">
+<ExtensionManifest Version="7.0" ExtensionBundleId="com.codex.premiere-pro-full-mcp.cep" ExtensionBundleVersion="1.0.0" ExtensionBundleName="Premiere Pro Full MCP Local Bridge">
   <ExtensionList>
-    <Extension Id="com.codex.premiere-pro-full-mcp.cep.headless" Version="0.4.0"/>
+      <Extension Id="com.codex.premiere-pro-full-mcp.cep.headless" Version="1.0.0"/>
   </ExtensionList>
   <ExecutionEnvironment>
     <HostList><Host Name="PPRO" Version="26.3"/></HostList>
@@ -13,12 +13,12 @@
       <DispatchInfo>
         <Resources>
           <MainPath>./index.html</MainPath>
-          <ScriptPath>./loader.jsx</ScriptPath>
           <CEFCommandLine><Parameter>--enable-nodejs</Parameter><Parameter>--allow-file-access-from-files</Parameter></CEFCommandLine>
         </Resources>
         <Lifecycle>
           <AutoVisible>false</AutoVisible>
           <StartOn><Event>com.adobe.csxs.events.ApplicationActivate</Event><Event>applicationActivate</Event></StartOn>
+          <Overlap>false</Overlap>
         </Lifecycle>
         <UI><Type>Custom</Type><Geometry><Size><Width>1</Width><Height>1</Height></Size></Geometry></UI>
       </DispatchInfo>

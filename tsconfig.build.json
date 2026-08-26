@@ -1,10 +1,9 @@
 {
   "extends": "./tsconfig.json",
+  "include": ["src/**/*.ts"],
+  "exclude": ["dist", "node_modules", "tests", "windows-ui-agent"],
   "compilerOptions": {
     "rootDir": "src",
-    "sourceMap": true,
-    "declaration": true
-  },
-  "include": ["src/**/*.ts"],
-  "exclude": ["tests", "dist", "node_modules", "windows-ui-agent"]
+    "outDir": "dist"
+  }
 }

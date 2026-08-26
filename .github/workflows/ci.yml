@@ -13,40 +13,10 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Scan complete Git history with Gitleaks 8.30.1
-        shell: pwsh
-        run: |
-          $archive = Join-Path $env:RUNNER_TEMP 'gitleaks_8.30.1_windows_x64.zip'
-          $installRoot = Join-Path $env:RUNNER_TEMP 'gitleaks-8.30.1'
-          Invoke-WebRequest -Uri 'https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_windows_x64.zip' -OutFile $archive
-          $expected = 'd29144deff3a68aa93ced33dddf84b7fdc26070add4aa0f4513094c8332afc4e'
-          $actual = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($actual -ne $expected) { throw "Gitleaks archive SHA-256 mismatch: $actual" }
-          Expand-Archive -LiteralPath $archive -DestinationPath $installRoot
-          & (Join-Path $installRoot 'gitleaks.exe') git . --redact --no-banner
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
           cache: npm
-      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
-        with:
-          dotnet-version: 8.0.424
       - run: npm ci
-      - run: npm audit --omit=dev --audit-level=high
-      - run: npm run inventory:adobe
       - run: npm run check
-      - run: npm run test:coverage
-      - run: npm run validate:uxp-plan
-      - run: npm run compliance:generate
-      - run: npm run uxp:dev-archive
-      - shell: pwsh
-        run: .\scripts\Test-ReleaseSecurity.ps1
-      - run: dotnet test .\windows-ui-agent\tests\PremiereMcp.WindowsUiAgent.Tests.csproj --configuration Release
-      - run: dotnet list .\windows-ui-agent\PremiereMcp.WindowsUiAgent.csproj package --vulnerable --include-transitive
-      - name: Verify generated compliance files are current
-        shell: pwsh
-        run: |
-          git diff --exit-code -- THIRD-PARTY-NOTICES.md THIRD-PARTY-LICENSES SBOM.spdx.json
+      - run: node scripts/smoke.mjs

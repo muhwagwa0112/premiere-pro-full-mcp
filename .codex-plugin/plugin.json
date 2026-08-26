@@ -1,7 +1,7 @@
 {
   "name": "premiere-pro-full-mcp",
-  "version": "0.4.0",
-  "description": "Watch & Run control of local Adobe Premiere Pro through the recommended full MCP bridge: no-approval flow engine for import, timeline edit, effects, markers, and sequence export.",
+  "version": "1.0.0",
+  "description": "Local-first Adobe Premiere Pro MCP: 353 flat tools over one persistent CEP WebSocket bridge. No auth, no approval, no actionId.",
   "author": {
     "name": "Premiere Pro Full MCP"
   },
@@ -19,20 +19,19 @@
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Premiere Pro Full MCP",
-    "shortDescription": "Watch & Run Premiere Pro control",
-    "longDescription": "Connect Codex to the local Premiere Pro Full MCP bridge with a no-approval flow engine. Imports media, builds sequences, edits timelines, applies effects, and exports without dialogs while you watch each change commit in the editor. Local hosting only.",
+    "shortDescription": "Control Premiere Pro locally",
+    "longDescription": "Connect Codex to the local Premiere Pro Full MCP bridge over one persistent WebSocket. Every operation is its own flat tool (set_active_sequence, add_to_timeline, split_clip, ...). No auth, no approval dialogs, no hidden actionId.",
     "developerName": "Premiere Pro Full MCP",
     "category": "Creativity",
     "capabilities": [
-      "Interactive",
       "Read",
       "Write"
     ],
     "websiteURL": "https://github.com/muhwagwa0112/premiere-pro-full-mcp",
     "defaultPrompt": [
-      "Inspect my open Premiere project and summarize its current edit",
-      "Run the Watch & Run flow to import media and build a sequence",
-      "Verify this sequence and export the final deliverable"
+      "List the sequences in my open Premiere project",
+      "Activate sequence X, add this clip to the timeline, and split it at 5s",
+      "Inspect the active sequence tracks and summarize the edit"
     ],
     "brandColor": "#4A4A8A"
   }

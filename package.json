@@ -1,55 +1,30 @@
 {
   "name": "premiere-pro-full-mcp",
-  "version": "0.4.0",
+  "version": "1.0.0",
   "private": true,
-  "description": "Capability-gated MCP server and UXP/CEP bridges for Adobe Premiere Pro 2026 on Windows.",
+  "description": "Local-first MCP server for Adobe Premiere Pro with 353 flat tools over a single persistent CEP WebSocket bridge.",
   "type": "module",
-  "main": "bundle/premiere-mcp.bundle.mjs",
+  "main": "dist/index.js",
   "bin": {
-    "premiere-pro-full-mcp": "bundle/premiere-mcp.bundle.mjs"
+    "premiere-pro-full-mcp": "dist/index.js"
   },
   "files": [
     "dist",
-    "bundle",
-    "generated",
-    "uxp-plugin",
+    "vendor",
     "cep-plugin",
-    "windows-ui-agent",
+    "scripts",
     "README.md",
-    "SECURITY.md"
+    "REBUILD-PLAN.md"
   ],
   "engines": {
     "node": ">=20.19.0"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node scripts/build-bundle.mjs",
+    "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "inventory:adobe": "node scripts/generate-adobe-inventory.mjs",
-    "inventory:support": "tsc -p tsconfig.build.json && node scripts/generate-support-matrix.mjs",
-    "inventory:support:check": "tsc -p tsconfig.build.json && node scripts/generate-support-matrix.mjs --check",
-    "inventory:features": "tsc -p tsconfig.build.json && node scripts/generate-feature-registry.mjs",
-    "inventory:features:check": "tsc -p tsconfig.build.json && node scripts/generate-feature-registry.mjs --check",
-    "inventory:local": "node dist/cli/inventory.js",
-    "smoke:mcp": "node scripts/smoke-mcp.mjs",
-    "smoke:security": "node scripts/smoke-security.mjs",
-    "validate:uxp-full": "node scripts/uxp-full-surface-validation.mjs",
-    "validate:uxp-plan": "node scripts/uxp-full-surface-validation.mjs --plan-only",
-    "validate:fixture-plan": "npm run build --silent && node e2e/live-host/run-fixture.mjs --plan-only",
-    "validate:fixture-live": "npm run build --silent && node e2e/live-host/run-fixture.mjs --live --confirm-isolated-host",
-    "validate:ui-live": "node scripts/ui-live-probe.mjs",
-    "compliance:generate": "node scripts/generate-release-compliance.mjs",
-    "lint:bridges": "node --check uxp-plugin/main.js && node --check uxp-plugin/main.cjs && node --check uxp-plugin/auth.cjs && node --check cep-plugin/cep-runtime.js && node --check cep-plugin/main.js && node --check scripts/generate-adobe-inventory.mjs && node --check scripts/uxp-full-surface-validation.mjs && node --check scripts/live-host-probe.mjs && node --check scripts/ui-live-probe.mjs && node --check scripts/generate-release-compliance.mjs && node --check scripts/generate-release-sbom.mjs",
-    "check": "npm run lint:bridges && npm run typecheck && npm test && npm run build",
-    "start": "\"%LOCALAPPDATA%\\PremiereMCP\\bin\\PremiereMcp.WindowsUiAgent.exe\" --launch-mcp \"%LOCALAPPDATA%\\PremiereMCP\\bundle\\premiere-mcp.bundle.mjs\"",
-    "doctor": "node dist/cli/doctor.js",
-    "approve": "node dist/cli/approve.js",
-    "uxp:dev-archive": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\Build-Ccx.ps1",
-    "release:keygen": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\New-ReleaseSigningKey.ps1",
-    "release:build": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\Build-Release.ps1",
-    "release:verify": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\Verify-Release.ps1",
-    "package:release": "npm run compliance:generate && node scripts/package-release.mjs"
+    "check": "npm run typecheck && npm test && npm run build && node scripts/smoke.mjs && node scripts/_e2e-bridge.mjs && node scripts/_syntax-check.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

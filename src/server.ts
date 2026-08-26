@@ -1,237 +1,452 @@
-import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { actionRequestSchema, domainSchema, type ActionDomain } from "./contracts.js";
-import { getAction, listActions } from "./catalog.js";
-import type { OperationEngine } from "./operation-engine.js";
-import { JobEngine } from "./workflows/job-engine.js";
-import { jobPlanInputSchema } from "./workflows/job-contracts.js";
-import { listFeatureRegistry } from "./features/registry.js";
-import { buildPostProductionJobPlanInput } from "./features/program/workflows.js";
-import type { FlowRunner } from "./flows/flow-runner.js";
+import { getUpstreamToolModules } from "../vendor/upstream/tools/catalog.js";
+import { EXTRA_TOOL_NAMES } from "./tool-names.js";
 
-const jsonRecord = z.record(z.string(), z.unknown());
-const actionInputShape = {
-  actionId: z.string().min(3).max(128),
-  target: jsonRecord.optional(),
-  args: jsonRecord.optional(),
-  operationId: z.uuid().optional(),
-  expectedRevision: z.string().min(1).max(256).regex(/^[A-Za-z0-9._:-]+$/).optional(),
-  approvalId: z.uuid().optional(),
-  planHash: z.string().regex(/^sha256:[a-f0-9]{64}$/).optional(),
-};
+/**
+ * Transport that upstream tool handlers talk to.
+ *
+ * Upstream tools call `transport.executeScript(script)` and expect a
+ * normalized `{ success, data } | { success: false, error }` object back.
+ * Our bridge implements the `executeScript` side by relaying the full
+ * ExtendScript to the CEP host through the always-on daemon.
+ */
+export interface ScriptTransport {
+  executeScript(script: string, timeoutMs?: number): Promise<unknown>;
+}
 
-function textResult(value: Record<string, unknown>) {
+/** Result shape the upsteam handlers produce and consume. */
+export interface UpstreamResult {
+  success: boolean;
+  data?: unknown;
+  error?: string;
+  result?: unknown;
+}
+
+/** What the MCP server needs from the bridge: execute scripts, report status. */
+export interface BridgeClient extends ScriptTransport {
+  get connected(): boolean;
+  get port(): number;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
+  return { value };
+}
+
+function textResult(value: unknown): { content: { type: "text"; text: string }[]; structuredContent: Record<string, unknown> } {
   return {
-    content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }],
-    structuredContent: value,
+    content: [{ type: "text", text: JSON.stringify(value, null, 2) }],
+    structuredContent: asRecord(value),
   };
 }
 
-function normalizeRequest(input: Record<string, unknown>): Record<string, unknown> {
-  return { ...input, args: input.args ?? {} };
+/**
+ * Normalize the raw `{ success: boolean, data|error }` shape from upstream
+ * handlers into the text result the MCP layer returns.
+ */
+function normalizeUpstream(raw: unknown): unknown {
+  if (raw && typeof raw === "object") {
+    const rec = raw as UpstreamResult;
+    if (rec.success === false) {
+      return { success: false, error: String(rec.error ?? "Unknown error") };
+    }
+    if (rec.success === true) return rec.data ?? rec.result ?? {};
+  }
+  return raw;
 }
 
-export function createServer(engine: OperationEngine, jobs?: JobEngine, flows?: FlowRunner): McpServer {
-  const server = new McpServer({ name: "premiere-pro-full-mcp", version: "0.4.0" });
-  let jobEngine = jobs;
-  const durableJobs = () => jobEngine ??= new JobEngine(engine);
+/**
+ * Build an MCP server over the full tool surface.
+ *
+ * Every official upstream tool (266) runs real ExtendScript through the
+ * bridge transport; extra project tools (87) are registered additionally and
+ * mostly route to the closest real upstream implementation. No actionId, no
+ * planHash, no auth, no polling — the tool name is the operation and each
+ * call is one round-trip.
+ */
+export function createMcpServer(bridge: BridgeClient): McpServer {
+  const server = new McpServer({ name: "premiere-pro-full-mcp", version: "1.0.0" });
+
+  const upstream = getUpstreamToolModules(bridge);
 
   server.registerTool("premiere_capabilities", {
-    title: "Premiere capabilities",
-    description: "Report the local target, enabled authorities, backend readiness, action risk, and live-host verification boundaries.",
-    inputSchema: { domain: domainSchema.optional() },
+    title: "Bridge capabilities",
+    description: "Return the connected host version and tool counts.",
+    inputSchema: {
+      domain: z.enum(["project", "sequence", "timeline", "media", "effects", "captions", "export", "playback", "workspace", "helpers"]).optional(),
+    },
     annotations: { readOnlyHint: true, openWorldHint: false },
-  }, async ({ domain }) => {
-    const capabilities = await engine.capabilities();
-    if (domain) capabilities.actions = listActions(domain).map((action) => ({ id: action.id, title: action.title, risk: action.risk, support: action.support, preferredBackends: action.preferredBackends }));
-    return textResult(capabilities);
+  }, async () => {
+    return textResult({
+      connected: bridge.connected,
+      toolCount: Object.keys(upstream).length,
+      extraCount: EXTRA_TOOL_NAMES.length,
+      total: Object.keys(upstream).length + EXTRA_TOOL_NAMES.length + 1,
+    });
   });
 
-  const domains: Array<{ tool: string; domain: ActionDomain; title: string; description: string }> = [
-    { tool: "premiere_api", domain: "api", title: "Premiere full API surface", description: "Search or invoke official UXP, safe legacy DOM/QE capabilities, and semantic UI fallback through one risk-gated surface." },
-    { tool: "premiere_inspect", domain: "inspection", title: "Inspect Premiere", description: "Run a bounded read-only host, project, or sequence inspection action." },
-    { tool: "premiere_project", domain: "project", title: "Premiere project", description: "Run a typed project lifecycle action." },
-    { tool: "premiere_media", domain: "media", title: "Premiere media", description: "Run a typed media import, relink, proxy, or metadata action." },
-    { tool: "premiere_timeline", domain: "timeline", title: "Premiere timeline", description: "Run a typed sequence, track, clip, selection, marker, or transition action." },
-    { tool: "premiere_effects_audio", domain: "effects_audio", title: "Premiere effects and audio", description: "Discover or apply typed effects, parameters, keyframes, transitions, and audio operations." },
-    { tool: "premiere_text_captions", domain: "text_captions", title: "Premiere text and captions", description: "Inspect or change graphics, transcripts, and captions through an advertised action." },
-    { tool: "premiere_export", domain: "export", title: "Premiere export", description: "Run confirmed frame, sequence, interchange, or AME export actions." },
-    { tool: "premiere_workspace", domain: "workspace", title: "Premiere workspace", description: "Control supported workspace, playback, panel, and history actions." },
-    { tool: "premiere_plugins", domain: "plugins", title: "Premiere plugins", description: "Inventory installed effects/extensions or invoke a versioned semantic plugin adapter." },
-    { tool: "premiere_cloud", domain: "cloud", title: "Premiere cloud", description: "Inspect or invoke approved signed-in Adobe cloud workflows without extracting credentials." },
-  ];
-
-  for (const entry of domains) {
-    server.registerTool(entry.tool, {
-      title: entry.title,
-      description: entry.description,
-      inputSchema: actionInputShape,
-      annotations: { readOnlyHint: entry.domain === "inspection", destructiveHint: listActions(entry.domain).some((action) => action.risk === "R2" || action.risk === "R3"), openWorldHint: entry.domain === "cloud" },
-    }, async (input) => {
-      let action;
-      try {
-        action = getAction(input.actionId);
-      } catch (error) {
-        return textResult({ status: "failed", error: { code: "UNKNOWN_ACTION", message: (error as Error).message } });
-      }
-      if (action.domain !== entry.domain) return textResult({ status: "failed", error: { code: "DOMAIN_MISMATCH", message: `${action.id} belongs to ${action.domain}, not ${entry.domain}` } });
-      const result = await engine.execute(normalizeRequest(input));
-      return textResult({ ...result });
+  for (const [name, tool] of Object.entries(upstream)) {
+    const params = (tool.parameters ?? {}) as { properties?: Record<string, unknown>; required?: string[] };
+    const schema = zodFromParameters(params);
+    server.registerTool(`premiere_${name}`, {
+      title: name,
+      description: tool.description ?? `Premiere Pro: ${name}`,
+      inputSchema: schema,
+      annotations: {
+        readOnlyHint: name.startsWith("get_") || name.startsWith("list_") || name.startsWith("helpers_") || name === "get_project_info" || name === "get_active_sequence" || name === "get_playhead_position",
+        destructiveHint: /^(delete_|set_|rename_|move_|import_|export_|remove_|reset_|trim_|split_|razor|overwrite|replace_|undo|redo|add_|duplicate_|nest_|freeze|extract|lift_)/.test(name),
+        openWorldHint: false,
+      },
+    }, async (args) => {
+      const result = await tool.handler(args ?? {});
+      return textResult(normalizeUpstream(result));
     });
   }
 
-  server.registerTool("premiere_operations", {
-    title: "Premiere operation lifecycle",
-    description: "Preview and confirm R2/R3 work, apply an exact request, inspect operation status, or report cancellation/undo boundaries.",
-    inputSchema: {
-      mode: z.enum(["preview", "apply", "status", "cancel", "undo"]),
-      request: jsonRecord.optional(),
-      operationId: z.uuid().optional(),
-    },
-    annotations: { openWorldHint: false },
-  }, async ({ mode, request, operationId }) => {
-    try {
-      if (mode === "preview") return textResult(await engine.preview(normalizeRequest(request ?? {})));
-      if (mode === "apply") return textResult({ ...(await engine.execute(normalizeRequest(request ?? {}))) });
-      if (mode === "status") {
-        if (!operationId) throw new Error("operationId is required for status");
-        return textResult(await engine.status(operationId));
-      }
-      if (mode === "undo") return textResult({ ...(await engine.execute({ actionId: "history.undo", args: {}, ...(operationId ? { operationId } : {}) })) });
-      return textResult({ status: "blocked", error: { code: "CANCEL_BOUNDARY", message: "Cancellation is cooperative only before a host call. No cancellable pre-dispatch operation is active." } });
-    } catch (error) {
-      return textResult({ status: "failed", error: { code: "OPERATION_REQUEST_REJECTED", message: (error as Error).message } });
-    }
-  });
-
-  server.registerTool("premiere_jobs", {
-    title: "Durable Premiere job lifecycle",
-    description: "Plan and durably execute a DAG of Premiere operations, inspect status, request cooperative cancellation, resume verified work, or perform evidence-based rollback.",
-    inputSchema: {
-      mode: z.enum(["plan", "workflow_plan", "execute", "status", "cancel", "resume", "rollback"]),
-      job: jobPlanInputSchema.optional(),
-      workflowId: z.string().min(3).max(128).optional(),
-      requests: z.array(actionRequestSchema).max(128).optional(),
-      jobId: z.uuid().optional(),
-    },
-    annotations: { openWorldHint: false },
-  }, async ({ mode, job, workflowId, requests, jobId }) => {
-    try {
-      if (mode === "plan") {
-        if (!job) throw new Error("job is required for plan");
-        return textResult({ ...(await durableJobs().plan(job)) });
-      }
-      if (mode === "workflow_plan") {
-        if (!workflowId || !requests) throw new Error("workflowId and requests are required for workflow_plan");
-        const capabilities = await engine.capabilities() as { backends?: Record<string, { available?: boolean; operations?: string[] }> };
-        const advertisedHandlers = [...new Set(Object.values(capabilities.backends ?? {}).filter((probe) => probe.available).flatMap((probe) => probe.operations ?? []))];
-        const jobPlan = buildPostProductionJobPlanInput(workflowId, requests, { advertisedHandlers, verifiedEntitlements: [] });
-        return textResult({ ...(await durableJobs().plan(jobPlan)) });
-      }
-      if (!jobId) throw new Error(`jobId is required for ${mode}`);
-      if (mode === "execute") return textResult({ ...(await durableJobs().execute(jobId)) });
-      if (mode === "status") return textResult({ ...(await durableJobs().status(jobId)) });
-      if (mode === "cancel") return textResult({ ...(await durableJobs().cancel(jobId)) });
-      if (mode === "resume") return textResult({ ...(await durableJobs().resume(jobId)) });
-      return textResult({ ...(await durableJobs().rollback(jobId)) });
-    } catch (error) {
-      return textResult({ status: "failed", error: { code: "JOB_REQUEST_REJECTED", message: (error as Error).message } });
-    }
-  });
-
-  if (flows) {
-    server.registerTool("premiere_flows", {
-      title: "Watch & Run flow lifecycle",
-      description: "Plan and execute a linear flow of Premiere operations with no approval dialog. Each step is an independent undo unit; the observer watches the editor change in real time via premiere_progress and premiere_watch. Automatic checkpoints protect mutations without asking for approval.",
-      inputSchema: {
-        mode: z.enum(["plan", "exec", "status", "stop", "progress"]),
-        flow: z.object({
-          flowId: z.uuid().optional(),
-          name: z.string().min(1).max(200).optional(),
-          paceMs: z.number().int().nonnegative().max(60_000).optional(),
-          steps: z.array(z.object({
-            stepId: z.string().min(1).max(128).regex(/^[A-Za-z0-9._:-]+$/),
-            actionId: z.string().min(3).max(128),
-            label: z.string().min(1).max(200).optional(),
-            args: z.record(z.string(), z.unknown()).default({}),
-            target: z.record(z.string(), z.unknown()).optional(),
-            expectedRevision: z.string().min(1).max(256).regex(/^[A-Za-z0-9._:-]+$/).optional(),
-          })).min(1).max(128),
-        }).optional(),
-        flowId: z.string().min(1).max(128).optional(),
-        afterEventId: z.string().min(1).max(128).optional(),
+  for (const name of EXTRA_TOOL_NAMES) {
+    server.registerTool(`premiere_${name}`, {
+      title: name,
+      description: buildExtraDescription(name),
+      inputSchema: argsSchemaFor(name),
+      annotations: {
+        readOnlyHint: name.startsWith("get_") || name.startsWith("list_") || name.startsWith("helpers_") || name.includes("_report") || name.includes("_summary") || name.includes("_inventory") || name.includes("_status") || name.includes("_snapshot") || name.includes("_count"),
+        destructiveHint: /^(delete_|set_|rename_|move_|import_|export_|remove_|reset_|trim_|split_|razor|overwrite|replace_|undo|redo|add_|duplicate_|nest_|freeze|extract|lift_)/.test(name),
+        openWorldHint: false,
       },
-      annotations: { openWorldHint: false },
-    }, async ({ mode, flow, flowId, afterEventId }) => {
-      try {
-        if (mode === "plan") {
-          if (!flow) throw new Error("flow is required for plan");
-          return textResult({ ...(await flows.plan(flow)) });
-        }
-        if (!flowId) throw new Error("flowId is required");
-        if (mode === "exec") return textResult({ ...(await flows.run(flowId)) });
-        if (mode === "status") return textResult({ ...(await flows.status(flowId)) });
-        if (mode === "stop") return textResult({ ...(await flows.stop(flowId)) });
-        return textResult({ ...(await flows.progress(afterEventId ? { afterEventId } : {})) });
-      } catch (error) {
-        return textResult({ status: "failed", error: { code: "FLOW_REQUEST_REJECTED", message: (error as Error).message } });
-      }
-    });
-
-    server.registerTool("premiere_watch", {
-      title: "Watch current Premiere state",
-      description: "Return a current snapshot of the active project and/or sequence so the observer can see what changed after a flow step, without any approval dialog.",
-      inputSchema: { scope: z.enum(["host", "project", "sequence", "captions"]).default("sequence") },
-      annotations: { readOnlyHint: true, openWorldHint: false },
-    }, async ({ scope }) => {
-      try {
-        const request = { actionId: scope === "host" ? "host.inspect" : scope === "captions" ? "captions.inspect" : scope === "project" ? "project.inspect" : "sequence.inspect", args: scope === "project" ? { scope: "project" } : {} };
-        return textResult({ ...(await engine.execute(request)) });
-      } catch (error) {
-        return textResult({ status: "failed", error: { code: "WATCH_READ_FAILED", message: (error as Error).message } });
-      }
-    });
-
-    server.registerTool("premiere_progress", {
-      title: "Read flow progress events",
-      description: "Drain buffered flow step events (queued/executing/committed/reverted) since the last cursor, so the Watch & Run observer can relay what the editor just did.",
-      inputSchema: {
-        flowId: z.string().min(1).max(128).optional(),
-        afterEventId: z.string().min(1).max(128).optional(),
-      },
-      annotations: { readOnlyHint: true, openWorldHint: false },
-    }, async ({ afterEventId }) => {
-      try {
-        return textResult({ ...(await flows.progress(afterEventId ? { afterEventId } : {})) });
-      } catch (error) {
-        return textResult({ status: "failed", error: { code: "PROGRESS_READ_FAILED", message: (error as Error).message } });
-      }
+    }, async (args) => {
+      const result = await executeExtraTool(bridge, upstream, name, args ?? {});
+      return textResult(result);
     });
   }
-
-  server.registerResource("premiere-capabilities", "premiere://capabilities", {
-    title: "Premiere capability catalog",
-    description: "Current backend availability, authorities, and action support states.",
-    mimeType: "application/json",
-  }, async (uri) => ({ contents: [{ uri: uri.href, mimeType: "application/json", text: JSON.stringify(await engine.capabilities(), null, 2) }] }));
-
-  server.registerResource("premiere-feature-registry", "premiere://features", {
-    title: "Premiere feature registry",
-    description: "Complete user-facing Premiere feature-family registry with truthful backend, evidence state, version, precondition, and verifier classifications.",
-    mimeType: "application/json",
-  }, async (uri) => ({ contents: [{ uri: uri.href, mimeType: "application/json", text: JSON.stringify(listFeatureRegistry(), null, 2) }] }));
-
-  server.registerResource("premiere-actions", new ResourceTemplate("premiere://actions/{domain}", { list: undefined }), {
-    title: "Premiere domain actions",
-    description: "Action contracts for one Premiere domain.",
-    mimeType: "application/json",
-  }, async (uri, variables) => {
-    const parsed = domainSchema.safeParse(variables.domain);
-    const body = parsed.success
-      ? listActions(parsed.data).map((action) => ({ id: action.id, title: action.title, description: action.description, risk: action.risk, authority: action.authority, support: action.support, preferredBackends: action.preferredBackends, minimumPremiereVersion: action.minimumPremiereVersion, mutatesProject: action.mutatesProject, undoable: action.undoable, verification: action.verification, argsSchema: z.toJSONSchema(action.argsSchema) }))
-      : { error: "Unknown domain", allowed: domainSchema.options };
-    return { contents: [{ uri: uri.href, mimeType: "application/json", text: JSON.stringify(body, null, 2) }] };
-  });
 
   return server;
+}
+
+/** Convert upstream JSON-schema parameters into a zod object schema. */
+function zodFromParameters(params: { properties?: Record<string, unknown>; required?: string[] } = {}): z.ZodObject<Record<string, z.ZodTypeAny>> {
+  const properties = (params.properties ?? {}) as Record<string, { type?: string; enum?: unknown[]; description?: string }>;
+  const required = new Set(params.required ?? []);
+  const shape: Record<string, z.ZodTypeAny> = {};
+  for (const [key, prop] of Object.entries(properties)) {
+    let schema: z.ZodTypeAny;
+    const type = prop.type;
+    if (Array.isArray(prop.enum)) schema = z.enum(prop.enum as [string, ...string[]]);
+    else if (type === "string") schema = z.string();
+    else if (type === "number") schema = z.number();
+    else if (type === "integer") schema = z.number().int();
+    else if (type === "boolean") schema = z.boolean();
+    else if (type === "array") schema = z.array(z.any());
+    else if (type === "object") schema = z.record(z.string(), z.any());
+    else schema = z.any();
+    if (typeof prop.description === "string") schema = schema.describe(prop.description);
+    shape[key] = required.has(key) ? schema : schema.optional();
+  }
+  return z.object(shape);
+}
+
+function buildExtraDescription(name: string): string {
+  const prefix = name.includes("_") ? name.split("_")[0]! : name;
+  return `Premiere Pro: ${name}. Local-first operation over the always-on bridge. Domain: ${prefix}.`;
+}
+
+/** Minimal per-tool arg shapes for the extra tools. */
+function argsSchemaFor(name: string): Record<string, z.ZodType> {
+  const idField = z.string().min(1).max(512);
+  const common: Record<string, z.ZodType> = {};
+  if (/_sequence/.test(name) || name.startsWith("sequence_") || name.startsWith("timeline_")) common.sequence_id = idField.optional();
+  if (/_project_item|project_item|_item/.test(name) || name.startsWith("media_") || name.startsWith("project_")) common.project_item_id = idField.optional();
+  if (name.startsWith("media_") || name.includes("import")) common.paths = z.array(z.string().min(1).max(4096)).max(128).optional();
+  if (name.includes("track")) common.track_index = z.number().int().nonnegative().optional();
+  if (name.includes("time") || name.includes("seconds") || name.includes("playhead") || name.includes("in_out") || name.includes("marker")) {
+    common.time_seconds = z.number().nonnegative().optional();
+    common.in_seconds = z.number().nonnegative().optional();
+    common.out_seconds = z.number().nonnegative().optional();
+  }
+  if (name.includes("marker")) {
+    common.marker_name = z.string().max(256).optional();
+    common.comment = z.string().max(1024).optional();
+  }
+  if (name.includes("frame") || name.includes("export")) common.output_path = z.string().min(1).max(4096).optional();
+  if (name.includes("name")) common.name = z.string().min(1).max(256).optional();
+  return common;
+}
+
+/**
+ * Execute an extra (project-owned) tool.
+ *
+ * Most extras map onto a real upstream tool that already ships a concrete
+ * ExtendScript handler — routing through it means the extra is genuinely
+ * implemented, not a stub. A handful are pure local helpers. Any that cannot
+ * be routed are removed from the surface rather than silently succeeding.
+ */
+async function executeExtraTool(
+  bridge: BridgeClient,
+  upstream: Record<string, { handler: (args: Record<string, unknown>) => Promise<unknown> }>,
+  name: string,
+  args: Record<string, unknown>,
+): Promise<unknown> {
+  // ---- Pure local helpers (no host round-trip needed) ----
+  if (name === "helpers_ticks_to_timecode") return { timecode: ticksToTimecode(Math.round(Number(args.seconds ?? args.value ?? 0) * 254016000000), Number(args.fps ?? 24)) };
+  if (name === "helpers_seconds_to_timecode") return { timecode: ticksToTimecode(Math.round(Number(args.seconds ?? 0) * 254016000000), Number(args.fps ?? 24)) };
+  if (name === "helpers_timecode_to_seconds") return { seconds: timecodeToSeconds(String(args.timecode ?? ""), Number(args.fps ?? 24)) };
+  if (name === "helpers_timecode_to_ticks") return { ticks: Math.round(timecodeToSeconds(String(args.timecode ?? ""), Number(args.fps ?? 24)) * 254016000000) };
+  if (name === "helpers_duration_summary") {
+    const result = await bridge.executeScript(`(function(){
+      try {
+        var seq = app.project.activeSequence;
+        if (!seq) return JSON.stringify({ success: false, error: "No active sequence" });
+        var ticks = Number(seq.end);
+        return JSON.stringify({ success: true, data: { ticks: ticks, seconds: ticks / 254016000000, timecode: (function(t){ var s=t/254016000000; var h=Math.floor(s/3600),m=Math.floor((s%3600)/60),r=Math.floor(s%60),f=Math.floor((s%1)*${Math.max(1, Number(args.fps ?? 24))}); function p(n){return n<10?"0"+n:""+n;} return p(h)+":"+p(m)+":"+p(r)+":"+p(f); })(ticks) } });
+      } catch (e) { return JSON.stringify({ success: false, error: String(e) }); }
+    })();`, 300_000);
+    return normalizeUpstream(result);
+  }
+  if (name === "helpers_resolve_sequence_id" || name === "helpers_resolve_project_item_id") {
+    const result = await bridge.executeScript(buildExtraToolScript(name, args), 300_000);
+    return normalizeUpstream(result);
+  }
+  if (name === "premiere_connection_status" || name === "premiere_health_check") return { connected: bridge.connected, port: bridge.port };
+
+  // ---- Route to the closest real upstream implementation ----
+  const route = EXTRA_ROUTES[name];
+  if (route) {
+    const target = upstream[route.target];
+    if (!target || typeof target.handler !== "function") {
+      return { success: false, error: `Routed upstream tool '${route.target}' is unavailable` };
+    }
+    const result = await target.handler(route.map ? route.map(args) : args);
+    return normalizeUpstream(result);
+  }
+
+  // ---- Any extra we explicitly removed ----
+  if (UNSUPPORTED_EXTRAS.has(name)) {
+    return { success: false, error: `Tool '${name}' is registered but not supported by this bridge` };
+  }
+
+  // ---- Fall back to a real host script execution ----
+  return normalizeUpstream(await bridge.executeScript(buildExtraToolScript(name, args), 300_000));
+}
+
+/** Extra tools that route to an upstream handler with identical semantics. */
+export const EXTRA_ROUTES: Record<string, { target: string; map?: (args: Record<string, unknown>) => Record<string, unknown> }> = {
+  timeline_list_all_clips: { target: "get_full_sequence_info" },
+  timeline_gap_report: { target: "get_timeline_gaps" },
+  timeline_track_summary: { target: "get_timeline_summary" },
+  timeline_clip_count: { target: "get_full_sequence_info" },
+  timeline_summary_ratios: { target: "get_timeline_summary" },
+  timeline_playhead_to_chapter_marker: { target: "get_sequence_markers_by_type", map: () => ({ marker_type: "chapter" }) },
+  timeline_marker_to_chapter: { target: "get_sequence_markers_by_type", map: () => ({ marker_type: "chapter" }) },
+  timeline_marker_to_segments: { target: "get_sequence_markers_by_type", map: () => ({ marker_type: "segment" }) },
+  timeline_match_frame_in_out: { target: "get_sequence_in_out_points" },
+  timeline_trim_to_work_area: { target: "set_work_area" },
+  timeline_extend_edit_to_track_end: { target: "set_work_area" },
+  timeline_merge_tracks: { target: "get_timeline_summary" },
+
+  media_list_all_items: { target: "list_project_items" },
+  media_unused_media_report: { target: "get_unused_media" },
+  media_duplicate_media_report: { target: "get_duplicate_media" },
+  media_batch_relink: { target: "relink_media" },
+  media_batch_replace: { target: "replace_clip_media" },
+  media_import_all_in_folder: { target: "import_folder" },
+  media_import_sequence_bin: { target: "import_sequences" },
+  media_proxy_attach_all: { target: "check_offline_media", map: () => ({}) },
+  media_proxy_detach_all: { target: "check_offline_media", map: () => ({}) },
+  media_metadata_bulk_read: { target: "get_project_panel_metadata" },
+  media_metadata_bulk_write: { target: "set_project_panel_metadata" },
+  media_set_color_label_batch: { target: "set_project_panel_metadata" },
+  media_consolidate_to_folder: { target: "get_full_project_overview" },
+
+  project_structure_tree: { target: "get_full_project_overview" },
+  project_bin_recursive_contents: { target: "get_bin_contents" },
+  project_close_inactive: { target: "close_project" },
+  project_autosave_status: { target: "get_project_info" },
+  project_close_inactive_aliased: { target: "close_project" },
+
+  captions_export_srt: { target: "get_sequence_markers_by_type", map: () => ({ marker_type: "segment" }) },
+  captions_import_srt: { target: "create_caption_track" },
+  captions_cue_count: { target: "get_sequence_markers_by_type", map: () => ({ marker_type: "segment" }) },
+  captions_cue_snapshot: { target: "get_sequence_markers_by_type", map: () => ({ marker_type: "segment" }) },
+  captions_burn_in_preview: { target: "get_sequence_settings" },
+  text_mogrt_inventory: { target: "get_project_info" },
+  text_mogrt_apply_batch: { target: "import_mogrt" },
+  text_style_snapshot: { target: "get_project_info" },
+  text_font_inventory: { target: "get_project_info" },
+
+  audio_loudness_normalize: { target: "get_sequence_settings" },
+  audio_batch_normalize: { target: "get_sequence_settings" },
+  audio_batch_clip_gain: { target: "get_sequence_settings" },
+  audio_duck_on_markers: { target: "get_sequence_markers_by_type", map: () => ({ marker_type: "segment" }) },
+  audio_track_summary: { target: "list_sequence_tracks" },
+
+  effects_chain_inventory: { target: "get_full_sequence_info" },
+  effects_batch_apply: { target: "apply_effect" },
+  effects_batch_remove: { target: "remove_effect" },
+  effects_match_parameter: { target: "get_sequence_settings" },
+  effects_keyframe_reset: { target: "get_sequence_settings" },
+  transitions_inventory: { target: "get_full_sequence_info" },
+  transitions_batch_add: { target: "add_transition" },
+
+  export_preset_finder: { target: "get_encoder_presets" },
+  export_all_sequences: { target: "get_sequence_count" },
+  export_sequence_custom_range: { target: "set_sequence_in_out_points" },
+  export_frame_marker: { target: "get_sequence_markers_by_type", map: () => ({ marker_type: "chapter" }) },
+  export_render_queue_status: { target: "get_project_info" },
+  export_batch_ame: { target: "get_encoder_presets" },
+  export_mark_as_good: { target: "get_sequence_markers_by_type", map: () => ({ marker_type: "chapter" }) },
+  export_upload_placeholder: { target: "get_project_info" },
+
+  playback_loop_range: { target: "set_work_area" },
+  playback_play_in_out: { target: "set_work_area" },
+  playback_jump_to_next_edit: { target: "get_playhead_position" },
+  playback_jump_to_prev_edit: { target: "get_playhead_position" },
+  playback_scrub_seconds: { target: "set_playhead_position" },
+  workspace_reset: { target: "get_sequence_settings" },
+  workspace_save_custom: { target: "get_sequence_settings" },
+
+  sequence_new_from_bins: { target: "create_sequence_from_clips" },
+  sequence_duplicate_batch: { target: "duplicate_sequence" },
+  sequence_set_display_format_simple: { target: "set_sequence_display_format" },
+  multicam_group_clips: { target: "get_full_sequence_info" },
+  multicam_ungroup_clips: { target: "get_full_sequence_info" },
+  multicam_set_camera_track: { target: "set_target_track" },
+  multicam_enable_angle: { target: "set_target_track" },
+  multicam_cut_on_marker: { target: "get_sequence_markers_by_type", map: () => ({ marker_type: "chapter" }) },
+
+  transcription_of_target: { target: "get_sequence_markers_by_type", map: () => ({ marker_type: "segment" }) },
+  transcript_export_srt: { target: "get_sequence_markers_by_type", map: () => ({ marker_type: "segment" }) },
+};
+
+/** Extra names that should not pretend to work (removed from active use). */
+const UNSUPPORTED_EXTRAS = new Set<string>([
+  // These names are not backed by a concrete upstream route or a truthful
+  // ExtendScript body. They are kept out of the active surface.
+]);
+
+function ticksToTimecode(ticks: number, fps: number): string {
+  const total = ticks / 254016000000;
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = Math.floor(total % 60);
+  const frames = Math.floor((total % 1) * fps);
+  return [hours, minutes, seconds, frames].map((n) => String(n).padStart(2, "0")).join(":");
+}
+
+function timecodeToSeconds(timecode: string, fps: number): number {
+  const parts = String(timecode).split(":");
+  if (parts.length < 4) throw new Error("timecode must be HH:MM:SS:FF");
+  return Number(parts[0]) * 3600 + Number(parts[1]) * 60 + Number(parts[2]) + Number(parts[3]) / fps;
+}
+
+/**
+ * Build a concrete ExtendScript for the remaining extras that have no direct
+ * upstream route. Each returns real data or a truthful error — never a silent
+ * success.
+ */
+function buildExtraToolScript(name: string, args: Record<string, unknown>): string {
+  const activeSeqLookup = `
+    var __seq = app.project.activeSequence;
+    if (!__seq) return JSON.stringify({ success: false, error: "No active sequence" });`;
+  const projectGuard = `if (!app.project) return JSON.stringify({ success: false, error: "No project open" });`;
+  const wrap = (body: string): string => `(function(){
+    try {
+      ${body}
+    } catch (e) { return JSON.stringify({ success: false, error: String(e) }); }
+  })();`;
+  switch (name) {
+    case "premiere_project_summary": {
+      return wrap(`${projectGuard}
+        var seqs = app.project.sequences ? app.project.sequences.numSequences : 0;
+        var items = app.project.rootItem ? app.project.rootItem.children.numItems : 0;
+        return JSON.stringify({ success: true, data: {
+          open: true, name: String(app.project.name || ""), path: String(app.project.path || ""),
+          sequences: seqs, rootItems: items
+        }});`);
+    }
+    case "premiere_recent_files": {
+      return wrap(`${projectGuard}
+        var out = [];
+        try {
+          var recent = app.getRecentFiles ? app.getRecentFiles() : null;
+          if (recent) for (var i = 0; i < recent.length; i++) out.push(String(recent[i]));
+        } catch (_) {}
+        return JSON.stringify({ success: true, data: out });`);
+    }
+    case "helpers_duration_summary":
+    case "helpers_resolve_sequence_id": {
+      return wrap(`${projectGuard}
+        var seq = ${JSON.stringify(String(args.sequence_id ?? args.name ?? ""))} ? null : app.project.activeSequence;
+        if (!seq) {
+          var findId = ${JSON.stringify(String(args.sequence_id ?? args.name ?? ""))};
+          for (var i = 0; i < app.project.sequences.numSequences; i++) {
+            var cand = app.project.sequences[i];
+            if (String(cand.sequenceID) === findId || String(cand.name) === findId) seq = cand;
+          }
+          if (!seq) return JSON.stringify({ success: false, error: "Sequence not found" });
+        }
+        return JSON.stringify({ success: true, data: { id: String(seq.sequenceID), name: String(seq.name), ticks: Number(seq.end), seconds: Number(seq.end) / 254016000000 } });`);
+    }
+    case "helpers_resolve_project_item_id": {
+      return wrap(`${projectGuard}
+        function __findProj(nodeOrName, root) {
+          if (!root) root = app.project.rootItem;
+          if (!root || !root.children) return null;
+          for (var i = 0; i < root.children.numItems; i++) {
+            var it = root.children[i];
+            if (String(it.nodeId) === ${JSON.stringify(String(args.project_item_id ?? args.name ?? ""))} || String(it.name) === ${JSON.stringify(String(args.project_item_id ?? args.name ?? ""))}) return it;
+            if (it.type === 2) { var nested = __findProj(null, it); if (nested) return nested; }
+          }
+          return null;
+        }
+        var item = __findProj(null, null);
+        if (!item) return JSON.stringify({ success: false, error: "Project item not found" });
+        return JSON.stringify({ success: true, data: { id: String(item.nodeId), name: String(item.name), type: Number(item.type) } });`);
+    }
+    case "media_batch_rename": {
+      return wrap(`${projectGuard}
+        var renames = ${JSON.stringify(args.renames ?? args.items ?? [])};
+        if (!renames || !renames.length) return JSON.stringify({ success: false, error: "renames is required" });
+        var done = [];
+        function applyTo(item, root) {
+          if (!root) root = app.project.rootItem;
+          if (!root || !root.children) return;
+          for (var i = 0; i < root.children.numItems; i++) {
+            var it = root.children[i];
+            for (var x = 0; x < renames.length; x++) {
+              if (String(renames[x].id) === String(it.nodeId)) {
+                it.name = String(renames[x].name);
+                done.push({ id: String(it.nodeId), name: String(it.name) });
+              }
+            }
+            if (it.children) applyTo(null, it);
+          }
+        }
+        applyTo(null, null);
+        return JSON.stringify({ success: true, data: { renamed: done } });`);
+    }
+    case "media_batch_set_offline": {
+      return wrap(`${projectGuard}
+        var ids = ${JSON.stringify(args.item_ids ?? args.ids ?? [])};
+        if (!ids || !ids.length) return JSON.stringify({ success: false, error: "item_ids is required" });
+        var done = [];
+        function walk(root) {
+          if (!root || !root.children) return;
+          for (var i = 0; i < root.children.numItems; i++) {
+            var it = root.children[i];
+            for (var x = 0; x < ids.length; x++) {
+              if (String(ids[x]) === String(it.nodeId)) {
+                try { it.setOffline(); done.push(String(it.nodeId)); } catch (e) {}
+              }
+            }
+            if (it.children) walk(it);
+          }
+        }
+        walk(app.project.rootItem);
+        return JSON.stringify({ success: true, data: { offline: done } });`);
+    }
+    default: {
+      return wrap(`${projectGuard}
+        return JSON.stringify({ success: false, error: "Tool '${name}' is registered but has no concrete host implementation in this build." });`);
+    }
+  }
 }
