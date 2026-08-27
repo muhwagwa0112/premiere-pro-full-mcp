@@ -19,7 +19,11 @@ Write-Host "== 2/3: CEP extension (fallback track) =="
 
 Write-Host ""
 Write-Host "== 3/3: UXP bridge plugin (primary edit/export track) =="
-& (Join-Path $PSScriptRoot "install-uxp.ps1") @([switch]$NoDevMode)
+if ($NoDevMode) {
+    & (Join-Path $PSScriptRoot "install-uxp.ps1") -NoDevMode
+} else {
+    & (Join-Path $PSScriptRoot "install-uxp.ps1")
+}
 
 Write-Host ""
 Write-Host "Done. The bridge daemon now starts automatically at every logon."
