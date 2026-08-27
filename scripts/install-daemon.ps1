@@ -35,7 +35,8 @@ if (-not $nodeExe) {
     exit 1
 }
 
-$action = New-ScheduledTaskAction -Execute $nodeExe -Argument "`"$daemonJs`"" -WorkingDirectory $repoRoot
+$wrapper = Join-Path $PSScriptRoot "daemon-task-wrapper.ps1"
+$action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$wrapper`"" -WorkingDirectory $repoRoot
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
 $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited

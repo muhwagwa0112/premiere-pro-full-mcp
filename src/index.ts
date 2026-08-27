@@ -2,7 +2,7 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { BridgeClient } from "./bridge/ws-client.js";
 import { createMcpServer } from "./server.js";
-import { WsHost, DEFAULT_DAEMON_PORT, readBridgeEndpoint } from "./bridge/ws-host.js";
+import { DEFAULT_DAEMON_PORT, readBridgeEndpoint } from "./bridge/ws-host.js";
 
 /**
  * MCP stdio server entry point.
@@ -13,28 +13,30 @@ import { WsHost, DEFAULT_DAEMON_PORT, readBridgeEndpoint } from "./bridge/ws-hos
  * so the bridge is always ready once Premiere is open — no manual setup.
  */
 async function main(): Promise<void> {
-  // Ensure the daemon is up. If it is already listening (started at logon),
-  // connect to it as a client; otherwise start it in-process for this session.
+  // Connect to the always-on bridge daemon. The daemon is a separate,
+  // long-lived `dist/daemon.js` process (auto-started at logon). It must
+  // NEVER be self-hosted from inside this MCP server entry point: if the MCP
+  // server process owns the fixed port, the "daemon" dies whenever that
+  // client session ends, leaving a stale bridge-endpoint that other sessions
+  // read and then fail to reach. Connect as a client only.
   const existing = readBridgeEndpoint();
-  let connectedToDaemon = false;
-  if (existing && existing.port === DEFAULT_DAEMON_PORT) {
-    try {
-      const probe = await BridgeClient.connect(existing.port);
-      await probe.close();
-      connectedToDaemon = true;
-    } catch {
-      // Stale endpoint file — daemon is not actually reachable. Start fresh.
-    }
+  if (!existing || existing.port !== DEFAULT_DAEMON_PORT) {
+    process.stderr.write(
+      "[premiere-pro-full-mcp] fatal: bridge daemon endpoint not found. Run 'scripts/install-daemon.ps1' (or 'npm run build && node dist/daemon.js') to start the always-on bridge.\n",
+    );
+    process.exit(1);
   }
 
-  if (!connectedToDaemon) {
-    try {
-      await WsHost.start(DEFAULT_DAEMON_PORT);
-      connectedToDaemon = true;
-    } catch (error) {
-      // Another process bound the port (a real daemon). Use it as a client.
-      connectedToDaemon = true;
-    }
+  try {
+    const probe = await BridgeClient.connect(existing.port);
+    await probe.close();
+  } catch {
+    process.stderr.write(
+      "[premiere-pro-full-mcp] fatal: bridge daemon is not reachable at ws://127.0.0.1:" +
+        DEFAULT_DAEMON_PORT +
+        "/bridge. Start it with 'node dist/daemon.js' (installed as 'Premiere MCP Bridge Daemon').\n",
+    );
+    process.exit(1);
   }
 
   const bridge = await BridgeClient.connect(DEFAULT_DAEMON_PORT);
