@@ -8,7 +8,7 @@ const BRIDGE_SETTINGS_FILE_NAME = "bridge-settings-v1.json";
 const CAPABILITIES = [
   "host.inspect", "project.inspect", "sequence.inspect", "project.save", "project.close_disposable", "project.checkpoint", "captions.inspect",
   "media.relink", "media.proxy.attach", "timeline.track.set_mute", "timeline.clip.insert", "timeline.markers", "timeline.in_out", "timeline.playhead",
-  "timeline.clip.find", "timeline.clip.trim", "timeline.clip.effect", "timeline.clip.add_transition", "export.frame", "export.sequence",
+  "timeline.clip.find", "timeline.clip.trim", "timeline.clip.effect", "timeline.clip.add_transition", "timeline.clip.move_track", "timeline.clip.remove", "export.frame", "export.sequence",
   "uxp.catalog", "uxp.read", "uxp.edit", "uxp.sensitive", "uxp.filesystem", "uxp.destructive", "uxp.handle.release",
   "uxp.page.read", "uxp.transaction.execute", "uxp.locked.batch", "uxp.events.subscribe", "uxp.events.poll", "uxp.events.unsubscribe"
 ];
@@ -917,17 +917,29 @@ async function execute(operation, args, expectedRevision) {
     if (typeof ppro.SequenceEditor.getEditor !== "function" || typeof ppro.TrackItemSelection.createEmptySelection !== "function" || typeof context.project.lockedAccess !== "function" || typeof context.project.executeTransaction !== "function") {
       throw Object.assign(new Error("Transactional sequence editing APIs are unavailable"), { code: "UXP_SEQUENCE_EDIT_API_UNAVAILABLE" });
     }
+    // Premiere's TrackItemSelection.createEmptySelection is callback-based on
+    // this host (the .d.ts declares `createEmptySelection(cb): boolean`), but
+    // some UXP builds also accept a Promise-returning form. Either way calling
+    // it with NO argument throws "Not Enough Parameters", so we must always
+    // pass a callback (and resolve on a returned Promise when present).
+    const createEmptySelection = () => new Promise((resolve, reject) => {
+      try {
+        const maybe = ppro.TrackItemSelection.createEmptySelection((sel) => resolve(sel));
+        if (maybe && typeof maybe.then === "function") maybe.then(resolve).catch(reject);
+      } catch (error) { reject(error); }
+    });
     const mediaType = args.mediaType === "audio" ? ppro.Constants.MediaType.AUDIO : ppro.Constants.MediaType.VIDEO;
     const ripple = args.ripple !== false;
     const trackItems = Array.isArray(args.trackItems) ? await Promise.all(args.trackItems.map((ref) => semanticHandle(ref, ["VideoClipTrackItem", "AudioClipTrackItem"], activeProjectIdentity))) : [];
     if (trackItems.length === 0) trackItems.push(trackItem);
     let removedDispatched = false;
     try {
+      const selection = await createEmptySelection();
+      if (!selection) throw Object.assign(new Error("Premiere returned an empty track item selection"), { code: "UXP_EMPTY_TRACK_SELECTION" });
+      for (const item of trackItems) selection.addItem(item, false);
       context.project.lockedAccess(function () {
         const editor = ppro.SequenceEditor.getEditor(sequence);
         if (!editor || typeof editor.createRemoveItemsAction !== "function") throw Object.assign(new Error("Sequence editor is unavailable"), { code: "UXP_SEQUENCE_EDITOR_UNAVAILABLE" });
-        const selection = ppro.TrackItemSelection.createEmptySelection();
-        for (const item of trackItems) selection.addItem(item, false);
         const action = editor.createRemoveItemsAction(selection, ripple, mediaType, args.shiftOverlapping === true);
         removedDispatched = true;
         context.project.executeTransaction((compoundAction) => { compoundAction.addAction(action); }, "Premiere MCP remove track items");

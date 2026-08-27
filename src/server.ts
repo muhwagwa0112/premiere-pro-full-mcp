@@ -565,19 +565,19 @@ export const UXP_ROUTES: Record<string, UxpRoute> = {
   ripple_delete: {
     steps: [
       { operation: "timeline.clip.find", map: (args) => ({ mediaType: args.media_type === "audio" ? "audio" : "video", trackIndex: args.track_index ?? 0, clipIndex: args.clip_index ?? 0, clipName: args.clip_name }) },
-      { operation: "timeline.clip.remove", map: (args) => ({ trackItem: (args as Record<string, unknown>).$_handle, ripple: true }) },
+      { operation: "timeline.clip.remove", map: (args) => ({ trackItem: (args as Record<string, unknown>).$_handle, mediaType: (args as Record<string, unknown>).media_type === "audio" ? "audio" : "video", ripple: true }) },
     ],
   },
   remove_from_timeline: {
     steps: [
       { operation: "timeline.clip.find", map: (args) => ({ mediaType: args.media_type === "audio" ? "audio" : "video", trackIndex: args.track_index ?? 0, clipIndex: args.clip_index ?? 0, clipName: args.clip_name }) },
-      { operation: "timeline.clip.remove", map: (args) => ({ trackItem: (args as Record<string, unknown>).$_handle, ripple: args.ripple !== false }) },
+      { operation: "timeline.clip.remove", map: (args) => ({ trackItem: (args as Record<string, unknown>).$_handle, mediaType: (args as Record<string, unknown>).media_type === "audio" ? "audio" : "video", ripple: args.ripple !== false }) },
     ],
   },
   remove_selected_clips: {
     steps: [
       { operation: "timeline.clip.find", map: (args) => ({ mediaType: args.media_type === "audio" ? "audio" : "video", trackIndex: args.track_index ?? 0, clipIndex: args.clip_index ?? 0, clipName: args.clip_name }) },
-      { operation: "timeline.clip.remove", map: (args) => ({ trackItem: (args as Record<string, unknown>).$_handle, ripple: args.ripple !== false }) },
+      { operation: "timeline.clip.remove", map: (args) => ({ trackItem: (args as Record<string, unknown>).$_handle, mediaType: (args as Record<string, unknown>).media_type === "audio" ? "audio" : "video", ripple: args.ripple !== false }) },
     ],
   },
 
