@@ -69,7 +69,7 @@ function normalizeUpstream(raw: unknown): unknown {
  * call is one round-trip.
  */
 export function createMcpServer(bridge: BridgeClient): McpServer {
-  const server = new McpServer({ name: "premiere-pro-full-mcp", version: "1.1.0" });
+  const server = new McpServer({ name: "premiere-pro-full-mcp", version: "1.2.0" });
 
   const upstream = getUpstreamToolModules(bridge);
 
@@ -81,17 +81,29 @@ export function createMcpServer(bridge: BridgeClient): McpServer {
     },
     annotations: { readOnlyHint: true, openWorldHint: false },
   }, async () => {
-    let uxp = { connected: false, hostVersion: null, capabilities: [] as string[] };
+    let uxp: { connected: boolean; hostVersion: null | string; capabilities: string[]; operations: string[]; catalogCounts: unknown } = { connected: false, hostVersion: null, capabilities: [], operations: [], catalogCounts: null };
     try {
-      const probe = (await bridge.uxp("uxp.catalog", { query: "", limit: 1 })) as { counts?: unknown } | null;
-      uxp = { connected: true, hostVersion: null, capabilities: [] };
-      void probe;
+      const probe = (await bridge.uxp("uxp.catalog", { query: "", limit: 1 })) as { counts?: unknown; advertisedOperations?: string[]; fingerprint?: string } | null;
+      if (probe && typeof probe === "object") {
+        uxp = {
+          connected: true,
+          hostVersion: null,
+          capabilities: Array.isArray((probe as { advertisedOperations?: unknown }).advertisedOperations) ? (probe as { advertisedOperations: string[] }).advertisedOperations : [],
+          operations: Array.isArray((probe as { advertisedOperations?: unknown }).advertisedOperations) ? (probe as { advertisedOperations: string[] }).advertisedOperations : [],
+          catalogCounts: (probe as { counts?: unknown }).counts ?? null,
+        };
+      } else {
+        uxp = { connected: true, hostVersion: null, capabilities: [], operations: [], catalogCounts: null };
+      }
     } catch {
-      uxp = { connected: false, hostVersion: null, capabilities: [] };
+      uxp = { connected: false, hostVersion: null, capabilities: [], operations: [], catalogCounts: null };
     }
     return textResult({
       connected: bridge.connected,
       uxpConnected: uxp.connected,
+      uxpOperations: uxp.operations,
+      uxpHostVersion: uxp.hostVersion,
+      uxpCatalogCounts: uxp.catalogCounts,
       toolCount: Object.keys(upstream).length,
       extraCount: EXTRA_TOOL_NAMES.length,
       total: Object.keys(upstream).length + EXTRA_TOOL_NAMES.length + 1,
@@ -425,6 +437,32 @@ function timecodeToSeconds(timecode: string, fps: number): number {
 const UXP_FALLTHROUGH = Symbol("UXP_FALLTHROUGH");
 
 /**
+ * A single UXP operation step. `operation` is the panel command name, `map` is
+ * an optional pure transformer turning the MCP args (plus any handle produced
+ * by a previous step via `$_handle`) into the step's wire arguments.
+ */
+interface UxpRouteStep {
+  operation: string;
+  map?: (args: Record<string, unknown>) => Record<string, unknown>;
+}
+
+type UxpRoute = UxpRouteStep | { steps: UxpRouteStep[] };
+
+/** Normalize a UXP panel result to a plain value (unwrap the {success,data} wrapper). */
+function unwrapUxpResult(uxpResult: unknown): unknown | typeof UXP_FALLTHROUGH {
+  if (uxpResult === undefined || uxpResult === null) return {};
+  if (uxpResult && typeof uxpResult === "object") {
+    const rec = uxpResult as { success?: boolean; data?: unknown; error?: string; code?: string };
+    if (rec.success === false) {
+      if (rec.code === "UXP_UNAVAILABLE" || rec.code === "UXP_NOT_CONNECTED") return UXP_FALLTHROUGH;
+      return { success: false, error: String(rec.error ?? "UXP operation failed"), code: String(rec.code ?? "UXP_FAILED") };
+    }
+    if ("data" in rec && rec.data !== undefined) return rec.data;
+  }
+  return uxpResult;
+}
+
+/**
  * Dispatch a named tool through the UXP bridge path. Returns a normalized
  * { success, data|error } result. If the UXP panel is not connected or this
  * operation is not in the route map, returns UXP_FALLTHROUGH so the caller can
@@ -434,37 +472,201 @@ const UXP_FALLTHROUGH = Symbol("UXP_FALLTHROUGH");
 async function dispatchUxp(bridge: BridgeClient, name: string, args: Record<string, unknown>): Promise<unknown | typeof UXP_FALLTHROUGH> {
   const route = UXP_ROUTES[name];
   if (!route) return UXP_FALLTHROUGH;
-  const mappedArgs = route.map ? route.map(args) : args;
-  if (process.env.PREMIERE_MCP_DEBUG === "1") process.stderr.write(`[uxp] ${name} args=${JSON.stringify(args)} mapped=${JSON.stringify(mappedArgs)}\n`);
-  const uxpResult = (await bridge.uxp(route.operation, mappedArgs)) as { success?: boolean; data?: unknown; error?: string; code?: string };
-  // The UXP bridge returns the panel's operation result directly (no
-  // {success,data} wrapper) on success. Treat a non-error value as the result.
-  if (uxpResult === undefined || uxpResult === null) return {};
-  if (uxpResult?.success === false) {
-    // If the panel is simply not connected, let the upstream handler run so it
-    // can return the documented CEP-only unsupported error.
-    if (uxpResult.code === "UXP_UNAVAILABLE" || uxpResult.code === "UXP_NOT_CONNECTED") return UXP_FALLTHROUGH;
-    return { success: false, error: String(uxpResult.error ?? "UXP operation failed"), code: String(uxpResult.code ?? "UXP_FAILED") };
+  const steps: UxpRouteStep[] = "steps" in route ? route.steps : [route as UxpRouteStep];
+  let handle: Record<string, unknown> | null = null;
+  let resolved = { ...args };
+  // Some destructive clip tools target a clip by its CEP `node_id` (a QE client
+  // id) which has no UXP equivalent. The server resolves node_id -> (track,
+  // clip start/index) by reading the active sequence over the CEP bridge, then
+  // feeds those coordinates into the UXP find step. This makes the handle-based
+  // UXP ops usable from the existing tool schema without any agent code change.
+  if (args && typeof args.node_id === "string" && args.node_id.length) {
+    const locate = await resolveNodeIdInSequence(bridge, args.node_id);
+    if (locate) resolved = { ...resolved, track_index: locate.trackIndex, clip_index: locate.clipIndex, clip_name: locate.clipName, clip_start_seconds: locate.startSeconds };
   }
-  return "data" in (uxpResult as object) && (uxpResult as { data?: unknown }).data !== undefined
-    ? (uxpResult as { data?: unknown }).data
-    : uxpResult;
+  for (const step of steps) {
+    const stepSource = { ...resolved, ...(handle ? { $_handle: handle } : {}) };
+    const stepArgs = step.map ? step.map(stepSource) : stepSource;
+    if (process.env.PREMIERE_MCP_DEBUG === "1") process.stderr.write(`[uxp] ${name} -> ${step.operation} args=${JSON.stringify(stepArgs)}\n`);
+    const uxpResult = (await bridge.uxp(step.operation, stepArgs)) as { success?: boolean; data?: unknown; error?: string; code?: string };
+    const unwrapped = unwrapUxpResult(uxpResult);
+    if (unwrapped === UXP_FALLTHROUGH) return UXP_FALLTHROUGH;
+    if (unwrapped && typeof unwrapped === "object" && (unwrapped as { success?: boolean }).success === false) return unwrapped;
+    // If a step returned a session-scoped handle, thread it to the next step.
+    const data = unwrapped && typeof unwrapped === "object" ? (unwrapped as { handle?: Record<string, unknown>; result?: { handle?: Record<string, unknown> } }).handle ?? (unwrapped as { result?: { handle?: Record<string, unknown> } }).result?.handle ?? null : null;
+    if (data) handle = data;
+    // The last step's output is the tool result; intermediate steps only feed
+    // the handle. If a step is the final one, return its whole result.
+    if (step === steps[steps.length - 1]) return unwrapped;
+  }
+  return {};
 }
 
 /**
  * UXP second track: tools whose only truthful implementation lives on the
  * Premiere UXP panel bridge. Each entry maps the flat MCP tool name to a UXP
- * operation. These operations need UXP APIs that CEP/ExtendScript cannot
- * reach, so we route them through bridge.uxp() when the panel is connected.
+ * operation (or a small pipeline of operations) that needs UXP APIs which
+ * CEP/ExtendScript cannot reach, so we route them through bridge.uxp() when the
+ * panel is connected. Operators can either be a single `operation` + `map`
+ * (one UXP call) or a `steps` array where earlier steps may return a
+ * session-scoped handle that later steps reference via `$_handle`.
  */
-export const UXP_ROUTES: Record<string, { operation: string; map?: (args: Record<string, unknown>) => Record<string, unknown> }> = {
-  // Frame / sequence export via Exporter (CEP lacks exportFramePNG).
+export const UXP_ROUTES: Record<string, UxpRoute> = {
+  // --- Frame / sequence export via Exporter (CEP lacks exportFramePNG). ---
   // export_frame takes an output_path (single named destination). capture_frame
   // captures "the current frame" without a destination in its schema, so we
   // synthesize a stable temp path and run the same UXP Exporter path.
   capture_frame: { operation: "export.frame", map: (args) => ({ outputPath: String(args.output_path ?? join(tmpdir(), `ppmc_frame_${Date.now()}.png`)), timeSeconds: args.time_seconds, format: args.format }) },
   export_frame: { operation: "export.frame", map: (args) => ({ outputPath: String(args.output_path ?? ""), timeSeconds: args.time_seconds, format: args.format }) },
+
+  // --- Track mute / visibility are UXP-only (AudioTrack.setMute is not over
+  // CEP/ExtendScript). We route the mediaType + trackIndex straight through.
+  mute_track: { operation: "timeline.track.set_mute", map: (args) => ({ mediaType: args.track_type === "audio" ? "audio" : "video", trackIndex: args.track_index, muted: args.muted !== false }) },
+  toggle_track_visibility: { operation: "timeline.track.set_mute", map: (args) => ({ mediaType: args.track_type === "audio" ? "audio" : "video", trackIndex: args.track_index, muted: args.visibility === false || args.hidden === true }) },
+
+  // --- Video transition add via UXP-only TransitionFactory. The upstream
+  // add_transition family cannot reach these APIs over CEP; route them to the
+  // panel's timeline.clip.add_transition. The clip must first be resolved to a
+  // track item handle via timeline.clip.find using the tool's coordinates.
+  add_transition: {
+    steps: [
+      { operation: "timeline.clip.find", map: (args) => ({ mediaType: "video", trackIndex: args.track_index ?? 0, clipTimeSeconds: args.cut_point_seconds, clipName: args.clip_name }) },
+      { operation: "timeline.clip.add_transition", map: (args) => ({ trackItem: (args as Record<string, unknown>).$_handle, matchName: args.transition_name ?? "Cross Dissolve", durationSeconds: args.duration_seconds }) },
+    ],
+  },
+  add_transition_to_clip: {
+    steps: [
+      { operation: "timeline.clip.find", map: (args) => ({ mediaType: "video", trackIndex: args.track_index ?? 0, clipIndex: args.clip_index ?? 0, clipName: args.clip_name }) },
+      { operation: "timeline.clip.add_transition", map: (args) => ({ trackItem: (args as Record<string, unknown>).$_handle, matchName: args.transition_name ?? "Cross Dissolve", durationSeconds: args.duration_seconds }) },
+    ],
+  },
+
+  // --- Clip move / delete / trim via UXP-only SequenceEditor actions. The
+  // server resolves a clip `node_id` to coordinates (track + index from a CEP
+  // read) before the panel finds the session handle and runs the transaction.
+  move_clip: {
+    steps: [
+      { operation: "timeline.clip.find", map: (args) => ({ mediaType: "video", trackIndex: args.track_index ?? 0, clipIndex: args.clip_index ?? 0, clipName: args.clip_name }) },
+      { operation: "timeline.clip.move_track", map: (args) => ({ trackItem: (args as Record<string, unknown>).$_handle, timeOffsetSeconds: args.new_start_seconds ?? 0 }) },
+    ],
+  },
+  move_clip_to_track: {
+    steps: [
+      { operation: "timeline.clip.find", map: (args) => ({ mediaType: "video", trackIndex: args.track_index ?? 0, clipIndex: args.clip_index ?? 0, clipName: args.clip_name }) },
+      { operation: "timeline.clip.move_track", map: (args) => ({ trackItem: (args as Record<string, unknown>).$_handle, videoTrackVerticalOffset: args.target_track_index ?? 0, audioTrackVerticalOffset: 0, alignToVideo: false }) },
+    ],
+  },
+  trim_clip: {
+    steps: [
+      { operation: "timeline.clip.find", map: (args) => ({ mediaType: args.media_type === "audio" ? "audio" : "video", trackIndex: args.track_index ?? 0, clipIndex: args.clip_index ?? 0, clipName: args.clip_name }) },
+      { operation: "timeline.clip.trim", map: (args) => ({ trackItem: (args as Record<string, unknown>).$_handle, startTimeSeconds: args.new_in_seconds, endTimeSeconds: args.new_out_seconds }) },
+    ],
+  },
+  ripple_delete: {
+    steps: [
+      { operation: "timeline.clip.find", map: (args) => ({ mediaType: args.media_type === "audio" ? "audio" : "video", trackIndex: args.track_index ?? 0, clipIndex: args.clip_index ?? 0, clipName: args.clip_name }) },
+      { operation: "timeline.clip.remove", map: (args) => ({ trackItem: (args as Record<string, unknown>).$_handle, ripple: true }) },
+    ],
+  },
+  remove_from_timeline: {
+    steps: [
+      { operation: "timeline.clip.find", map: (args) => ({ mediaType: args.media_type === "audio" ? "audio" : "video", trackIndex: args.track_index ?? 0, clipIndex: args.clip_index ?? 0, clipName: args.clip_name }) },
+      { operation: "timeline.clip.remove", map: (args) => ({ trackItem: (args as Record<string, unknown>).$_handle, ripple: args.ripple !== false }) },
+    ],
+  },
+  remove_selected_clips: {
+    steps: [
+      { operation: "timeline.clip.find", map: (args) => ({ mediaType: args.media_type === "audio" ? "audio" : "video", trackIndex: args.track_index ?? 0, clipIndex: args.clip_index ?? 0, clipName: args.clip_name }) },
+      { operation: "timeline.clip.remove", map: (args) => ({ trackItem: (args as Record<string, unknown>).$_handle, ripple: args.ripple !== false }) },
+    ],
+  },
+
+  // --- Effect add/remove via UXP-only component-chain actions. The server
+  // resolves the node_id to coordinates; the panel then applies/removes by name.
+  apply_effect: {
+    steps: [
+      { operation: "timeline.clip.find", map: (args) => ({ mediaType: "video", trackIndex: args.track_index ?? 0, clipIndex: args.clip_index ?? 0, clipName: args.clip_name }) },
+      { operation: "timeline.clip.effect", map: (args) => ({ trackItem: (args as Record<string, unknown>).$_handle, mediaType: "video", mode: "append", effectName: args.effect_name ?? args.effect_type ?? "Gaussian Blur" }) },
+    ],
+  },
+  apply_audio_effect: {
+    steps: [
+      { operation: "timeline.clip.find", map: (args) => ({ mediaType: "audio", trackIndex: args.track_index ?? 0, clipIndex: args.clip_index ?? 0, clipName: args.clip_name }) },
+      { operation: "timeline.clip.effect", map: (args) => ({ trackItem: (args as Record<string, unknown>).$_handle, mediaType: "audio", mode: "append", effectName: args.effect_name ?? args.effect_type ?? "DeEsser" }) },
+    ],
+  },
+  remove_effect: {
+    steps: [
+      { operation: "timeline.clip.find", map: (args) => ({ mediaType: args.media_type === "audio" ? "audio" : "video", trackIndex: args.track_index ?? 0, clipIndex: args.clip_index ?? 0, clipName: args.clip_name }) },
+      { operation: "timeline.clip.effect", map: (args) => ({ trackItem: (args as Record<string, unknown>).$_handle, mediaType: args.media_type === "audio" ? "audio" : "video", mode: "remove", effectName: args.effect_name ?? args.effect_type }) },
+    ],
+  },
+  remove_effect_by_name: {
+    steps: [
+      { operation: "timeline.clip.find", map: (args) => ({ mediaType: "video", trackIndex: args.track_index ?? 0, clipIndex: args.clip_index ?? 0, clipName: args.clip_name }) },
+      { operation: "timeline.clip.effect", map: (args) => ({ trackItem: (args as Record<string, unknown>).$_handle, mediaType: "video", mode: "remove", effectName: args.effect_name ?? args.match_name }) },
+    ],
+  },
 };
+
+/**
+ * Resolve a CEP clip `node_id` to (track_index, clip_index, name, start) by
+ * reading the active sequence over the CEP bridge. `node_id` is the QE client id
+ * reported by get_full_sequence_info; UXP has no equivalent, so the server maps
+ * it to coordinates before handing the handle-based UXP ops a clip to resolve.
+ * Returns null when the active sequence/clip cannot be located (the caller then
+ * lets the UXP find step return an honest error or falls back to CEP).
+ */
+async function resolveNodeIdInSequence(bridge: BridgeClient, nodeId: string): Promise<{ trackIndex: number; clipIndex: number; clipName: string; startSeconds: number } | null> {
+  const script = `
+    (function(){
+      var seq = app.project ? app.project.activeSequence : null;
+      if (!seq) return JSON.stringify({ success: false, error: "No active sequence" });
+      var target = ${JSON.stringify(String(nodeId))};
+      function scanTracks(getCount, getTrack, mediaType) {
+        var count = seq[getCount] ? seq[getCount]() : 0;
+        for (var t = 0; t < count; t++) {
+          var tr = seq[getTrack](t);
+          if (!tr || !tr.getTrackItems) continue;
+          var items = tr.getTrackItems(1, false); // 1 == CLIP
+          if (!items) continue;
+          for (var i = 0; i < items.numItems; i++) {
+            var it = items[i];
+            if (!it) continue;
+            try {
+              var id = String(it.nodeId || it.matchName || "");
+              if (id === target) {
+                var start = it.start ? it.start.seconds : 0;
+                var name = String(it.name || "");
+                return JSON.stringify({ success: true, data: { trackIndex: t, clipIndex: i, clipName: name, startSeconds: start, mediaType: mediaType } });
+              }
+            } catch (_) {}
+          }
+        }
+        return null;
+      }
+      var v = scanTracks("getVideoTrackCount", "getVideoTrack", "video");
+      if (v) return v;
+      var a = scanTracks("getAudioTrackCount", "getAudioTrack", "audio");
+      if (a) return a;
+      return JSON.stringify({ success: false, error: "Clip node_id not found in active sequence" });
+    })();
+  `;
+  const raw = await bridge.executeScript(script, 20_000);
+  const parsed = raw as { success?: boolean; data?: { trackIndex: number; clipIndex: number; clipName: string; startSeconds: number; mediaType?: string } } | string;
+  const obj = typeof parsed === "string" ? safeJson(parsed) : parsed;
+  if (obj && obj.success === true && obj.data && typeof obj.data === "object") {
+    const d = obj.data as { trackIndex?: number; clipIndex?: number; clipName?: string; startSeconds?: number };
+    if (d && typeof d.trackIndex === "number" && typeof d.clipIndex === "number") {
+      return { trackIndex: d.trackIndex, clipIndex: d.clipIndex, clipName: String(d.clipName ?? ""), startSeconds: Number(d.startSeconds ?? 0) };
+    }
+  }
+  return null;
+}
+
+function safeJson(value: string): Record<string, unknown> | null {
+  try { return JSON.parse(value) as Record<string, unknown>; } catch { return null; }
+}
 
 /**
  * Build a concrete ExtendScript for the remaining extras that have no direct

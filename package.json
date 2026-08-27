@@ -1,8 +1,8 @@
 {
   "name": "premiere-pro-full-mcp",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
-  "description": "Local-first MCP server for Adobe Premiere Pro with 353 flat tools over a dual-track CEP + UXP bridge.",
+  "description": "Local-first MCP server for Adobe Premiere Pro with 354 flat tools over a dual-track CEP + UXP bridge.",
   "type": "module",
   "main": "dist/index.js",
   "bin": {

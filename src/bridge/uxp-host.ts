@@ -1,5 +1,5 @@
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createServer as createHttpServer, type Server as HttpServer } from "node:http";
@@ -290,6 +290,22 @@ export function readUxpAuthSecret(): string {
   const raw = readFileSync(uxpAuthFilePath(), "utf8").trim().toLowerCase();
   if (!/^[a-f0-9]{64}$/.test(raw)) throw new Error("UXP authentication data is invalid");
   return raw;
+}
+
+/**
+ * Return the shared UXP HMAC secret, creating a fresh 256-bit key on first
+ * use so the daemon and installer never fail just because the key file does
+ * not yet exist. The panel reads the same file during its handshake, so both
+ * sides converge on the same secret without any shared external state.
+ */
+export function ensureUxpAuthSecret(): string {
+  const path = uxpAuthFilePath();
+  if (existsSync(path)) {
+    try { return readUxpAuthSecret(); } catch { /* fall through and regenerate */ }
+  }
+  const secret = randomBytes(32).toString("hex");
+  writeFileSync(path, `${secret}\n`, { mode: 0o600, encoding: "utf8" });
+  return secret;
 }
 
 export function uxpPluginDataDir(): string {

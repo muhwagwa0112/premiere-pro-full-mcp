@@ -1,5 +1,5 @@
 import { WsHost, DEFAULT_DAEMON_PORT, daemonStateDir, daemonEndpointPath, daemonPidFile } from "./bridge/ws-host.js";
-import { UxpBridgeHost, UXP_DEFAULT_PORT, readUxpAuthSecret, uxpPluginDataDir, uxpAuthRootDir } from "./bridge/uxp-host.js";
+import { UxpBridgeHost, UXP_DEFAULT_PORT, ensureUxpAuthSecret, uxpPluginDataDir, uxpAuthRootDir } from "./bridge/uxp-host.js";
 import { createRequire } from "node:module";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -9,17 +9,19 @@ import { join } from "node:path";
 // { fingerprint, counts }.
 function loadUxpApiFingerprint(): string {
   const require = createRequire(import.meta.url);
-  const catalogPath = join(
-    process.env.LOCALAPPDATA ?? "",
-    "PremiereMCP",
-    "uxp-plugin-0.4.0",
-    "api-catalog.cjs",
-  );
-  try {
-    const catalog = require(catalogPath) as { fingerprint?: string };
-    if (typeof catalog.fingerprint === "string" && /^[a-f0-9]{64}$/.test(catalog.fingerprint)) return catalog.fingerprint;
-  } catch {
-    // Fall through to the known fingerprint.
+  // Prefer the repo-owned catalog (the source of truth), then the app-local
+  // copy used by the dev-mode loader, then the built-in known fingerprint.
+  const candidates = [
+    join(process.cwd() ?? "", "uxp-plugin", "api-catalog.cjs"),
+    join(process.env.LOCALAPPDATA ?? "", "PremiereMCP", "uxp-plugin-0.4.0", "api-catalog.cjs"),
+  ];
+  for (const catalogPath of candidates) {
+    try {
+      const catalog = require(catalogPath) as { fingerprint?: string };
+      if (typeof catalog.fingerprint === "string" && /^[a-f0-9]{64}$/.test(catalog.fingerprint)) return catalog.fingerprint;
+    } catch {
+      // Try the next candidate.
+    }
   }
   return "3ad423e187ccb155afd139a8181bdc3093de357fb183d7505b4a00e1e3c3b17e";
 }
@@ -50,7 +52,7 @@ export async function runDaemon(options: { port?: number } = {}): Promise<{ host
 
 /** Start the UXP bridge (the second track) alongside the CEP daemon. */
 export async function startUxpBridge(): Promise<{ host: UxpBridgeHost; port: number }> {
-  const authSecret = readUxpAuthSecret();
+  const authSecret = ensureUxpAuthSecret();
   const fingerprint = loadUxpApiFingerprint();
   const host = await UxpBridgeHost.start({ port: UXP_DEFAULT_PORT, apiFingerprint: fingerprint, authSecret });
   // Publish the bridge port into the same plugin data folder the panel reads
@@ -90,4 +92,4 @@ if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith
     });
 }
 
-export { UxpBridgeHost, UXP_DEFAULT_PORT, readUxpAuthSecret, uxpAuthRootDir };
+export { UxpBridgeHost, UXP_DEFAULT_PORT, ensureUxpAuthSecret, uxpAuthRootDir };
