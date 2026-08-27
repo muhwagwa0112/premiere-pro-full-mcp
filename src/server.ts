@@ -574,12 +574,6 @@ export const UXP_ROUTES: Record<string, UxpRoute> = {
       { operation: "timeline.clip.remove", map: (args) => ({ trackItem: (args as Record<string, unknown>).$_handle, mediaType: (args as Record<string, unknown>).media_type === "audio" ? "audio" : "video", ripple: args.ripple !== false }) },
     ],
   },
-  remove_selected_clips: {
-    steps: [
-      { operation: "timeline.clip.find", map: (args) => ({ mediaType: args.media_type === "audio" ? "audio" : "video", trackIndex: args.track_index ?? 0, clipIndex: args.clip_index ?? 0, clipName: args.clip_name }) },
-      { operation: "timeline.clip.remove", map: (args) => ({ trackItem: (args as Record<string, unknown>).$_handle, mediaType: (args as Record<string, unknown>).media_type === "audio" ? "audio" : "video", ripple: args.ripple !== false }) },
-    ],
-  },
 
   // --- Effect add/remove via UXP-only component-chain actions. The server
   // resolves the node_id to coordinates; the panel then applies/removes by name.
