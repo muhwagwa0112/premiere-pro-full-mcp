@@ -102,16 +102,11 @@ export class WsHost {
     }
     const kind = String(msg.kind ?? "");
     if (kind === "ready") {
-      // Only a CEP host announces with `ready`. We keep the first live host
-      // so a stray, or a reconnect race, cannot steal the executing socket.
-      // If the current host is already open and healthy, a late `ready` from
-      // another connection (or a reconnect of the same host) is ignored rather
-      // than silently replacing it mid-flight.
-      const current = this.#cepSocket;
-      if (current && current.readyState === current.OPEN) {
-        socket.send(JSON.stringify({ kind: "hello", ok: true, port: this.#port, host: "already-connected" }));
-        return;
-      }
+      // A CEP host announces via `ready`. Adopt the announcing socket as the
+      // executing host. This must replace any prior socket so a freshly
+      // reconnected CEP (after the daemon or the panel reconnects) becomes
+      // live again; otherwise the panel stays "connecting" forever because the
+      // daemon keeps routing to a stale/disconnected socket.
       this.#cepSocket = socket;
       socket.send(JSON.stringify({ kind: "hello", ok: true, port: this.#port }));
       return;
