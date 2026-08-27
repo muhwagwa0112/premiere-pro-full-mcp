@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "premiere-pro-full-mcp": {
+      "title": "Premiere Pro Full MCP",
+      "description": "Local-first Adobe Premiere Pro MCP: 354 flat tools over a dual-track CEP + UXP bridge.",
+      "command": "node",
+      "args": [
+        "D:\\PP_MCP\\dist\\index.js"
+      ],
+      "env": {
+        "LOCALAPPDATA": "C:\\Users\\lufth\\AppData\\Local"
+      }
+    }
+  }
+}
