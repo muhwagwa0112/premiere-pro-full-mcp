@@ -2,6 +2,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { getUpstreamToolModules } from "../vendor/upstream/tools/catalog.js";
 import { EXTRA_TOOL_NAMES } from "./tool-names.js";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 /**
  * Transport that upstream tool handlers talk to.
@@ -432,14 +434,21 @@ const UXP_FALLTHROUGH = Symbol("UXP_FALLTHROUGH");
 async function dispatchUxp(bridge: BridgeClient, name: string, args: Record<string, unknown>): Promise<unknown | typeof UXP_FALLTHROUGH> {
   const route = UXP_ROUTES[name];
   if (!route) return UXP_FALLTHROUGH;
-  const uxpResult = (await bridge.uxp(route.operation, route.map ? route.map(args) : args)) as { success?: boolean; data?: unknown; error?: string; code?: string };
+  const mappedArgs = route.map ? route.map(args) : args;
+  if (process.env.PREMIERE_MCP_DEBUG === "1") process.stderr.write(`[uxp] ${name} args=${JSON.stringify(args)} mapped=${JSON.stringify(mappedArgs)}\n`);
+  const uxpResult = (await bridge.uxp(route.operation, mappedArgs)) as { success?: boolean; data?: unknown; error?: string; code?: string };
+  // The UXP bridge returns the panel's operation result directly (no
+  // {success,data} wrapper) on success. Treat a non-error value as the result.
+  if (uxpResult === undefined || uxpResult === null) return {};
   if (uxpResult?.success === false) {
     // If the panel is simply not connected, let the upstream handler run so it
     // can return the documented CEP-only unsupported error.
     if (uxpResult.code === "UXP_UNAVAILABLE" || uxpResult.code === "UXP_NOT_CONNECTED") return UXP_FALLTHROUGH;
     return { success: false, error: String(uxpResult.error ?? "UXP operation failed"), code: String(uxpResult.code ?? "UXP_FAILED") };
   }
-  return uxpResult?.data ?? {};
+  return "data" in (uxpResult as object) && (uxpResult as { data?: unknown }).data !== undefined
+    ? (uxpResult as { data?: unknown }).data
+    : uxpResult;
 }
 
 /**
@@ -450,7 +459,10 @@ async function dispatchUxp(bridge: BridgeClient, name: string, args: Record<stri
  */
 export const UXP_ROUTES: Record<string, { operation: string; map?: (args: Record<string, unknown>) => Record<string, unknown> }> = {
   // Frame / sequence export via Exporter (CEP lacks exportFramePNG).
-  capture_frame: { operation: "export.frame", map: (args) => ({ outputPath: String(args.output_path ?? ""), timeSeconds: args.time_seconds, format: args.format }) },
+  // export_frame takes an output_path (single named destination). capture_frame
+  // captures "the current frame" without a destination in its schema, so we
+  // synthesize a stable temp path and run the same UXP Exporter path.
+  capture_frame: { operation: "export.frame", map: (args) => ({ outputPath: String(args.output_path ?? join(tmpdir(), `ppmc_frame_${Date.now()}.png`)), timeSeconds: args.time_seconds, format: args.format }) },
   export_frame: { operation: "export.frame", map: (args) => ({ outputPath: String(args.output_path ?? ""), timeSeconds: args.time_seconds, format: args.format }) },
 };
 
