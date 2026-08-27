@@ -105,6 +105,26 @@ export class BridgeClient {
     });
   }
 
+  /**
+   * Dispatch a UXP operation to the connected UXP panel through the daemon.
+   * Returns the model's normalized { success, data|error } object. This is the
+   * second track used by tools that can only run over the UXP bridge.
+   */
+  async uxp(operation: string, args: Record<string, unknown> = {}, expectedRevision?: string): Promise<unknown> {
+    await this.#open();
+    const requestId = randomUUID();
+    const ws = this.#ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) throw new Error("Bridge connection is not open");
+    return await new Promise<unknown>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.#pending.delete(requestId);
+        reject(new Error("Premiere UXP host execution timed out"));
+      }, 30_000);
+      this.#pending.set(requestId, { resolve, reject, timer });
+      ws.send(JSON.stringify({ kind: "uxp", requestId, operation, args, expectedRevision }));
+    });
+  }
+
   get connected(): boolean {
     return this.#ws !== null && this.#ws.readyState === WebSocket.OPEN;
   }

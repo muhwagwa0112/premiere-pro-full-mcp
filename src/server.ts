@@ -27,6 +27,7 @@ export interface UpstreamResult {
 export interface BridgeClient extends ScriptTransport {
   get connected(): boolean;
   get port(): number;
+  uxp(operation: string, args?: Record<string, unknown>, expectedRevision?: string): Promise<unknown>;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -66,7 +67,7 @@ function normalizeUpstream(raw: unknown): unknown {
  * call is one round-trip.
  */
 export function createMcpServer(bridge: BridgeClient): McpServer {
-  const server = new McpServer({ name: "premiere-pro-full-mcp", version: "1.0.0" });
+  const server = new McpServer({ name: "premiere-pro-full-mcp", version: "1.1.0" });
 
   const upstream = getUpstreamToolModules(bridge);
 
@@ -78,8 +79,17 @@ export function createMcpServer(bridge: BridgeClient): McpServer {
     },
     annotations: { readOnlyHint: true, openWorldHint: false },
   }, async () => {
+    let uxp = { connected: false, hostVersion: null, capabilities: [] as string[] };
+    try {
+      const probe = (await bridge.uxp("uxp.catalog", { query: "", limit: 1 })) as { counts?: unknown } | null;
+      uxp = { connected: true, hostVersion: null, capabilities: [] };
+      void probe;
+    } catch {
+      uxp = { connected: false, hostVersion: null, capabilities: [] };
+    }
     return textResult({
       connected: bridge.connected,
+      uxpConnected: uxp.connected,
       toolCount: Object.keys(upstream).length,
       extraCount: EXTRA_TOOL_NAMES.length,
       total: Object.keys(upstream).length + EXTRA_TOOL_NAMES.length + 1,
@@ -99,6 +109,15 @@ export function createMcpServer(bridge: BridgeClient): McpServer {
         openWorldHint: false,
       },
     }, async (args) => {
+      // UXP second track pre-dispatch: some official tool names have a
+      // truthful UXP-only implementation (export.frame, capture_frame). If the
+      // UXP panel is connected, route there first; otherwise fall through to
+      // the upstream ExtendScript handler (which reports the honest error or,
+      // for UXP-only operations, the real unsupported reason).
+      if (UXP_ROUTES[name]) {
+        const uxpResult = await dispatchUxp(bridge, name, args ?? {});
+        if (uxpResult !== UXP_FALLTHROUGH) return textResult(uxpResult);
+      }
       const result = await tool.handler(args ?? {});
       return textResult(normalizeUpstream(result));
     });
@@ -240,6 +259,17 @@ async function executeExtraTool(
     return normalizeUpstream(result);
   }
   if (name === "premiere_connection_status" || name === "premiere_health_check") return { connected: bridge.connected, port: bridge.port };
+
+  // ---- UXP second track: tools that can only run over the UXP panel bridge.
+  // These require UXP APIs that CEP/ExtendScript cannot reach (SequenceEditor
+  // createRemoveItemsAction / createCloneTrackItemAction / createMoveAction /
+  // createInsertProjectItemAction, typed project close, Exporter frame export).
+  // Route them to the connected UXP panel via bridge.uxp(). If the UXP panel
+  // is not connected, return the documented UXP error rather than fake success.
+  const uxpResult = await dispatchUxp(bridge, name, args);
+  if (uxpResult !== UXP_FALLTHROUGH) {
+    return uxpResult;
+  }
 
   // ---- Any extra we explicitly removed (name claims an action we cannot
   // actually perform truthfully; do NOT silently route to a different tool) ----
@@ -387,6 +417,42 @@ function timecodeToSeconds(timecode: string, fps: number): number {
   if (parts.length < 4) throw new Error("timecode must be HH:MM:SS:FF");
   return Number(parts[0]) * 3600 + Number(parts[1]) * 60 + Number(parts[2]) + Number(parts[3]) / fps;
 }
+
+/** Sentinel: the UXP route is not applicable for this call; fall back to the
+ *  upstream ExtendScript handler so it can report the honest error. */
+const UXP_FALLTHROUGH = Symbol("UXP_FALLTHROUGH");
+
+/**
+ * Dispatch a named tool through the UXP bridge path. Returns a normalized
+ * { success, data|error } result. If the UXP panel is not connected or this
+ * operation is not in the route map, returns UXP_FALLTHROUGH so the caller can
+ * fall back to the upstream ExtendScript handler (which produces an honest
+ * "not supported by this bridge" error rather than a fake success).
+ */
+async function dispatchUxp(bridge: BridgeClient, name: string, args: Record<string, unknown>): Promise<unknown | typeof UXP_FALLTHROUGH> {
+  const route = UXP_ROUTES[name];
+  if (!route) return UXP_FALLTHROUGH;
+  const uxpResult = (await bridge.uxp(route.operation, route.map ? route.map(args) : args)) as { success?: boolean; data?: unknown; error?: string; code?: string };
+  if (uxpResult?.success === false) {
+    // If the panel is simply not connected, let the upstream handler run so it
+    // can return the documented CEP-only unsupported error.
+    if (uxpResult.code === "UXP_UNAVAILABLE" || uxpResult.code === "UXP_NOT_CONNECTED") return UXP_FALLTHROUGH;
+    return { success: false, error: String(uxpResult.error ?? "UXP operation failed"), code: String(uxpResult.code ?? "UXP_FAILED") };
+  }
+  return uxpResult?.data ?? {};
+}
+
+/**
+ * UXP second track: tools whose only truthful implementation lives on the
+ * Premiere UXP panel bridge. Each entry maps the flat MCP tool name to a UXP
+ * operation. These operations need UXP APIs that CEP/ExtendScript cannot
+ * reach, so we route them through bridge.uxp() when the panel is connected.
+ */
+export const UXP_ROUTES: Record<string, { operation: string; map?: (args: Record<string, unknown>) => Record<string, unknown> }> = {
+  // Frame / sequence export via Exporter (CEP lacks exportFramePNG).
+  capture_frame: { operation: "export.frame", map: (args) => ({ outputPath: String(args.output_path ?? ""), timeSeconds: args.time_seconds, format: args.format }) },
+  export_frame: { operation: "export.frame", map: (args) => ({ outputPath: String(args.output_path ?? ""), timeSeconds: args.time_seconds, format: args.format }) },
+};
 
 /**
  * Build a concrete ExtendScript for the remaining extras that have no direct

@@ -12,6 +12,7 @@ function mockHost(): BridgeClient {
     connected: true,
     port: 4242,
     executeScript: async (script) => ({ echo: { script } }),
+    uxp: async (operation, args) => ({ success: false, error: "mock uxp", code: "UXP_MOCK" }),
   };
 }
 

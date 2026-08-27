@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { BridgeEndpoint, ExecuteRequest, ExecuteResponse, ReadyMessage } from "../bridge-types.js";
+import { UxpBridgeHost } from "./uxp-host.js";
 
 /**
  * Always-on bridge daemon WebSocket router.
@@ -52,12 +53,18 @@ export class WsHost {
   readonly #wss: WebSocketServer;
   readonly #port: number;
   #cepSocket: WebSocket | null = null;
+  #uxpBridge: UxpBridgeHost | null = null;
   #pending = new Map<string, PendingEntry>();
 
   private constructor(http: HttpServer, wss: WebSocketServer, port: number) {
     this.#http = http;
     this.#wss = wss;
     this.#port = port;
+  }
+
+  /** Attach (or detach) the UXP bridge so `/bridge` can route UXP operations. */
+  setUxpBridge(bridge: UxpBridgeHost | null): void {
+    this.#uxpBridge = bridge;
   }
 
   static async start(port = DEFAULT_DAEMON_PORT): Promise<WsHost> {
@@ -115,10 +122,54 @@ export class WsHost {
       this.#dispatchExecute(socket, msg as unknown as ExecuteRequest);
       return;
     }
+    if (kind === "uxp") {
+      this.#dispatchUxp(socket, msg);
+      return;
+    }
     if (kind === "response") {
       this.#relayResponse(socket, msg);
       return;
     }
+  }
+
+  #dispatchUxp(source: WebSocket, msg: Record<string, unknown>): void {
+    const requestId = String(msg.requestId ?? randomUUID());
+    const bridge = this.#uxpBridge;
+    if (!bridge || !bridge.connected) {
+      source.send(
+        JSON.stringify({
+          kind: "response",
+          requestId,
+          ok: false,
+          error: { code: "UXP_NOT_CONNECTED", message: "Premiere UXP panel is not connected to the bridge" },
+        }),
+      );
+      return;
+    }
+    void bridge
+      .dispatch(String(msg.operation ?? ""), (msg.args ?? {}) as Record<string, unknown>, msg.expectedRevision as string | undefined)
+      .then((raw) => {
+        const rec = raw as { success?: boolean; data?: unknown; error?: string; code?: string };
+        const ok = rec?.success !== false;
+        source.send(
+          JSON.stringify({
+            kind: "response",
+            requestId,
+            ok,
+            ...(ok ? { data: rec?.data } : { error: { code: rec?.code ?? "UXP_COMMAND_FAILED", message: rec?.error ?? "UXP command failed" } }),
+          }),
+        );
+      })
+      .catch(() => {
+        source.send(
+          JSON.stringify({
+            kind: "response",
+            requestId,
+            ok: false,
+            error: { code: "UXP_DISPATCH_FAILED", message: "UXP bridge dispatch failed" },
+          }),
+        );
+      });
   }
 
   #dispatchExecute(source: WebSocket, req: ExecuteRequest): void {

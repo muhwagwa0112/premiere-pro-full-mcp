@@ -4,15 +4,21 @@ Local-first MCP server for Adobe Premiere Pro. Rebuilt from scratch:
 
 - **No auth, no token, no approval dialogs, no plan-hash, no preview/confirm
   lifecycle.** This is a local tool; there is nothing to trust-gate.
-- **One persistent connection.** The Node server opens a loopback WebSocket and
-  the Premiere CEP extension connects back once. No file polling, no leader
-  lease, no HMAC session, no nonce.
+- **One persistent dual-track connection.** The Node server opens a loopback
+  WebSocket to the CEP extension (the classic ExtendScript host) AND a
+  HMAC-authenticated UXP bridge. Tools that Premiere 26.x only exposes through
+  UXP (for example `export_frame` / `capture_frame` via `Exporter`, and the
+  `SequenceEditor` transaction actions) automatically route over the UXP track;
+  everything else runs over CEP/ExtendScript. No file polling, no leader lease.
 - **353 flat tools** (266 official `adobe-premiere-pro-mcp` v1.2.0 names +
   87 project-specific extras). Every tool is its own MCP tool named
   `premiere_<snake_case_tool>`. No `actionId` anywhere.
 - **Sequence automation works**: `set_active_sequence`, `add_to_timeline`,
   `open_in_source`, `create_sequence`, `split_clip`, `trim_clip`, and friends
   are implemented in the ExtendScript host against the real Premiere PPRO DOM.
+- **Frame capture is fixed.** Premiere 26.x CEP has no `exportFramePNG`; the
+  `export_frame` / `capture_frame` tools now use the UXP `Exporter` path, so
+  they produce a real, distinct frame at the requested playhead position.
 
 ## Layout
 
@@ -25,6 +31,7 @@ src/                  TypeScript MCP server (thin)
   auto-start.ts       daemon auto-start wiring
   bridge/ws-host.ts   WS server + endpoint files (%LOCALAPPDATA%\PremiereMCP)
   bridge/ws-client.ts loopback WS client used by MCP servers
+  bridge/uxp-host.ts  UXP bridge (HMAC /uxp WebSocket) for UXP-only operations
   bridge-types.ts     wire contract ({ kind, requestId, script } -> response)
   tool-names.ts       266 official + 87 extra tool names (single source of truth)
 vendor/upstream/      official adobe-premiere-pro-mcp v1.2.0 handlers (validated)
@@ -36,6 +43,7 @@ cep-plugin/           Adobe CEP extension (Premiere side)
 scripts/
   smoke.mjs           assert >= 354 tools are advertised
   _e2e-bridge.mjs     daemon<->CEP wire-path exercise (mock host)
+  _live-probe.mjs     ping the running daemon's CEP host and UXP bridge
   _syntax-check.mjs   wrapped-script parse audit (no top-level return leak)
   _live-probe.mjs     ping the running daemon's CEP host
   install-daemon.ps1  register always-on daemon (Task Scheduler, logon)
