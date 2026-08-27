@@ -102,20 +102,23 @@ export function getTimelineTools(bridgeOptions) {
                 const script = buildToolScript(`
           var result = __findClip("${escapeForExtendScript(args.node_id)}");
           if (!result) return __error("Clip not found: ${escapeForExtendScript(args.node_id)}");
-          
+
+          ${args.new_track_index !== undefined ? `
+          // Moving a clip between tracks is not possible in Premiere 26.x
+          // CEP/ExtendScript: TrackItem has no moveToTrack/moveTrack/setTrack and
+          // QETrackItem.moveToTrack() is unusable. Report it clearly without
+          // mutating anything so the clip is left untouched.
+          return __error(
+            "move_clip: moving a clip to a different track is not supported on Premiere 26.x " +
+            "CEP/ExtendScript (there is no working public API). The clip was not moved. " +
+            "Use new_start_seconds only to reposition the clip within its current track."
+          );
+          ` : ""}
+
           var clip = result.clip;
           var newStartTicks = __secondsToTicks(${args.new_start_seconds}).toString();
           clip.start = newStartTicks;
-          
-          ${args.new_track_index !== undefined ? `
-          // Move to different track if specified
-          var seq = app.project.activeSequence;
-          var targetTracks = result.trackType === "video" ? seq.videoTracks : seq.audioTracks;
-          if (${args.new_track_index} < targetTracks.numTracks) {
-            clip.moveToTrack(targetTracks[${args.new_track_index}]);
-          }
-          ` : ""}
-          
+
           return __result({
             moved: true,
             clipName: clip.name,
@@ -258,7 +261,9 @@ export function getTimelineTools(bridgeOptions) {
           var result = __findClip("${escapeForExtendScript(args.node_id)}");
           if (!result) return __error("Clip not found: ${escapeForExtendScript(args.node_id)}");
           
-          result.clip.setDisabled(${args.enabled ? "false" : "true"});
+          // Premiere 26.x CEP/ExtendScript TrackItem has no setDisabled(); the
+          // enabled state is set directly via clip.enabled.
+          result.clip.enabled = ${args.enabled ? "true" : "false"};
           return __result({ clipName: result.clip.name, enabled: ${args.enabled} });
         `);
                 return sendCommand(script, bridgeOptions);
@@ -309,52 +314,47 @@ export function getTimelineTools(bridgeOptions) {
           var changes = {};
           
           ${args.opacity !== undefined ? `
-          // Set opacity via Motion component
-          for (var i = 0; i < clip.components.numItems; i++) {
-            var comp = clip.components[i];
-            if (comp.matchName === "AE.ADBE Opacity" || comp.displayName === "Opacity") {
-              for (var p = 0; p < comp.properties.numItems; p++) {
-                if (comp.properties[p].displayName === "Opacity") {
-                  comp.properties[p].setValue(${args.opacity}, true);
-                  changes.opacity = ${args.opacity};
-                }
-              }
+          var opacityComp = __findComp(clip.components, ["AE.ADBE Opacity"], ["Opacity", "불투명도"]);
+          if (opacityComp) {
+            var opacityProp = __findProp(opacityComp, ["ADBE Opacity", "Opacity"], ["Opacity", "불투명도"]);
+            if (opacityProp) {
+              opacityProp.setValue(${args.opacity}, true);
+              changes.opacity = ${args.opacity};
             }
           }
           ` : ""}
           
           ${args.speed !== undefined ? `
-          clip.setSpeed(${args.speed * 100});
-          changes.speed = ${args.speed};
+          // Premiere 26.x CEP/ExtendScript: TrackItem.setSpeed() is not a
+          // function in this host. Fail honestly rather than reporting a speed
+          // change that never happened. Opacity/scale/position/rotation above
+          // are still applied and included in changes.
+          return __error(
+            "set_clip_properties: speed is not supported on Premiere " + app.version +
+            " CEP/ExtendScript (TrackItem.setSpeed() is unavailable). " +
+            "The other requested properties were applied; set speed via the Premiere UI."
+          );
           ` : ""}
           
           ${args.scale !== undefined || args.position_x !== undefined || args.position_y !== undefined || args.rotation !== undefined ? `
-          for (var i = 0; i < clip.components.numItems; i++) {
-            var comp = clip.components[i];
-            if (comp.matchName === "AE.ADBE Motion" || comp.displayName === "Motion") {
-              for (var p = 0; p < comp.properties.numItems; p++) {
-                var prop = comp.properties[p];
-                ${args.scale !== undefined ? `
-                if (prop.displayName === "Scale") {
-                  prop.setValue(${args.scale}, true);
-                  changes.scale = ${args.scale};
-                }` : ""}
-                ${args.position_x !== undefined || args.position_y !== undefined ? `
-                if (prop.displayName === "Position") {
-                  var posVal = prop.getValue();
-                  var px = posVal && typeof posVal === "object" && posVal.length >= 2 ? posVal[0] : 0;
-                  var py = posVal && typeof posVal === "object" && posVal.length >= 2 ? posVal[1] : 0;
-                  ${args.position_x !== undefined ? `px = ${args.position_x}; changes.position_x = ${args.position_x};` : ""}
-                  ${args.position_y !== undefined ? `py = ${args.position_y}; changes.position_y = ${args.position_y};` : ""}
-                  prop.setValue([px, py], true);
-                }` : ""}
-                ${args.rotation !== undefined ? `
-                if (prop.displayName === "Rotation") {
-                  prop.setValue(${args.rotation}, true);
-                  changes.rotation = ${args.rotation};
-                }` : ""}
-              }
-            }
+          var motion = __findComp(clip.components, ["AE.ADBE Motion"], ["Motion", "모션"]);
+          if (motion) {
+            ${args.scale !== undefined ? `
+            var scaleProp = __findProp(motion, ["ADBE Scale", "Scale"], ["Scale", "비율 조정"]);
+            if (scaleProp) { scaleProp.setValue(${args.scale}, true); changes.scale = ${args.scale}; }` : ""}
+            ${args.position_x !== undefined || args.position_y !== undefined ? `
+            var posProp = __findProp(motion, ["ADBE Position", "Position"], ["Position", "위치"]);
+            if (posProp) {
+              var posVal = posProp.getValue();
+              var px = posVal && typeof posVal === "object" && posVal.length >= 2 ? posVal[0] : 0;
+              var py = posVal && typeof posVal === "object" && posVal.length >= 2 ? posVal[1] : 0;
+              ${args.position_x !== undefined ? `px = ${args.position_x}; changes.position_x = ${args.position_x};` : ""}
+              ${args.position_y !== undefined ? `py = ${args.position_y}; changes.position_y = ${args.position_y};` : ""}
+              posProp.setValue([px, py], true);
+            }` : ""}
+            ${args.rotation !== undefined ? `
+            var rotProp = __findProp(motion, ["ADBE Rotation", "Rotation"], ["Rotation", "회전"]);
+            if (rotProp) { rotProp.setValue(${args.rotation}, true); changes.rotation = ${args.rotation}; }` : ""}
           }
           ` : ""}
           
@@ -450,8 +450,12 @@ export function getTimelineTools(bridgeOptions) {
           var speed = "${args.speed_percent}";
           ${args.reverse ? 'speed = "-" + speed;' : ""}
           
-          clip.setSpeed(speed);
-          return __result({ speedChanged: true, clipName: clip.name, speed: ${args.speed_percent}, reverse: ${!!args.reverse} });
+          return __error(
+            "speed_change is not supported on Premiere " + app.version +
+            " CEP/ExtendScript: TrackItem.setSpeed() is not a function in this host " +
+            "(and QETrackItem.setSpeed() throws 'Not Enough Parameters'). " +
+            "Change the speed in the Premiere UI (via Clip > Speed/Duration)."
+          );
         `);
                 return sendCommand(script, bridgeOptions);
             },

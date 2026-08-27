@@ -169,6 +169,39 @@ function argsSchemaFor(name: string): Record<string, z.ZodType> {
   }
   if (name.includes("frame") || name.includes("export")) common.output_path = z.string().min(1).max(4096).optional();
   if (name.includes("name")) common.name = z.string().min(1).max(256).optional();
+  // helpers_* tools use their own arg names (not the generic time_seconds).
+  // Provide the correct inputs so the schema matches the implementation,
+  // otherwise these never receive a usable value and always fail validation.
+  if (name.startsWith("helpers_")) {
+    common.fps = z.number().positive().optional();
+    if (name === "helpers_ticks_to_timecode" || name === "helpers_seconds_to_timecode") {
+      common.seconds = z.number().optional();
+      common.value = z.number().optional();
+    }
+    if (name === "helpers_timecode_to_seconds" || name === "helpers_timecode_to_ticks") {
+      common.timecode = z.string().min(1).optional();
+    }
+  }
+  // Extra tools that route to an upstream handler must expose the same
+  // required arguments the routed handler expects, otherwise the handler
+  // receives undefined and throws (e.g. "Cannot read properties of undefined").
+  const routedRequiredArgs: Record<string, Record<string, z.ZodType>> = {
+    sequence_new_from_bins: {
+      name: z.string().min(1).max(256),
+      item_ids: z.array(z.string().min(1)).min(1),
+    },
+    media_metadata_bulk_write: { metadata_xml: z.string().min(1) },
+    media_set_color_label_batch: { metadata_xml: z.string().min(1) },
+    project_bin_recursive_contents: { bin_id: z.string().min(1) },
+    effects_batch_apply: { node_id: idField, effect_name: z.string().min(1) },
+    effects_batch_remove: { node_id: idField },
+    effects_match_parameter: { node_id: idField },
+    effects_keyframe_reset: { node_id: idField },
+  };
+  const routed = routedRequiredArgs[name];
+  if (routed) {
+    for (const [k, schema] of Object.entries(routed)) common[k] = schema;
+  }
   return common;
 }
 
@@ -208,6 +241,12 @@ async function executeExtraTool(
   }
   if (name === "premiere_connection_status" || name === "premiere_health_check") return { connected: bridge.connected, port: bridge.port };
 
+  // ---- Any extra we explicitly removed (name claims an action we cannot
+  // actually perform truthfully; do NOT silently route to a different tool) ----
+  if (UNSUPPORTED_EXTRAS.has(name)) {
+    return { success: false, error: `Tool '${name}' is registered but not supported by this bridge (no truthful ExtendScript implementation). Fix its mapping or remove it before use.` };
+  }
+
   // ---- Route to the closest real upstream implementation ----
   const route = EXTRA_ROUTES[name];
   if (route) {
@@ -217,11 +256,6 @@ async function executeExtraTool(
     }
     const result = await target.handler(route.map ? route.map(args) : args);
     return normalizeUpstream(result);
-  }
-
-  // ---- Any extra we explicitly removed ----
-  if (UNSUPPORTED_EXTRAS.has(name)) {
-    return { success: false, error: `Tool '${name}' is registered but not supported by this bridge` };
   }
 
   // ---- Fall back to a real host script execution ----
@@ -240,8 +274,6 @@ export const EXTRA_ROUTES: Record<string, { target: string; map?: (args: Record<
   timeline_marker_to_segments: { target: "get_sequence_markers_by_type", map: () => ({ marker_type: "segment" }) },
   timeline_match_frame_in_out: { target: "get_sequence_in_out_points" },
   timeline_trim_to_work_area: { target: "set_work_area" },
-  timeline_extend_edit_to_track_end: { target: "set_work_area" },
-  timeline_merge_tracks: { target: "get_timeline_summary" },
 
   media_list_all_items: { target: "list_project_items" },
   media_unused_media_report: { target: "get_unused_media" },
@@ -250,12 +282,9 @@ export const EXTRA_ROUTES: Record<string, { target: string; map?: (args: Record<
   media_batch_replace: { target: "replace_clip_media" },
   media_import_all_in_folder: { target: "import_folder" },
   media_import_sequence_bin: { target: "import_sequences" },
-  media_proxy_attach_all: { target: "check_offline_media", map: () => ({}) },
-  media_proxy_detach_all: { target: "check_offline_media", map: () => ({}) },
   media_metadata_bulk_read: { target: "get_project_panel_metadata" },
   media_metadata_bulk_write: { target: "set_project_panel_metadata" },
   media_set_color_label_batch: { target: "set_project_panel_metadata" },
-  media_consolidate_to_folder: { target: "get_full_project_overview" },
 
   project_structure_tree: { target: "get_full_project_overview" },
   project_bin_recursive_contents: { target: "get_bin_contents" },
@@ -264,63 +293,84 @@ export const EXTRA_ROUTES: Record<string, { target: string; map?: (args: Record<
   project_close_inactive_aliased: { target: "close_project" },
 
   captions_export_srt: { target: "get_sequence_markers_by_type", map: () => ({ marker_type: "segment" }) },
-  captions_import_srt: { target: "create_caption_track" },
   captions_cue_count: { target: "get_sequence_markers_by_type", map: () => ({ marker_type: "segment" }) },
   captions_cue_snapshot: { target: "get_sequence_markers_by_type", map: () => ({ marker_type: "segment" }) },
-  captions_burn_in_preview: { target: "get_sequence_settings" },
   text_mogrt_inventory: { target: "get_project_info" },
-  text_mogrt_apply_batch: { target: "import_mogrt" },
-  text_style_snapshot: { target: "get_project_info" },
   text_font_inventory: { target: "get_project_info" },
 
-  audio_loudness_normalize: { target: "get_sequence_settings" },
-  audio_batch_normalize: { target: "get_sequence_settings" },
-  audio_batch_clip_gain: { target: "get_sequence_settings" },
-  audio_duck_on_markers: { target: "get_sequence_markers_by_type", map: () => ({ marker_type: "segment" }) },
   audio_track_summary: { target: "list_sequence_tracks" },
 
   effects_chain_inventory: { target: "get_full_sequence_info" },
   effects_batch_apply: { target: "apply_effect" },
   effects_batch_remove: { target: "remove_effect" },
-  effects_match_parameter: { target: "get_sequence_settings" },
-  effects_keyframe_reset: { target: "get_sequence_settings" },
   transitions_inventory: { target: "get_full_sequence_info" },
-  transitions_batch_add: { target: "add_transition" },
 
   export_preset_finder: { target: "get_encoder_presets" },
-  export_all_sequences: { target: "get_sequence_count" },
-  export_sequence_custom_range: { target: "set_sequence_in_out_points" },
   export_frame_marker: { target: "get_sequence_markers_by_type", map: () => ({ marker_type: "chapter" }) },
-  export_render_queue_status: { target: "get_project_info" },
-  export_batch_ame: { target: "get_encoder_presets" },
-  export_mark_as_good: { target: "get_sequence_markers_by_type", map: () => ({ marker_type: "chapter" }) },
-  export_upload_placeholder: { target: "get_project_info" },
 
-  playback_loop_range: { target: "set_work_area" },
-  playback_play_in_out: { target: "set_work_area" },
-  playback_jump_to_next_edit: { target: "get_playhead_position" },
-  playback_jump_to_prev_edit: { target: "get_playhead_position" },
   playback_scrub_seconds: { target: "set_playhead_position" },
-  workspace_reset: { target: "get_sequence_settings" },
-  workspace_save_custom: { target: "get_sequence_settings" },
 
   sequence_new_from_bins: { target: "create_sequence_from_clips" },
-  sequence_duplicate_batch: { target: "duplicate_sequence" },
   sequence_set_display_format_simple: { target: "set_sequence_display_format" },
-  multicam_group_clips: { target: "get_full_sequence_info" },
-  multicam_ungroup_clips: { target: "get_full_sequence_info" },
-  multicam_set_camera_track: { target: "set_target_track" },
-  multicam_enable_angle: { target: "set_target_track" },
-  multicam_cut_on_marker: { target: "get_sequence_markers_by_type", map: () => ({ marker_type: "chapter" }) },
-
-  transcription_of_target: { target: "get_sequence_markers_by_type", map: () => ({ marker_type: "segment" }) },
-  transcript_export_srt: { target: "get_sequence_markers_by_type", map: () => ({ marker_type: "segment" }) },
 };
 
 /** Extra names that should not pretend to work (removed from active use). */
-const UNSUPPORTED_EXTRAS = new Set<string>([
-  // These names are not backed by a concrete upstream route or a truthful
-  // ExtendScript body. They are kept out of the active surface.
+export const UNSUPPORTED_EXTRAS = new Set<string>([
+  // r4: remove actions that silently route to a different tool. These names
+  // claim a specific edit/export/audio/multicam action but EXTRA_ROUTES maps
+  // them to a getter or a different single-item tool. Keeping them active
+  // with the old mapping would make the tool do something the name doesn't
+  // say (e.g. effects_keyframe_reset actually returning sequence settings).
+  //
+  // A truthful ExtendScript body for each is out of scope for the CEP bridge
+  // (some require UXP APIs that are unavailable in ExtendScript); until that
+  // exists these must fail loudly instead of silently doing the wrong thing.
+
+  "effects_keyframe_reset",
+  "effects_match_parameter",
+  "transitions_batch_add",
+
+  "audio_loudness_normalize",
+  "audio_batch_normalize",
+  "audio_batch_clip_gain",
+  "audio_duck_on_markers",
+
+  "captions_burn_in_preview",
+  "captions_import_srt",
+
+  "media_proxy_attach_all",
+  "media_proxy_detach_all",
+  "media_consolidate_to_folder",
+
+  "export_all_sequences",
+  "export_sequence_custom_range",
+  "export_batch_ame",
+  "export_upload_placeholder",
+  "export_render_queue_status",
+  "export_mark_as_good",
+
+  "workspace_reset",
+  "workspace_save_custom",
+
+  "text_mogrt_apply_batch",
+  "text_style_snapshot",
+
+  "multicam_group_clips",
+  "multicam_ungroup_clips",
+  "multicam_set_camera_track",
+  "multicam_enable_angle",
+  "multicam_cut_on_marker",
+
+  "timeline_merge_tracks",
+  "timeline_extend_edit_to_track_end",
+  "playback_loop_range",
+  "playback_play_in_out",
+  "playback_jump_to_next_edit",
+  "playback_jump_to_prev_edit",
+
+  "sequence_duplicate_batch",
+  "transcription_of_target",
+  "transcript_export_srt",
 ]);
 
 function ticksToTimecode(ticks: number, fps: number): string {

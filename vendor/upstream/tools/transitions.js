@@ -24,43 +24,27 @@ export function getTransitionsTools(bridgeOptions) {
                         description: "Duration of the transition in seconds (default: 1.0)",
                     },
                 },
-                required: ["transition_name", "track_index", "cut_point_seconds"],
+                      required: ["transition_name", "track_index", "cut_point_seconds"],
             },
             handler: async (args) => {
                 const duration = args.duration_seconds ?? 1.0;
                 const script = buildToolScript(`
-          app.enableQE();
-          var qeSeq = qe.project.getActiveSequence();
-          if (!qeSeq) return __error("No active sequence (QE)");
-          
-          var qeTrack = qeSeq.getVideoTrackAt(${args.track_index});
-          if (!qeTrack) return __error("Track not found");
-          
-          var transitionName = "${escapeForExtendScript(args.transition_name)}";
-          var transitions = qe.project.getVideoTransitionList();
-          var transitionQE = null;
-          
-          for (var i = 0; i < transitions.numItems; i++) {
-            if (transitions[i].name === transitionName) {
-              transitionQE = transitions[i];
-              break;
-            }
-          }
-          
-          if (!transitionQE) return __error("Transition not found: " + transitionName);
-          
-          var cutTicks = __secondsToTicks(${args.cut_point_seconds}).toString();
-          var durationTicks = __secondsToTicks(${duration}).toString();
-          
-          qeTrack.addTransition(transitionQE, true, cutTicks, durationTicks, "0", false);
-          
-          return __result({
-            added: true,
-            transition: transitionName,
-            trackIndex: ${args.track_index},
-            atSeconds: ${args.cut_point_seconds},
-            durationSeconds: ${duration}
-          });
+          // Premiere 26.x CEP-ExtendScript exposes NO public method to *add* a
+          // transition. qe.project.getVideoTransitionList() returns an array of
+          // localized name strings (157 entries), and QETrack has no
+          // addTransition method (only numTransitions). There is no
+          // premierepro/TransitionFactory global in this host either. So the
+          // only truthful behavior is a clear diagnostic error instead of a
+          // fake success or a confusing "Transition not found".
+          return __error(
+            "add_transition is not supported by this host: Premiere " + app.version +
+            " CEP/ExtendScript exposes no public transition-adding API " +
+            "(qe.project.getVideoTransitionList returns only localized name strings, " +
+            "but QETrack has no addTransition). Use list_available_transitions " +
+            "to enumerate installed replacements, or add transitions via the " +
+            "Premiere UI / UXP (createAddVideoTransitionAction) which is not " +
+            "reachable from CEP ExtendScript."
+          );
         `);
                 return sendCommand(script, bridgeOptions);
             },
@@ -88,51 +72,19 @@ export function getTransitionsTools(bridgeOptions) {
                         description: "Duration of the transition in seconds (default: 1.0)",
                     },
                 },
-                required: ["node_id", "transition_name"],
+                      required: ["node_id", "transition_name"],
             },
             handler: async (args) => {
                 const position = args.position || "end";
                 const duration = args.duration_seconds ?? 1.0;
                 const script = buildToolScript(`
-          app.enableQE();
-          var qeSeq = qe.project.getActiveSequence();
-          if (!qeSeq) return __error("No active sequence (QE)");
-          
-          var result = __findClip("${escapeForExtendScript(args.node_id)}");
-          if (!result) return __error("Clip not found");
-          
-          var transitionName = "${escapeForExtendScript(args.transition_name)}";
-          var transitions = qe.project.getVideoTransitionList();
-          var transitionQE = null;
-          for (var i = 0; i < transitions.numItems; i++) {
-            if (transitions[i].name === transitionName) {
-              transitionQE = transitions[i];
-              break;
-            }
-          }
-          if (!transitionQE) return __error("Transition not found: " + transitionName);
-          
-          var qeTrack = qeSeq.getVideoTrackAt(result.trackIndex);
-          var durationTicks = __secondsToTicks(${duration}).toString();
-          var clip = result.clip;
-          var position = "${position}";
-          
-          if (position === "start" || position === "both") {
-            var startTicks = clip.start.ticks;
-            qeTrack.addTransition(transitionQE, true, startTicks, durationTicks, "0", false);
-          }
-          if (position === "end" || position === "both") {
-            var endTicks = clip.end.ticks;
-            qeTrack.addTransition(transitionQE, true, endTicks, durationTicks, "0", false);
-          }
-          
-          return __result({
-            added: true,
-            transition: transitionName,
-            clipName: clip.name,
-            position: position,
-            durationSeconds: ${duration}
-          });
+          return __error(
+            "add_transition_to_clip is not supported by this host: Premiere " +
+            app.version + " CEP/ExtendScript exposes no public transition-adding " +
+            "API (QETrack has no addTransition). Add transitions via the Premiere " +
+            "UI or UXP (createAddVideoTransitionAction) which cannot be reached " +
+            "from CEP ExtendScript."
+          );
         `);
                 return sendCommand(script, bridgeOptions);
             },
@@ -161,44 +113,13 @@ export function getTransitionsTools(bridgeOptions) {
                 const trackIndex = args.track_index ?? 0;
                 const duration = args.duration_seconds ?? 1.0;
                 const script = buildToolScript(`
-          app.enableQE();
-          var qeSeq = qe.project.getActiveSequence();
-          if (!qeSeq) return __error("No active sequence (QE)");
-          
-          var seq = app.project.activeSequence;
-          if (!seq) return __error("No active sequence");
-          
-          var transitionName = "${escapeForExtendScript(args.transition_name)}";
-          var transitions = qe.project.getVideoTransitionList();
-          var transitionQE = null;
-          for (var i = 0; i < transitions.numItems; i++) {
-            if (transitions[i].name === transitionName) {
-              transitionQE = transitions[i];
-              break;
-            }
-          }
-          if (!transitionQE) return __error("Transition not found: " + transitionName);
-          
-          var track = seq.videoTracks[${trackIndex}];
-          var qeTrack = qeSeq.getVideoTrackAt(${trackIndex});
-          var durationTicks = __secondsToTicks(${duration}).toString();
-          var count = 0;
-          
-          // Add transition at each cut point (between consecutive clips)
-          for (var c = 0; c < track.clips.numItems - 1; c++) {
-            var cutTicks = track.clips[c].end.ticks;
-            try {
-              qeTrack.addTransition(transitionQE, true, cutTicks, durationTicks, "0", false);
-              count++;
-            } catch(e) {}
-          }
-          
-          return __result({
-            added: count,
-            transition: transitionName,
-            trackIndex: ${trackIndex},
-            durationSeconds: ${duration}
-          });
+          return __error(
+            "batch_add_transitions is not supported by this host: Premiere " +
+            app.version + " CEP/ExtendScript exposes no public transition-adding " +
+            "API (QETrack has no addTransition). Add transitions via the Premiere " +
+            "UI or UXP (createAddVideoTransitionAction) which cannot be reached " +
+            "from CEP ExtendScript."
+          );
         `);
                 return sendCommand(script, bridgeOptions);
             },
@@ -209,10 +130,20 @@ export function getTransitionsTools(bridgeOptions) {
             handler: async () => {
                 const script = buildToolScript(`
           app.enableQE();
-          var transitions = qe.project.getVideoTransitionList();
+          var transitions = null;
           var list = [];
-          for (var i = 0; i < transitions.numItems; i++) {
-            list.push({ name: transitions[i].name, index: i });
+          try {
+            transitions = qe.project.getVideoTransitionList();
+          } catch (e) {
+            transitions = null;
+          }
+          if (transitions) {
+            var len = transitions.length;
+            for (var i = 0; i < len; i++) {
+              try {
+                list.push({ name: String(transitions[i]), index: i });
+              } catch (e) {}
+            }
           }
           return __result(list);
         `);
@@ -225,10 +156,20 @@ export function getTransitionsTools(bridgeOptions) {
             handler: async () => {
                 const script = buildToolScript(`
           app.enableQE();
-          var transitions = qe.project.getAudioTransitionList();
+          var transitions = null;
           var list = [];
-          for (var i = 0; i < transitions.numItems; i++) {
-            list.push({ name: transitions[i].name, index: i });
+          try {
+            transitions = qe.project.getAudioTransitionList();
+          } catch (e) {
+            transitions = null;
+          }
+          if (transitions) {
+            var len = transitions.length;
+            for (var i = 0; i < len; i++) {
+              try {
+                list.push({ name: String(transitions[i]), index: i });
+              } catch (e) {}
+            }
           }
           return __result(list);
         `);

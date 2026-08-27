@@ -34,7 +34,21 @@ export function getClipboardTools(bridgeOptions) {
           var tgt = tgtResult.clip;
           var copied = 0;
           var effectFilter = ${args.effect_name ? `"${escapeForExtendScript(args.effect_name)}"` : "null"};
-          var intrinsic = ["Motion", "Opacity", "Time Remapping", "Volume", "Channel Volume", "Panner"];
+          // Locale-independent intrinsic detection. Premiere's displayName is
+          // localized (e.g. "모션"/"불투명도" in Korean), so matching only
+          // English names silently lets intrinsic components be copied. Check
+          // both the English displayName and the stable matchName instead.
+          function __isIntrinsic(comp) {
+            var n = String(comp.displayName || "");
+            var m = String(comp.matchName || "");
+            var eng = ["Motion", "Opacity", "Time Remapping", "Volume", "Channel Volume", "Panner"];
+            var kor = ["모션", "불투명도", "시간 다시 매핑", "볼륨", "채널 볼륨", "패너"];
+            for (var k = 0; k < eng.length; k++) {
+              if (n === eng[k] || n === kor[k]) return true;
+            }
+            if (/AE\.ADBE (Motion|Opacity|Time Remapping|Volume|Channel Volume|Panner)$/.test(m)) return true;
+            return false;
+          }
 
           // Use QE to copy effects by name
           var qeSeq = qe.project.getActiveSequence();
@@ -50,11 +64,7 @@ export function getClipboardTools(bridgeOptions) {
 
             if (effectFilter && name !== effectFilter) continue;
             if (!effectFilter) {
-              var skip = false;
-              for (var k = 0; k < intrinsic.length; k++) {
-                if (name === intrinsic[k]) { skip = true; break; }
-              }
-              if (skip) continue;
+              if (__isIntrinsic(comp)) continue;
             }
 
             // Apply effect via QE
@@ -350,18 +360,13 @@ export function getClipboardTools(bridgeOptions) {
           if (!result) return __error("Clip not found");
 
           var clip = result.clip;
+          var opacityComp = __findComp(clip.components, ["AE.ADBE Opacity"], ["Opacity", "불투명도"]);
           var set = false;
-          for (var i = 0; i < clip.components.numItems; i++) {
-            var comp = clip.components[i];
-            if (comp.displayName === "Opacity") {
-              for (var p = 0; p < comp.properties.numItems; p++) {
-                if (comp.properties[p].displayName === "Blend Mode") {
-                  comp.properties[p].setValue(${modeValue}, true);
-                  set = true;
-                  break;
-                }
-              }
-              break;
+          if (opacityComp) {
+            var blendProp = __findProp(opacityComp, ["ADBE Blend Mode", "Blend Mode"], ["Blend Mode", "혼합 모드"]);
+            if (blendProp) {
+              blendProp.setValue(${modeValue}, true);
+              set = true;
             }
           }
 

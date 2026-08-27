@@ -48,11 +48,11 @@ export function getDiscoveryTools(bridgeOptions) {
                 const binPath = args.bin_path ? `"${escapeForExtendScript(args.bin_path)}"` : "null";
                 const script = buildToolScript(`
           var rootItem = app.project.rootItem;
-          var targetItem = rootItem;
-          
-          var binPath = ${binPath};
-          if (binPath) {
-            var parts = binPath.split("/");
+            var targetItem = rootItem;
+            
+            var binPath = ${binPath};
+            if (binPath && binPath !== "/") {
+              var parts = binPath.split("/");
             for (var p = 0; p < parts.length; p++) {
               var found = false;
               for (var i = 0; i < targetItem.children.numItems; i++) {

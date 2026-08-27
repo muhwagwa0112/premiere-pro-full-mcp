@@ -52,17 +52,16 @@ export function getTextTools(bridgeOptions) {
           var startTicks = __secondsToTicks(${startSeconds}).toString();
           var endTicks = __secondsToTicks(${startSeconds + durationSeconds}).toString();
           
-          // Create text via project item
-          var textContent = "${escapeForExtendScript(args.text)}";
-          project.activeSequence.createCaptionTrack(textContent, startTicks, "Subtitle");
-          
-          return __result({
-            added: true,
-            text: textContent,
-            trackIndex: trackIndex,
-            startSeconds: ${startSeconds},
-            durationSeconds: ${durationSeconds}
-          });
+          // Premiere 26.x CEP/ExtendScript has no public API to create a
+          // graphics/text overlay programmatically. The historic
+          // createCaptionTrack(text, startTicks, "Subtitle") call is not a
+          // valid text-overlay API and throws "Illegal Parameter type"
+          // (verified live). There is no truthful way to add a title/text
+          // overlay from this host.
+          return __error(
+            "add_text_overlay is not supported by this host: Premiere " + app.version +
+            " CEP/ExtendScript exposes no public text/graphics overlay creation API. Add the title in the Premiere Graphics workspace first."
+          );
         `);
                 return sendCommand(script, bridgeOptions);
             },

@@ -1,5 +1,9 @@
 import { buildToolScript, escapeForExtendScript } from "../bridge/script-builder.js";
 import { sendCommand } from "../bridge/file-bridge.js";
+import { makeSingleFramePreset } from "./export.js";
+import { readFileSync, writeFileSync, unlinkSync, mkdirSync, rmSync, copyFileSync, existsSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 export function getUtilityTools(bridgeOptions) {
     return {
         delete_project_item: {
@@ -138,28 +142,134 @@ export function getUtilityTools(bridgeOptions) {
                 required: ["output_path"],
             },
             handler: async (args) => {
-                const script = buildToolScript(`
+                // Determine install path.
+                const pathScript = buildToolScript(`
+          return __result({ path: app.path || "" });
+        `);
+                const pathResult = await sendCommand(pathScript, bridgeOptions);
+                const data = (pathResult && typeof pathResult === 'object' && 'data' in pathResult)
+                    ? pathResult.data
+                    : pathResult;
+                const installPath = data && data.path ? String(data.path) : "";
+                if (!installPath) {
+                    return { success: false, error: "Could not determine Premiere Pro install path from app.path" };
+                }
+
+                const presetPath = makeSingleFramePreset(installPath, true);
+                if (!presetPath) {
+                    return { success: false, error: "Could not locate/patch a stock PNG preset for frame capture." };
+                }
+
+                const timeSeconds = (typeof args.time_seconds === 'number') ? args.time_seconds : null;
+                const outputDir = join(tmpdir(), "ppmc-freeze");
+                mkdirSync(outputDir, { recursive: true });
+                const tempOut = join(outputDir, `mcp_freeze_${Date.now()}.png`);
+
+                const exportScript = buildToolScript(`
           var seq = app.project.activeSequence;
           if (!seq) return __error("No active sequence");
+          var preset = ${JSON.stringify(presetPath)};
+          var outPath = ${JSON.stringify(tempOut)};
+          var restoreIn = null, restoreOut = null, restorePos = null;
+          var fps = 30;
+          var frameTick = Math.round(__secondsToTicks(1 / fps));
+          try { restoreIn = seq.getInPoint(); } catch(e) {}
+          try { restoreOut = seq.getOutPoint(); } catch(e) {}
+          try { restorePos = seq.getPlayerPosition(); } catch(e) {}
+          try { var tb = Number(seq.timebase); if (tb > 0) fps = 254016000000 / tb; } catch(e) {}
+          frameTick = Math.round(__secondsToTicks(1 / fps));
 
-          ${args.time_seconds !== undefined
-                    ? `var timeTicks = __secondsToTicks(${args.time_seconds}).toString();`
-                    : `var timeTicks = seq.getPlayerPosition().ticks;`}
+          try {
+            // Export only a one-frame in/out window rather than the whole
+            // timeline (ENCODE_ENTIRE ignores the playhead and re-encodes
+            // the entire sequence from the start).
+            ${timeSeconds === null ? `
+            var curPos = Number(seq.getPlayerPosition().ticks);
+            var inTick = String(curPos);
+            var outTick = String(curPos + frameTick);
+            ` : `
+            var tickBase = __secondsToTicks(${timeSeconds});
+            var inTick = String(tickBase);
+            var outTick = String(tickBase + frameTick);
+            seq.setPlayerPosition(inTick);
+            `}
+            seq.setInPoint(inTick);
+            seq.setOutPoint(outTick);
+            var res = seq.exportAsMediaDirect(outPath, preset, app.encoder.ENCODE_IN_TO_OUT);
+            try { if (restoreIn !== null && restoreIn !== undefined) seq.setInPoint(restoreIn); } catch(e) {}
+            try { if (restoreOut !== null && restoreOut !== undefined) seq.setOutPoint(restoreOut); } catch(e) {}
+            try { if (restorePos !== null && restorePos !== undefined) seq.setPlayerPosition(String(restorePos.ticks !== undefined ? restorePos.ticks : restorePos)); } catch(e) {}
+            return __result({ exported: true, outputPath: outPath, result: String(res) });
+          } catch(e) {
+            try { if (restoreIn !== null && restoreIn !== undefined) seq.setInPoint(restoreIn); } catch(e) {}
+            try { if (restoreOut !== null && restoreOut !== undefined) seq.setOutPoint(restoreOut); } catch(e) {}
+            try { if (restorePos !== null && restorePos !== undefined) seq.setPlayerPosition(String(restorePos.ticks !== undefined ? restorePos.ticks : restorePos)); } catch(e) {}
+            return __error("freeze_frame export failed: " + e);
+          }
+        `);
+                const exportResult = await sendCommand(exportScript, { ...bridgeOptions, timeoutMs: 120000 });
+                try { unlinkSync(presetPath); } catch { /* ignore */ }
 
-          // Export frame
-          seq.exportFramePNG(timeTicks, "${escapeForExtendScript(args.output_path)}");
+                const isError = Boolean(exportResult && typeof exportResult === 'object' && exportResult.success === false);
+                if (isError) return exportResult;
 
-          // Import back
-          app.project.importFiles(["${escapeForExtendScript(args.output_path)}"], false, app.project.rootItem, false);
+                // exportAsMediaDirect writes asynchronously; poll for the file.
+                let capturedPath = null;
+                for (let attempt = 0; attempt < 120; attempt++) {
+                    if (existsSync(tempOut)) {
+                        let size = 0;
+                        try { size = statSync(tempOut).size; } catch { /* ignore */ }
+                        if (size > 0) { capturedPath = tempOut; break; }
+                    }
+                    await new Promise((r) => setTimeout(r, 500));
+                }
 
+                if (!capturedPath) {
+                    try { rmSync(outputDir, { recursive: true, force: true }); } catch { /* ignore */ }
+                    return { success: false, error: "freeze_frame timed out waiting for the captured frame file." };
+                }
+
+                // Import the captured still back into the project so it can be
+                // used as a freeze-frame clip.
+                const importScript = buildToolScript(`
+          var file = new File(${JSON.stringify(capturedPath)});
+          if (!file.exists) return __error("Captured frame file not found: " + file.fsName);
+          var props = app.project.importFiles([file.fsName], true, app.project.rootItem, false);
+          var newItem = null;
+          if (props && props.numItems > 0) newItem = props[0];
           return __result({
-            exported: true,
-            path: "${escapeForExtendScript(args.output_path)}",
-            atSeconds: __ticksToSeconds(timeTicks),
-            note: "Frame exported and imported. Add to timeline with add_to_timeline."
+            imported: true,
+            projectItemName: newItem ? newItem.name : null,
+            projectItemId: newItem ? String(newItem.nodeId) : null,
+            outputPath: ${JSON.stringify(capturedPath)}
           });
         `);
-                return sendCommand(script, bridgeOptions);
+                const importResult = await sendCommand(importScript, bridgeOptions);
+
+                const importError = Boolean(importResult && typeof importResult === 'object' && importResult.success === false);
+                if (importError) return importResult;
+
+                // Copy the still to the requested output_path if provided, so the
+                // user has a durable copy.
+                const outPath = args.output_path;
+                let finalOut = capturedPath;
+                if (outPath) {
+                    try {
+                        copyFileSync(capturedPath, String(outPath));
+                        finalOut = String(outPath);
+                    } catch { /* keep tempOut */ }
+                }
+
+                try { rmSync(outputDir, { recursive: true, force: true }); } catch { /* ignore */ }
+
+                return {
+                    success: true,
+                    data: {
+                        freezeFrame: true,
+                        outputPath: finalOut,
+                        importResult: importResult?.data ?? importResult,
+                    },
+                };
             },
         },
         set_sequence_frame_rate: {
@@ -246,7 +356,11 @@ export function getUtilityTools(bridgeOptions) {
           var settings = seq.getSettings();
           if (!settings) return __error("Could not get sequence settings");
 
-          ${args.sample_rate !== undefined ? `settings.audioSampleRate = ${args.sample_rate};` : ""}
+          // Premiere 26.x stores audioSampleRate as a tick-count string
+          // (e.g. "48000" = 48000 samples per second), not a raw number.
+          // Assigning a number silently corrupts the value into
+          // {seconds: 48000, ticks: ...}, so we must assign a string.
+          ${args.sample_rate !== undefined ? `settings.audioSampleRate = "${args.sample_rate}";` : ""}
           ${args.channel_type !== undefined ? `settings.audioChannelType = ${args.channel_type};` : ""}
           seq.setSettings(settings);
 
@@ -275,7 +389,10 @@ export function getUtilityTools(bridgeOptions) {
           var settings = seq.getSettings();
           if (!settings) return __error("Could not get sequence settings");
 
-          settings.videoPixelAspectRatio = ${args.ratio};
+          // Premiere 26.x stores videoPixelAspectRatio as a "W:H" string
+          // (e.g. "1:1"), not a number. Assigning a number throws
+          // "Illegal Parameter type" on this host. Build the string instead.
+          settings.videoPixelAspectRatio = String(${args.ratio}) + ":1";
           seq.setSettings(settings);
 
           return __result({ ratio: ${args.ratio}, sequence: seq.name });

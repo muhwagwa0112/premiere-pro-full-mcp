@@ -21,36 +21,18 @@ export function getEffectsTools(bridgeOptions) {
             handler: async (args) => {
                 const script = buildToolScript(`
           app.enableQE();
-          var qeSeq = qe.project.getActiveSequence();
-          if (!qeSeq) return __error("No active sequence (QE)");
-          
           var result = __findClip("${escapeForExtendScript(args.node_id)}");
           if (!result) return __error("Clip not found: ${escapeForExtendScript(args.node_id)}");
           
-          // Find the effect in QE
           var effectName = "${escapeForExtendScript(args.effect_name)}";
-          var qeTrack = result.trackType === "video" 
-            ? qeSeq.getVideoTrackAt(result.trackIndex)
-            : qeSeq.getAudioTrackAt(result.trackIndex);
-          
-          if (!qeTrack) return __error("QE track not found");
-          
-          var qeClip = qeTrack.getItemAt(result.clipIndex);
-          if (!qeClip) return __error("QE clip not found");
-          
-          // Search for the effect
-          var effects = qe.project.getVideoEffectList();
-          var found = false;
-          for (var i = 0; i < effects.numItems; i++) {
-            if (effects[i].name === effectName) {
-              qeClip.addVideoEffect(effects[i]);
-              found = true;
-              break;
-            }
-          }
-          
-          if (!found) return __error("Effect not found: " + effectName);
-          return __result({ applied: true, effect: effectName, clipName: result.clip.name });
+          // Premiere 26.x CEP/ExtendScript has no public effect-adding API.
+          // getVideoEffectList() returns localized name strings and
+          // QETrackItem.addVideoEffect is not reliably exposed.
+          return __error(
+            "apply_effect is not supported by this host: Premiere " + app.version +
+            " CEP/ExtendScript has no public effect-adding API. Apply '" +
+            effectName + "' in the Premiere UI first, then adjust it here."
+          );
         `);
                 return sendCommand(script, bridgeOptions);
             },
@@ -74,31 +56,15 @@ export function getEffectsTools(bridgeOptions) {
             handler: async (args) => {
                 const script = buildToolScript(`
           app.enableQE();
-          var qeSeq = qe.project.getActiveSequence();
-          if (!qeSeq) return __error("No active sequence (QE)");
-          
           var result = __findClip("${escapeForExtendScript(args.node_id)}");
           if (!result) return __error("Clip not found");
           
           var effectName = "${escapeForExtendScript(args.effect_name)}";
-          var qeTrack = qeSeq.getAudioTrackAt(result.trackIndex);
-          if (!qeTrack) return __error("QE audio track not found");
-          
-          var qeClip = qeTrack.getItemAt(result.clipIndex);
-          if (!qeClip) return __error("QE clip not found");
-          
-          var effects = qe.project.getAudioEffectList();
-          var found = false;
-          for (var i = 0; i < effects.numItems; i++) {
-            if (effects[i].name === effectName) {
-              qeClip.addAudioEffect(effects[i]);
-              found = true;
-              break;
-            }
-          }
-          
-          if (!found) return __error("Audio effect not found: " + effectName);
-          return __result({ applied: true, effect: effectName });
+          return __error(
+            "apply_audio_effect is not supported by this host: Premiere " +
+            app.version + " CEP/ExtendScript has no public effect-adding API. " +
+            "Apply the audio effect in the Premiere UI first, then adjust it here."
+          );
         `);
                 return sendCommand(script, bridgeOptions);
             },
@@ -128,25 +94,15 @@ export function getEffectsTools(bridgeOptions) {
           var result = __findClip("${escapeForExtendScript(args.node_id)}");
           if (!result) return __error("Clip not found");
           
-          var clip = result.clip;
-          ${args.effect_index !== undefined ? `
-          if (${args.effect_index} >= clip.components.numItems) return __error("Effect index out of range");
-          var effectName = clip.components[${args.effect_index}].displayName;
-          clip.components[${args.effect_index}].remove();
-          return __result({ removed: true, effect: effectName });
-          ` : `
-          var effectName = "${escapeForExtendScript(args.effect_name || "")}";
-          var found = false;
-          for (var i = clip.components.numItems - 1; i >= 0; i--) {
-            if (clip.components[i].displayName === effectName) {
-              clip.components[i].remove();
-              found = true;
-              break;
-            }
-          }
-          if (!found) return __error("Effect not found: " + effectName);
-          return __result({ removed: true, effect: effectName });
-          `}
+          // Premiere 26.x CEP/ExtendScript does not expose a remove() method
+          // on clip component objects (verified: clip.components[i].remove is
+          // undefined). QE removeEffects() also reports true but leaves the
+          // components intact, so there is no truthful way to remove an effect
+          // programmatically from this host.
+          return __error(
+            "remove_effect is not supported by this host: Premiere " + app.version +
+            " CEP/ExtendScript exposes no remove() on clip components. Remove the effect in the Premiere UI first."
+          );
         `);
                 return sendCommand(script, bridgeOptions);
             },
@@ -157,10 +113,14 @@ export function getEffectsTools(bridgeOptions) {
             handler: async () => {
                 const script = buildToolScript(`
           app.enableQE();
-          var effects = qe.project.getVideoEffectList();
+          var effects = null;
           var list = [];
-          for (var i = 0; i < effects.numItems; i++) {
-            list.push({ name: effects[i].name, index: i });
+          try { effects = qe.project.getVideoEffectList(); } catch (e) { effects = null; }
+          if (effects) {
+            var len = effects.length;
+            for (var i = 0; i < len; i++) {
+              try { list.push({ name: String(effects[i]), index: i }); } catch (e) {}
+            }
           }
           return __result(list);
         `);
@@ -173,10 +133,14 @@ export function getEffectsTools(bridgeOptions) {
             handler: async () => {
                 const script = buildToolScript(`
           app.enableQE();
-          var effects = qe.project.getAudioEffectList();
+          var effects = null;
           var list = [];
-          for (var i = 0; i < effects.numItems; i++) {
-            list.push({ name: effects[i].name, index: i });
+          try { effects = qe.project.getAudioEffectList(); } catch (e) { effects = null; }
+          if (effects) {
+            var len = effects.length;
+            for (var i = 0; i < len; i++) {
+              try { list.push({ name: String(effects[i]), index: i }); } catch (e) {}
+            }
           }
           return __result(list);
         `);
@@ -216,46 +180,43 @@ export function getEffectsTools(bridgeOptions) {
           
           // Apply Lumetri Color if not already present
           var clip = result.clip;
-          var hasLumetri = false;
-          for (var i = 0; i < clip.components.numItems; i++) {
-            if (clip.components[i].displayName === "Lumetri Color") {
-              hasLumetri = true;
-              break;
-            }
-          }
+          var hasLumetri = __findComp(clip.components, ["ADBE Lumetri"], ["Lumetri Color", "루메트리 색상"]) !== null;
           
           if (!hasLumetri) {
-            var qeTrack = qeSeq.getVideoTrackAt(result.trackIndex);
-            var qeClip = qeTrack.getItemAt(result.clipIndex);
-            var effects = qe.project.getVideoEffectList();
-            for (var i = 0; i < effects.numItems; i++) {
-              if (effects[i].name === "Lumetri Color") {
-                qeClip.addVideoEffect(effects[i]);
-                break;
-              }
-            }
+            // Premiere 26.x CEP/ExtendScript exposes no reliable public API to
+            // *add* an effect (getVideoEffectList returns localized name
+            // strings, and QETrackItem.addVideoEffect is not reliably exposed).
+            // Refuse silently instead of pretending.
+            return __error(
+              "color_correct cannot add Lumetri Color on this host: Premiere " +
+              app.version + " CEP/ExtendScript has no public effect-adding API. " +
+              "Apply Lumetri Color in the Premiere UI first, then call color_correct " +
+              "to adjust its already-present properties."
+            );
           }
           
           // Set Lumetri properties
           var changes = {};
-          for (var i = 0; i < clip.components.numItems; i++) {
-            var comp = clip.components[i];
-            if (comp.displayName === "Lumetri Color") {
-              for (var p = 0; p < comp.properties.numItems; p++) {
-                var prop = comp.properties[p];
-                var name = prop.displayName;
-                ${args.exposure !== undefined ? `if (name === "Exposure") { prop.setValue(${args.exposure}, true); changes.exposure = ${args.exposure}; }` : ""}
-                ${args.contrast !== undefined ? `if (name === "Contrast") { prop.setValue(${args.contrast}, true); changes.contrast = ${args.contrast}; }` : ""}
-                ${args.highlights !== undefined ? `if (name === "Highlights") { prop.setValue(${args.highlights}, true); changes.highlights = ${args.highlights}; }` : ""}
-                ${args.shadows !== undefined ? `if (name === "Shadows") { prop.setValue(${args.shadows}, true); changes.shadows = ${args.shadows}; }` : ""}
-                ${args.whites !== undefined ? `if (name === "Whites") { prop.setValue(${args.whites}, true); changes.whites = ${args.whites}; }` : ""}
-                ${args.blacks !== undefined ? `if (name === "Blacks") { prop.setValue(${args.blacks}, true); changes.blacks = ${args.blacks}; }` : ""}
-                ${args.temperature !== undefined ? `if (name === "Temperature") { prop.setValue(${args.temperature}, true); changes.temperature = ${args.temperature}; }` : ""}
-                ${args.tint !== undefined ? `if (name === "Tint") { prop.setValue(${args.tint}, true); changes.tint = ${args.tint}; }` : ""}
-                ${args.saturation !== undefined ? `if (name === "Saturation") { prop.setValue(${args.saturation}, true); changes.saturation = ${args.saturation}; }` : ""}
-              }
-              break;
-            }
+          var lumetriComp = hasLumetri ? __findComp(clip.components, ["ADBE Lumetri"], ["Lumetri Color", "루메트리 색상"]) : null;
+          if (lumetriComp) {
+            var exposureProp = __findProp(lumetriComp, ["ADBE Lumetri Exposure", "Exposure"], ["Exposure", "노출"]);
+            var contrastProp = __findProp(lumetriComp, ["ADBE Lumetri Contrast", "Contrast"], ["Contrast", "대비"]);
+            var highlightsProp = __findProp(lumetriComp, ["ADBE Lumetri Highlights"], ["Highlights", "밝은 영역"]);
+            var shadowsProp = __findProp(lumetriComp, ["ADBE Lumetri Shadows"], ["Shadows", "어두운 영역"]);
+            var whitesProp = __findProp(lumetriComp, ["ADBE Lumetri Whites"], ["Whites", "흰색"]);
+            var blacksProp = __findProp(lumetriComp, ["ADBE Lumetri Blacks"], ["Blacks", "검정색"]);
+            var temperatureProp = __findProp(lumetriComp, ["ADBE Lumetri Temperature"], ["Temperature", "온도"]);
+            var tintProp = __findProp(lumetriComp, ["ADBE Lumetri Tint"], ["Tint", "틴트"]);
+            var saturationProp = __findProp(lumetriComp, ["ADBE Lumetri Saturation"], ["Saturation", "채도"]);
+            ${args.exposure !== undefined ? `if (exposureProp) { exposureProp.setValue(${args.exposure}, true); changes.exposure = ${args.exposure}; }` : ""}
+            ${args.contrast !== undefined ? `if (contrastProp) { contrastProp.setValue(${args.contrast}, true); changes.contrast = ${args.contrast}; }` : ""}
+            ${args.highlights !== undefined ? `if (highlightsProp) { highlightsProp.setValue(${args.highlights}, true); changes.highlights = ${args.highlights}; }` : ""}
+            ${args.shadows !== undefined ? `if (shadowsProp) { shadowsProp.setValue(${args.shadows}, true); changes.shadows = ${args.shadows}; }` : ""}
+            ${args.whites !== undefined ? `if (whitesProp) { whitesProp.setValue(${args.whites}, true); changes.whites = ${args.whites}; }` : ""}
+            ${args.blacks !== undefined ? `if (blacksProp) { blacksProp.setValue(${args.blacks}, true); changes.blacks = ${args.blacks}; }` : ""}
+            ${args.temperature !== undefined ? `if (temperatureProp) { temperatureProp.setValue(${args.temperature}, true); changes.temperature = ${args.temperature}; }` : ""}
+            ${args.tint !== undefined ? `if (tintProp) { tintProp.setValue(${args.tint}, true); changes.tint = ${args.tint}; }` : ""}
+            ${args.saturation !== undefined ? `if (saturationProp) { saturationProp.setValue(${args.saturation}, true); changes.saturation = ${args.saturation}; }` : ""}
           }
           
           return __result({ colorCorrected: true, clipName: clip.name, changes: changes });
@@ -288,44 +249,23 @@ export function getEffectsTools(bridgeOptions) {
           var clip = result.clip;
           
           // Find or apply Lumetri Color
-          var lumetriComp = null;
-          for (var i = 0; i < clip.components.numItems; i++) {
-            if (clip.components[i].displayName === "Lumetri Color") {
-              lumetriComp = clip.components[i];
-              break;
-            }
-          }
+          var lumetriComp = __findComp(clip.components, ["ADBE Lumetri"], ["Lumetri Color", "루메트리 색상"]);
           
           if (!lumetriComp) {
-            var qeSeq = qe.project.getActiveSequence();
-            var qeTrack = qeSeq.getVideoTrackAt(result.trackIndex);
-            var qeClip = qeTrack.getItemAt(result.clipIndex);
-            var effects = qe.project.getVideoEffectList();
-            for (var i = 0; i < effects.numItems; i++) {
-              if (effects[i].name === "Lumetri Color") {
-                qeClip.addVideoEffect(effects[i]);
-                break;
-              }
-            }
-            // Re-find the component
-            for (var i = 0; i < clip.components.numItems; i++) {
-              if (clip.components[i].displayName === "Lumetri Color") {
-                lumetriComp = clip.components[i];
-                break;
-              }
-            }
+            return __error(
+              "apply_lut cannot add Lumetri Color on this host: Premiere " +
+              app.version + " CEP/ExtendScript has no public effect-adding API. " +
+              "Apply Lumetri Color in the Premiere UI first, then call apply_lut " +
+              "to set its Input LUT."
+            );
           }
           
           if (!lumetriComp) return __error("Could not apply Lumetri Color effect");
           
           // Set the LUT path
-          for (var p = 0; p < lumetriComp.properties.numItems; p++) {
-            var prop = lumetriComp.properties[p];
-            if (prop.displayName === "Input LUT") {
-              prop.setValue("${escapeForExtendScript(args.lut_path)}", true);
-              break;
-            }
-          }
+          var inputLutProp = __findProp(lumetriComp, ["ADBE Lumetri Input LUT", "Input LUT"], ["Input LUT", "입력 LUT"]);
+          if (!inputLutProp) return __error("Input LUT property not found on Lumetri Color");
+          inputLutProp.setValue("${escapeForExtendScript(args.lut_path)}", true);
           
           return __result({ lutApplied: true, clipName: clip.name, lutPath: "${escapeForExtendScript(args.lut_path)}" });
         `);
@@ -362,50 +302,27 @@ export function getEffectsTools(bridgeOptions) {
           var result = __findClip("${escapeForExtendScript(args.node_id)}");
           if (!result) return __error("Clip not found: ${escapeForExtendScript(args.node_id)}");
           
-          var qeTrack = result.trackType === "video"
-            ? qeSeq.getVideoTrackAt(result.trackIndex)
-            : null;
-          if (!qeTrack) return __error("Warp Stabilizer can only be applied to video clips");
+          var clip = result.clip;
+          if (result.trackType !== "video") return __error("Warp Stabilizer can only be applied to video clips");
           
-          var qeClip = qeTrack.getItemAt(result.clipIndex);
-          if (!qeClip) return __error("QE clip not found");
-          
-          // Find and apply Warp Stabilizer
-          var effects = qe.project.getVideoEffectList();
-          var found = false;
-          for (var i = 0; i < effects.numItems; i++) {
-            if (effects[i].name === "Warp Stabilizer") {
-              qeClip.addVideoEffect(effects[i]);
-              found = true;
-              break;
-            }
+          // Find already-applied Warp Stabilizer (locale-independent)
+          var warpComp = __findComp(clip.components, ["ADBE Warp Stabilizer", "Warp Stabilizer"], ["Warp Stabilizer", "변형 안정화"]);
+          if (!warpComp) {
+            // Premiere 26.x CEP/ExtendScript has no public effect-adding API.
+            return __error(
+              "stabilize_clip cannot add Warp Stabilizer on this host: Premiere " +
+              app.version + " CEP/ExtendScript has no public effect-adding API. " +
+              "Apply Warp Stabilizer in the Premiere UI first, then call " +
+              "stabilize_clip to adjust its properties."
+            );
           }
           
-          if (!found) return __error("Warp Stabilizer effect not found");
-          
-          // Set properties if specified
-          var clip = result.clip;
           var changes = { stabilized: true };
           ${args.smoothness !== undefined || args.method !== undefined ? `
-          for (var i = 0; i < clip.components.numItems; i++) {
-            var comp = clip.components[i];
-            if (comp.displayName === "Warp Stabilizer") {
-              for (var p = 0; p < comp.properties.numItems; p++) {
-                var prop = comp.properties[p];
-                ${args.smoothness !== undefined ? `
-                if (prop.displayName === "Smoothness") {
-                  prop.setValue(${args.smoothness}, true);
-                  changes.smoothness = ${args.smoothness};
-                }` : ""}
-                ${args.method !== undefined ? `
-                if (prop.displayName === "Method") {
-                  prop.setValue("${escapeForExtendScript(args.method)}", true);
-                  changes.method = "${escapeForExtendScript(args.method)}";
-                }` : ""}
-              }
-              break;
-            }
-          }
+          var smoothProp = __findProp(warpComp, ["ADBE Warp Stabilizer Smoothness", "Smoothness"], ["Smoothness", "매끄러움"]);
+          var methodProp = __findProp(warpComp, ["ADBE Warp Stabilizer Method", "Method"], ["Method", "방법"]);
+          ${args.smoothness !== undefined ? `if (smoothProp) { smoothProp.setValue(${args.smoothness}, true); changes.smoothness = ${args.smoothness}; }` : ""}
+          ${args.method !== undefined ? `if (methodProp) { methodProp.setValue("${escapeForExtendScript(args.method)}", true); changes.method = "${escapeForExtendScript(args.method)}"; }` : ""}
           ` : ""}
           
           return __result({ clipName: clip.name, info: "Warp Stabilizer applied. Analysis will begin automatically.", changes: changes });

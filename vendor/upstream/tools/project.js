@@ -94,10 +94,14 @@ export function getProjectTools(bridgeOptions) {
             handler: async (args) => {
                 const count = args.count || 1;
                 const script = buildToolScript(`
-          for (var i = 0; i < ${count}; i++) {
-            app.project.undo();
-          }
-          return __result({ undone: ${count} });
+          // Premiere 26.x CEP/ExtendScript has no working public undo API:
+          // app.project.undo() is not a function in this host. Fail honestly
+          // rather than silently reporting an undo that never happened.
+          return __error(
+            "undo is not supported on Premiere " + app.version +
+            " CEP/ExtendScript: app.project.undo() is not available. " +
+            "Use Ctrl+Z (Cmd+Z) in the Premiere UI to undo."
+          );
         `);
                 return sendCommand(script, bridgeOptions);
             },

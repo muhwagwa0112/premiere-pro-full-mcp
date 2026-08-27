@@ -38,10 +38,12 @@ export function getMarkerTools(bridgeOptions) {
                 const markerTarget = args.node_id
                     ? `var clipResult = __findClip("${escapeForExtendScript(args.node_id)}");
              if (!clipResult) return __error("Clip not found");
-             var markers = clipResult.clip.markers;`
+             var markers = clipResult.clip.markers;
+             if (!markers) return __result({ deleted: false, timeSeconds: ${args.time_seconds} });`
                     : `var seq = app.project.activeSequence;
              if (!seq) return __error("No active sequence");
-             var markers = seq.markers;`;
+             var markers = seq.markers;
+             if (!markers) return __result({ deleted: false, timeSeconds: ${args.time_seconds} });`;
                 const script = buildToolScript(`
           ${markerTarget}
           
@@ -83,10 +85,12 @@ export function getMarkerTools(bridgeOptions) {
                 const markerTarget = args.node_id
                     ? `var clipResult = __findClip("${escapeForExtendScript(args.node_id)}");
              if (!clipResult) return __error("Clip not found");
-             var markers = clipResult.clip.markers;`
+             var markers = clipResult.clip.markers;
+             if (!markers) return __result({ deleted: false, timeSeconds: ${args.time_seconds} });`
                     : `var seq = app.project.activeSequence;
              if (!seq) return __error("No active sequence");
-             var markers = seq.markers;`;
+             var markers = seq.markers;
+             if (!markers) return __result({ deleted: false, timeSeconds: ${args.time_seconds} });`;
                 const script = buildToolScript(`
           ${markerTarget}
           
@@ -167,7 +171,8 @@ export function getMarkerTools(bridgeOptions) {
                 const markerTarget = args.node_id
                     ? `var clipResult = __findClip("${escapeForExtendScript(args.node_id)}");
              if (!clipResult) return __error("Clip not found");
-             var markers = clipResult.clip.markers;`
+             var markers = clipResult.clip.markers;
+             if (!markers) return __result([]);`
                     : `var seq = app.project.activeSequence;
              if (!seq) return __error("No active sequence");
              var markers = seq.markers;`;

@@ -389,6 +389,17 @@ export function getKeyframeTools(bridgeOptions) {
           endTime.ticks = __secondsToTicks(${args.end_seconds}).toString();
           prop.removeKeyRange(startTime, endTime);
           
+          // Premiere's removeKeyRange() leaves the property flagged as
+          // time-varying even after the last keyframe is gone, which makes
+          // isTimeVarying() return true while getKeys() is empty. If no keys
+          // remain, explicitly clear the flag so the state is truthful.
+          try {
+            var remaining = prop.getKeys();
+            if (!remaining || remaining.length === 0) {
+              prop.setTimeVarying(false);
+            }
+          } catch(e) {}
+          
           return __result({
             removed: true,
             effect: "${escapeForExtendScript(args.effect_name)}",

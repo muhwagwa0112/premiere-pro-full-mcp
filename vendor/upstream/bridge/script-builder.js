@@ -28,6 +28,64 @@ function __pad(n) {
   return n < 10 ? "0" + n : "" + n;
 }
 
+// === Locale-independent effect/component/property matching ===
+// Premiere localizes component/property displayName (불투명도/모션/위치/...).
+// matchName is stable across locales (AE.ADBE Opacity etc.), so prefer it,
+// then fall back to a set of known localized aliases.
+
+function __normStr(s) {
+  return String(s || "").toLowerCase().replace(/\\s+/g, " ").replace(/^\\s+|\\s+$/g, "");
+}
+
+// Match a component/effect object against a stable matchName fragment and
+// localized displayName aliases. Returns the object on match, else null.
+function __findComp(components, matchNameFrags, names) {
+  if (!components) return null;
+  var targetFrags = matchNameFrags || [];
+  var aliasSet = [];
+  for (var ai = 0; ai < (names || []).length; ai++) aliasSet.push(__normStr(names[ai]));
+  try {
+    for (var i = 0; i < components.numItems; i++) {
+      var comp = components[i];
+      var dn = "";
+      var mn = "";
+      try { dn = __normStr(comp.displayName); } catch (e) {}
+      try { mn = __normStr(comp.matchName); } catch (e) {}
+      for (var f = 0; f < targetFrags.length; f++) {
+        if (mn.indexOf(__normStr(targetFrags[f])) >= 0) return comp;
+      }
+      for (var a = 0; a < aliasSet.length; a++) {
+        if (dn === aliasSet[a] || dn.indexOf(aliasSet[a]) >= 0) return comp;
+      }
+    }
+  } catch (e) {}
+  return null;
+}
+
+// Match a property within a component against matchName frags / displayName aliases.
+function __findProp(comp, matchNameFrags, names) {
+  if (!comp || !comp.properties) return null;
+  var targetFrags = matchNameFrags || [];
+  var aliasSet = [];
+  for (var ai = 0; ai < (names || []).length; ai++) aliasSet.push(__normStr(names[ai]));
+  try {
+    for (var p = 0; p < comp.properties.numItems; p++) {
+      var prop = comp.properties[p];
+      var dn = "";
+      var mn = "";
+      try { dn = __normStr(prop.displayName); } catch (e) {}
+      try { mn = __normStr(prop.matchName); } catch (e) {}
+      for (var f = 0; f < targetFrags.length; f++) {
+        if (mn.indexOf(__normStr(targetFrags[f])) >= 0) return prop;
+      }
+      for (var a = 0; a < aliasSet.length; a++) {
+        if (dn === aliasSet[a] || dn.indexOf(aliasSet[a]) >= 0) return prop;
+      }
+    }
+  } catch (e) {}
+  return null;
+}
+
 function __findSequence(idOrName) {
   var project = app.project;
   for (var i = 0; i < project.sequences.numSequences; i++) {
@@ -185,7 +243,8 @@ export function buildScript(code) {
  * Escape a string for safe embedding in ExtendScript.
  */
 export function escapeForExtendScript(value) {
-    return value
+    const str = String(value ?? "");
+    return str
         .replace(/\\/g, "\\\\")
         .replace(/"/g, '\\"')
         .replace(/'/g, "\\'")

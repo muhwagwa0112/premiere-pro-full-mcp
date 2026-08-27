@@ -169,21 +169,19 @@ export function getAdvancedTools(bridgeOptions) {
             },
             handler: async (args) => {
                 const script = buildToolScript(`
-          app.enableQE();
-          var qeSeq = qe.project.getActiveSequence();
-          if (!qeSeq) return __error("No active sequence (QE)");
-          
+          // Premiere 26.x CEP/ExtendScript provides no working public API to
+          // move a clip between tracks. QETrackItem.moveToTrack() exists but is
+          // unusable in this host (throws "Not Enough Parameters" / "cannot work
+          // with instances of this class"), and the ExtendScript TrackItem has no
+          // moveToTrack/moveTrack/setTrack at all. Report the limitation clearly
+          // rather than pretending to succeed.
           var result = __findClip("${escapeForExtendScript(args.node_id)}");
           if (!result) return __error("Clip not found");
-          
-          var qeTrack = result.trackType === "video"
-            ? qeSeq.getVideoTrackAt(result.trackIndex)
-            : qeSeq.getAudioTrackAt(result.trackIndex);
-          var qeClip = qeTrack.getItemAt(result.clipIndex);
-          if (!qeClip) return __error("QE clip not found");
-          
-          qeClip.moveToTrack(${args.target_track_index});
-          return __result({ moved: true, clipName: result.clip.name, newTrackIndex: ${args.target_track_index} });
+          return __error(
+            "move_clip_to_track is not supported on Premiere 26.x CEP/ExtendScript: " +
+            "there is no working public API to move a clip between tracks in this host. " +
+            "Move the clip manually, or use a track-within move via move_clip."
+          );
         `);
                 return sendCommand(script, bridgeOptions);
             },
@@ -214,9 +212,15 @@ export function getAdvancedTools(bridgeOptions) {
             : qeSeq.getAudioTrackAt(result.trackIndex);
           var qeClip = qeTrack.getItemAt(result.clipIndex);
           if (!qeClip) return __error("QE clip not found");
-          
-          qeClip.removeEffects();
-          return __result({ removed: true, clipName: result.clip.name });
+
+          // Premiere 26.x QE removeEffects() returns true but does not
+          // actually remove any components (verified: component count stays
+          // unchanged). ExtendScript exposes no remove() on clip components,
+          // so there is no truthful way to remove all effects here.
+          return __error(
+            "remove_all_effects is not supported by this host: Premiere " + app.version +
+            " CEP/ExtendScript's QE removeEffects() is a no-op and clip components expose no remove(). Remove effects in the Premiere UI first."
+          );
         `);
                 return sendCommand(script, bridgeOptions);
             },
@@ -256,15 +260,16 @@ export function getAdvancedTools(bridgeOptions) {
           var qeClip = qeTrack.getItemAt(result.clipIndex);
           if (!qeClip) return __error("QE clip not found");
           
-          qeClip.setSpeed(${args.speed_percent});
-          ${args.reverse ? `qeClip.setReverse(true);` : ""}
-          
-          return __result({
-            speedSet: true,
-            clipName: result.clip.name,
-            speed: ${args.speed_percent},
-            reverse: ${!!args.reverse}
-          });
+          // Premiere 26.x CEP/ExtendScript: QETrackItem.setSpeed() throws
+          // "Not Enough Parameters" and setReverse() throws "Unknown error
+          // exception" in this host (both verified on 26.3.2). There is no
+          // public working speed/reverse API through the CEP bridge, so fail
+          // honestly instead of reporting a change that never happened.
+          return __error(
+            "set_clip_speed_qe is not supported on Premiere " + app.version +
+            " CEP/ExtendScript: QETrackItem.setSpeed()/setReverse() are unusable in " +
+            "this host. Use speed_change (non-QE) or change speed in the Premiere UI."
+          );
         `);
                 return sendCommand(script, bridgeOptions);
             },
@@ -301,8 +306,15 @@ export function getAdvancedTools(bridgeOptions) {
           var qeClip = qeTrack.getItemAt(result.clipIndex);
           if (!qeClip) return __error("QE clip not found");
           
-          qeClip.setReverse(${rev});
-          return __result({ reversed: ${rev}, clipName: result.clip.name });
+          // Premiere 26.x CEP/ExtendScript: QETrackItem.setReverse exists but
+          // always throws "Unknown error exception" when called (verified on
+          // 26.3.2). There is no truthful reverse operation available through
+          // the CEP bridge, so fail honestly instead of silently no-op'ing.
+          return __error(
+            "reverse_clip is not supported by this host: Premiere " + app.version +
+            " CEP/ExtendScript exposes QETrackItem.setReverse but it always " +
+            "throws 'Unknown error exception'. Reverse the clip in the Premiere UI first."
+          );
         `);
                 return sendCommand(script, bridgeOptions);
             },
@@ -674,11 +686,15 @@ export function getAdvancedTools(bridgeOptions) {
             parameters: {},
             handler: async () => {
                 const script = buildToolScript(`
-          var seq = app.project.activeSequence;
-          if (!seq) return __error("No active sequence");
-          seq.performSceneEditDetectionOnSelection();
-          return __result({ sceneDetection: true });
-        `);
+            var seq = app.project.activeSequence;
+            if (!seq) return __error("No active sequence");
+            return __error(
+              "scene_edit_detection is not supported on Premiere " + app.version +
+              " CEP/ExtendScript: seq.performSceneEditDetectionOnSelection() exists " +
+              "but throws 'Not Enough Parameters' in this host (Scene Edit Detection " +
+              "is UXP/UI-only). Run it in the Premiere UI first."
+            );
+          `);
                 return sendCommand(script, bridgeOptions);
             },
         },

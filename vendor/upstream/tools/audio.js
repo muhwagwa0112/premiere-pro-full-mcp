@@ -24,16 +24,12 @@ export function getAudioTools(bridgeOptions) {
           if (!result) return __error("Clip not found");
           
           var clip = result.clip;
-          // Find the Volume component
-          for (var i = 0; i < clip.components.numItems; i++) {
-            var comp = clip.components[i];
-            if (comp.displayName === "Volume" || comp.matchName === "audioVolume") {
-              for (var p = 0; p < comp.properties.numItems; p++) {
-                if (comp.properties[p].displayName === "Level") {
-                  comp.properties[p].setValue(${args.level_db}, true);
-                  return __result({ adjusted: true, clipName: clip.name, levelDb: ${args.level_db} });
-                }
-              }
+          var volumeComp = __findComp(clip.components, ["Internal Volume", "ADBE Audio Levels", "Volume"], ["Volume", "볼륨"]);
+          if (volumeComp) {
+            var levelProp = __findProp(volumeComp, ["ADBE Audio Levels", "Level"], ["Level", "레벨"]);
+            if (levelProp) {
+              levelProp.setValue(${args.level_db}, true);
+              return __result({ adjusted: true, clipName: clip.name, levelDb: ${args.level_db} });
             }
           }
           
@@ -78,18 +74,10 @@ export function getAudioTools(bridgeOptions) {
           if (!result) return __error("Clip not found");
           
           var clip = result.clip;
+          var volumeComp = __findComp(clip.components, ["Internal Volume", "ADBE Audio Levels", "Volume"], ["Volume", "볼륨"]);
           var levelProp = null;
-          
-          for (var i = 0; i < clip.components.numItems; i++) {
-            var comp = clip.components[i];
-            if (comp.displayName === "Volume" || comp.matchName === "audioVolume") {
-              for (var p = 0; p < comp.properties.numItems; p++) {
-                if (comp.properties[p].displayName === "Level") {
-                  levelProp = comp.properties[p];
-                  break;
-                }
-              }
-            }
+          if (volumeComp) {
+            levelProp = __findProp(volumeComp, ["ADBE Audio Levels", "Level"], ["Level", "레벨"]);
           }
           
           if (!levelProp) return __error("Could not find audio Level property");

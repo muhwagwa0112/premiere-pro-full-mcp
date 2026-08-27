@@ -441,19 +441,12 @@ export function getTrackTargetingTools(bridgeOptions) {
           if (!result) return __error("Clip not found");
 
           var clip = result.clip;
-          var set = false;
-          for (var i = 0; i < clip.components.numItems; i++) {
-            if (clip.components[i].displayName === "Motion") {
-              for (var p = 0; p < clip.components[i].properties.numItems; p++) {
-                if (clip.components[i].properties[p].displayName === "Position") {
-                  clip.components[i].properties[p].setValue([${args.x}, ${args.y}], true);
-                  set = true;
-                  break;
-                }
-              }
-              break;
-            }
-          }
+          var motion = __findComp(clip.components, ["AE.ADBE Motion"], ["Motion", "모션"]);
+          if (!motion) return __error("Could not set position - Motion component not found (locale-independent lookup failed)");
+          var prop = __findProp(motion, ["ADBE Position", "Position"], ["Position", "위치"]);
+          if (!prop) return __error("Could not set position - Position property not found (locale-independent lookup failed)");
+          var set = true;
+          prop.setValue([${args.x}, ${args.y}], true);
           if (!set) return __error("Could not set position");
           return __result({ x: ${args.x}, y: ${args.y}, clip: clip.name });
         `);
@@ -482,19 +475,12 @@ export function getTrackTargetingTools(bridgeOptions) {
           if (!result) return __error("Clip not found");
 
           var clip = result.clip;
-          var set = false;
-          for (var i = 0; i < clip.components.numItems; i++) {
-            if (clip.components[i].displayName === "Motion") {
-              for (var p = 0; p < clip.components[i].properties.numItems; p++) {
-                if (clip.components[i].properties[p].displayName === "Scale") {
-                  clip.components[i].properties[p].setValue(${args.scale}, true);
-                  set = true;
-                  break;
-                }
-              }
-              break;
-            }
-          }
+          var motion = __findComp(clip.components, ["AE.ADBE Motion"], ["Motion", "모션"]);
+          if (!motion) return __error("Could not set scale - Motion component not found (locale-independent lookup failed)");
+          var prop = __findProp(motion, ["ADBE Scale", "Scale"], ["Scale", "비율 조정"]);
+          if (!prop) return __error("Could not set scale - Scale property not found (locale-independent lookup failed)");
+          var set = true;
+          prop.setValue(${args.scale}, true);
           if (!set) return __error("Could not set scale");
           return __result({ scale: ${args.scale}, clip: clip.name });
         `);
@@ -523,19 +509,12 @@ export function getTrackTargetingTools(bridgeOptions) {
           if (!result) return __error("Clip not found");
 
           var clip = result.clip;
-          var set = false;
-          for (var i = 0; i < clip.components.numItems; i++) {
-            if (clip.components[i].displayName === "Motion") {
-              for (var p = 0; p < clip.components[i].properties.numItems; p++) {
-                if (clip.components[i].properties[p].displayName === "Rotation") {
-                  clip.components[i].properties[p].setValue(${args.degrees}, true);
-                  set = true;
-                  break;
-                }
-              }
-              break;
-            }
-          }
+          var motion = __findComp(clip.components, ["AE.ADBE Motion"], ["Motion", "모션"]);
+          if (!motion) return __error("Could not set rotation - Motion component not found (locale-independent lookup failed)");
+          var prop = __findProp(motion, ["ADBE Rotation", "Rotation"], ["Rotation", "회전"]);
+          if (!prop) return __error("Could not set rotation - Rotation property not found (locale-independent lookup failed)");
+          var set = true;
+          prop.setValue(${args.degrees}, true);
           if (!set) return __error("Could not set rotation");
           return __result({ degrees: ${args.degrees}, clip: clip.name });
         `);
@@ -568,19 +547,12 @@ export function getTrackTargetingTools(bridgeOptions) {
           if (!result) return __error("Clip not found");
 
           var clip = result.clip;
-          var set = false;
-          for (var i = 0; i < clip.components.numItems; i++) {
-            if (clip.components[i].displayName === "Motion") {
-              for (var p = 0; p < clip.components[i].properties.numItems; p++) {
-                if (clip.components[i].properties[p].displayName === "Anchor Point") {
-                  clip.components[i].properties[p].setValue([${args.x}, ${args.y}], true);
-                  set = true;
-                  break;
-                }
-              }
-              break;
-            }
-          }
+          var motion = __findComp(clip.components, ["AE.ADBE Motion"], ["Motion", "모션"]);
+          if (!motion) return __error("Could not set anchor point - Motion component not found (locale-independent lookup failed)");
+          var prop = __findProp(motion, ["ADBE Anchor Point", "Anchor Point"], ["Anchor Point", "기준점"]);
+          if (!prop) return __error("Could not set anchor point - Anchor Point property not found (locale-independent lookup failed)");
+          var set = true;
+          prop.setValue([${args.x}, ${args.y}], true);
           if (!set) return __error("Could not set anchor point");
           return __result({ x: ${args.x}, y: ${args.y}, clip: clip.name });
         `);
@@ -609,19 +581,12 @@ export function getTrackTargetingTools(bridgeOptions) {
           if (!result) return __error("Clip not found");
 
           var clip = result.clip;
-          var set = false;
-          for (var i = 0; i < clip.components.numItems; i++) {
-            if (clip.components[i].displayName === "Opacity") {
-              for (var p = 0; p < clip.components[i].properties.numItems; p++) {
-                if (clip.components[i].properties[p].displayName === "Opacity") {
-                  clip.components[i].properties[p].setValue(${args.opacity}, true);
-                  set = true;
-                  break;
-                }
-              }
-              break;
-            }
-          }
+          var opacityComp = __findComp(clip.components, ["AE.ADBE Opacity"], ["Opacity", "불투명도"]);
+          if (!opacityComp) return __error("Could not set opacity - Opacity component not found (locale-independent lookup failed)");
+          var prop = __findProp(opacityComp, ["ADBE Opacity", "Opacity"], ["Opacity", "불투명도"]);
+          if (!prop) return __error("Could not set opacity - Opacity property not found (locale-independent lookup failed)");
+          var set = true;
+          prop.setValue(${args.opacity}, true);
           if (!set) return __error("Could not set opacity");
           return __result({ opacity: ${args.opacity}, clip: clip.name });
         `);
@@ -650,19 +615,12 @@ export function getTrackTargetingTools(bridgeOptions) {
           if (!result) return __error("Clip not found");
 
           var clip = result.clip;
-          var set = false;
-          for (var i = 0; i < clip.components.numItems; i++) {
-            if (clip.components[i].displayName === "Volume") {
-              for (var p = 0; p < clip.components[i].properties.numItems; p++) {
-                if (clip.components[i].properties[p].displayName === "Level") {
-                  clip.components[i].properties[p].setValue(${args.volume_db}, true);
-                  set = true;
-                  break;
-                }
-              }
-              break;
-            }
-          }
+          var volumeComp = __findComp(clip.components, ["AE.ADBE Audio Levels"], ["Volume", "볼륨", "오디오 레벨"]);
+          if (!volumeComp) return __error("Could not set volume - Volume component not found (locale-independent lookup failed). Is this an audio clip?");
+          var prop = __findProp(volumeComp, ["ADBE Audio Levels", "Level"], ["Level", "레벨"]);
+          if (!prop) return __error("Could not set volume - Level property not found (locale-independent lookup failed)");
+          var set = true;
+          prop.setValue(${args.volume_db}, true);
           if (!set) return __error("Could not set volume - is this an audio clip?");
           return __result({ volumeDb: ${args.volume_db}, clip: clip.name });
         `);
@@ -691,19 +649,12 @@ export function getTrackTargetingTools(bridgeOptions) {
           if (!result) return __error("Clip not found");
 
           var clip = result.clip;
-          var set = false;
-          for (var i = 0; i < clip.components.numItems; i++) {
-            if (clip.components[i].displayName === "Panner") {
-              for (var p = 0; p < clip.components[i].properties.numItems; p++) {
-                if (clip.components[i].properties[p].displayName === "Balance" || clip.components[i].properties[p].displayName === "Pan") {
-                  clip.components[i].properties[p].setValue(${args.pan}, true);
-                  set = true;
-                  break;
-                }
-              }
-              break;
-            }
-          }
+          var pannerComp = __findComp(clip.components, ["AE.ADBE Panner"], ["Panner", "패너", "오디오 밸런스", "밸런스"]);
+          if (!pannerComp) return __error("Could not set pan - this clip has no Panner/Balance component on Premiere 26.x. Stereo audio clips expose Channel Volume (left/right) instead, so a mono pan is not available for this clip.");
+          var prop = __findProp(pannerComp, ["ADBE Pan", "ADBE Balance", "Balance"], ["Balance", "Pan", "밸런스", "팬"]);
+          if (!prop) return __error("Could not set pan - Balance/Pan property not found (locale-independent lookup failed)");
+          var set = true;
+          prop.setValue(${args.pan}, true);
           if (!set) return __error("Could not set pan - is this an audio clip?");
           return __result({ pan: ${args.pan}, clip: clip.name });
         `);
@@ -900,7 +851,10 @@ export function getTrackTargetingTools(bridgeOptions) {
           var seq = app.project.activeSequence;
           if (!seq) return __error("No active sequence");
 
-          ${clearIn ? `seq.setInPoint(seq.zeroPoint.ticks);` : ""}
+          // setInPoint/setOutPoint require string ticks (numbers and Time
+          // objects are rejected as "Illegal Parameter type"). seq.zeroPoint
+          // and seq.end are both string tick counts, so pass them directly.
+          ${clearIn ? `seq.setInPoint(seq.zeroPoint);` : ""}
           ${clearOut ? `seq.setOutPoint(seq.end);` : ""}
 
           return __result({ clearedIn: ${clearIn}, clearedOut: ${clearOut} });
@@ -921,30 +875,15 @@ export function getTrackTargetingTools(bridgeOptions) {
             },
             handler: async (args) => {
                 const script = buildToolScript(`
-          var encoder = app.encoder;
-          if (!encoder) return __error("Encoder not available");
-
-          try {
-            var formats = encoder.getFormatList();
-            if (!formats) return __error("Could not get format list");
-
-            var result = [];
-            for (var f = 0; f < formats.length; f++) {
-              var formatName = formats[f];
-              ${args.format ? `if (formatName.toLowerCase().indexOf("${escapeForExtendScript(args.format)}".toLowerCase()) === -1) continue;` : ""}
-              var presets = encoder.getPresetList(formatName);
-              var presetNames = [];
-              if (presets) {
-                for (var p = 0; p < presets.length; p++) {
-                  presetNames.push(presets[p]);
-                }
-              }
-              result.push({ format: formatName, presets: presetNames });
-            }
-            return __result(result);
-          } catch(e) {
-            return __error("Encoder preset listing failed: " + e.message);
-          }
+          // Premiere 26.x CEP/ExtendScript's app.encoder exposes only
+          // ENCODE_ENTIRE / ENCODE_IN_TO_OUT / ENCODE_WORKAREA and no
+          // getFormatList/getPresetList API. Listing AME presets must be done
+          // by scanning the install dir's MediaIO/systempresets .epr files,
+          // which this bridge does not do. Report the limitation truthfully.
+          return __error(
+            "get_encoder_presets is not supported on Premiere 26.x CEP/ExtendScript: " +
+            "app.encoder has no getFormatList/getPresetList API in this host."
+          );
         `);
                 return sendCommand(script, bridgeOptions);
             },
@@ -981,7 +920,12 @@ export function getTrackTargetingTools(bridgeOptions) {
                     : `qeSeq.getAudioTrackAt(${args.track_index})`};
           if (!qeTrack) return __error("Track not found");
 
-          var qeClip = qeTrack.getItemAt(${args.clip_index});
+          var qeClip = null;
+          try {
+            qeClip = qeTrack.getItemAt(${args.clip_index});
+          } catch(e) {
+            qeClip = null;
+          }
           if (!qeClip) return __error("Clip not found at index ${args.clip_index}");
 
           var info = { trackType: "${args.track_type}", trackIndex: ${args.track_index}, clipIndex: ${args.clip_index} };
@@ -1050,14 +994,13 @@ export function getTrackTargetingTools(bridgeOptions) {
             handler: async (args) => {
                 const count = args.count ?? 1;
                 const script = buildToolScript(`
-          var undone = 0;
-          for (var i = 0; i < ${count}; i++) {
-            try {
-              app.project.undo();
-              undone++;
-            } catch(e) { break; }
-          }
-          return __result({ undone: undone });
+          // Premiere 26.x CEP/ExtendScript has no working public undo API:
+          // app.project.undo() is not a function in this host. Fail honestly.
+          return __error(
+            "multiple_undo is not supported on Premiere " + app.version +
+            " CEP/ExtendScript: app.project.undo() is not available. Use Ctrl+Z " +
+            "(Cmd+Z) in the Premiere UI to undo."
+          );
         `);
                 return sendCommand(script, bridgeOptions);
             },
@@ -1174,17 +1117,15 @@ export function getTrackTargetingTools(bridgeOptions) {
 
           var clip = result.clip;
           var set = false;
-          for (var i = 0; i < clip.components.numItems; i++) {
-            if (clip.components[i].displayName === "Motion") {
-              for (var p = 0; p < clip.components[i].properties.numItems; p++) {
-                var pName = clip.components[i].properties[p].displayName;
-                if (pName === "Anti-flicker Filter" || pName === "Use Composition's Shutter Angle") {
-                  clip.components[i].properties[p].setValue(${args.enabled}, true);
-                  set = true;
-                  break;
-                }
-              }
-              break;
+          var motion = __findComp(clip.components, ["AE.ADBE Motion"], ["Motion", "모션"]);
+          if (motion) {
+            var anti = __findProp(motion, ["ADBE Anti-Flicker", "Anti-Flicker"], ["Anti-flicker Filter", "깜박임 제거 필터", "Use Composition's Shutter Angle"]);
+            if (anti) {
+              // ADBE Anti-Flicker in Premiere 26.x is an integer (0/1), not a
+              // boolean. Passing true/false throws "Illegal Parameter type".
+              // Convert to 0/1 so setValue succeeds on this host.
+              anti.setValue(${args.enabled} ? 1 : 0, true);
+              set = true;
             }
           }
 
@@ -1216,16 +1157,12 @@ export function getTrackTargetingTools(bridgeOptions) {
 
           var clip = result.clip;
           var set = false;
-          for (var i = 0; i < clip.components.numItems; i++) {
-            if (clip.components[i].displayName === "Motion") {
-              for (var p = 0; p < clip.components[i].properties.numItems; p++) {
-                if (clip.components[i].properties[p].displayName === "Uniform Scale") {
-                  clip.components[i].properties[p].setValue(${args.uniform}, true);
-                  set = true;
-                  break;
-                }
-              }
-              break;
+          var motion = __findComp(clip.components, ["AE.ADBE Motion"], ["Motion", "모션"]);
+          if (motion) {
+            var uniform = __findProp(motion, ["ADBE Uniform Scale", "Uniform Scale"], ["Uniform Scale", "균일 비율"]);
+            if (uniform) {
+              uniform.setValue(${args.uniform}, true);
+              set = true;
             }
           }
           if (!set) return __error("Uniform Scale property not found");
@@ -1260,26 +1197,21 @@ export function getTrackTargetingTools(bridgeOptions) {
           if (!result) return __error("Clip not found");
 
           var clip = result.clip;
-          var motion = null;
-          for (var i = 0; i < clip.components.numItems; i++) {
-            if (clip.components[i].displayName === "Motion") { motion = clip.components[i]; break; }
-          }
+          var motion = __findComp(clip.components, ["AE.ADBE Motion"], ["Motion", "모션"]);
           if (!motion) return __error("Motion component not found");
 
           // Disable uniform scale first
-          for (var p = 0; p < motion.properties.numItems; p++) {
-            if (motion.properties[p].displayName === "Uniform Scale") {
-              motion.properties[p].setValue(false, true);
-              break;
-            }
+          var uniform = __findProp(motion, ["ADBE Uniform Scale", "Uniform Scale"], ["Uniform Scale", "균일 비율"]);
+          if (uniform) {
+            uniform.setValue(false, true);
           }
 
           var setW = false, setH = false;
-          for (var p = 0; p < motion.properties.numItems; p++) {
-            var pName = motion.properties[p].displayName;
-            if (pName === "Scale Width") { motion.properties[p].setValue(${args.scale_width}, true); setW = true; }
-            if (pName === "Scale Height") { motion.properties[p].setValue(${args.scale_height}, true); setH = true; }
-          }
+          var scaleW = __findProp(motion, ["ADBE Scale Width", "Scale Width"], ["Scale Width", "폭 비율 조정"]);
+          var scaleH = __findProp(motion, ["ADBE Scale Height", "Scale Height"], ["Scale Height", "높이 비율 조정"]);
+          if (scaleW) { scaleW.setValue(${args.scale_width}, true); setW = true; }
+          if (scaleH) { scaleH.setValue(${args.scale_height}, true); setH = true; }
+          if (!setW && !setH) return __error("Scale Width/Height properties not found (locale-independent lookup failed)");
 
           return __result({ clip: clip.name, scaleWidth: ${args.scale_width}, scaleHeight: ${args.scale_height}, widthSet: setW, heightSet: setH });
         `);

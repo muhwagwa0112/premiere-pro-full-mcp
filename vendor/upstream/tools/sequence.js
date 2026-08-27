@@ -23,10 +23,16 @@ export function getSequenceTools(bridgeOptions) {
                     ? `app.project.createNewSequenceFromPreset("${escapeForExtendScript(args.name)}", "${escapeForExtendScript(args.preset_path)}");`
                     : `app.project.createNewSequence("${escapeForExtendScript(args.name)}");`;
                 const script = buildToolScript(`
-          ${presetCode}
-          var seq = app.project.activeSequence;
-          if (!seq) return __error("Failed to create sequence");
-          return __result({ created: true, name: seq.name, id: seq.sequenceID });
+          // Premiere 26.x CEP/ExtendScript: Project.createNewSequence() throws
+          // "Not Enough Parameters" when called from the bridge even with a name
+          // argument, and Project.createNewSequenceFromPreset() is undefined in this
+          // host. Report the limitation clearly rather than pretending to succeed.
+          return __error(
+            "create_sequence is not supported on Premiere " + app.version +
+            " CEP/ExtendScript: app.project.createNewSequence() throws " +
+            "'Not Enough Parameters' and createNewSequenceFromPreset() is unavailable. " +
+            "Create the sequence in the Premiere UI first."
+          );
         `);
                 return sendCommand(script, bridgeOptions);
             },
@@ -112,11 +118,15 @@ export function getSequenceTools(bridgeOptions) {
                 const seqLookup = args.sequence_id
                     ? `var seq = __findSequence("${escapeForExtendScript(args.sequence_id)}"); if (!seq) return __error("Sequence not found");`
                     : `var seq = app.project.activeSequence; if (!seq) return __error("No active sequence");`;
+                // Premiere 26.x CEP/ExtendScript: assigning seq.frameSizeHorizontal /
+                // frameSizeVertical directly is silently ignored on this host. The
+                // working approach (verified live) is to set videoFrameWidth /
+                // videoFrameHeight on the settings object and call seq.setSettings().
                 const setters = [];
                 if (args.width)
-                    setters.push(`seq.frameSizeHorizontal = ${args.width};`);
+                    setters.push(`settings.videoFrameWidth = ${args.width};`);
                 if (args.height)
-                    setters.push(`seq.frameSizeVertical = ${args.height};`);
+                    setters.push(`settings.videoFrameHeight = ${args.height};`);
                 const script = buildToolScript(`
           ${seqLookup}
           var settings = seq.getSettings();
@@ -176,8 +186,12 @@ export function getSequenceTools(bridgeOptions) {
                     : `var seq = app.project.activeSequence; if (!seq) return __error("No active sequence");`;
                 const script = buildToolScript(`
           ${seqLookup}
-          seq.autoReframeSequence(${args.target_width}, ${args.target_height}, false);
-          return __result({ reframed: true, name: seq.name, targetSize: "${args.target_width}x${args.target_height}" });
+          return __error(
+            "auto_reframe_sequence is not supported on Premiere " + app.version +
+            " CEP/ExtendScript: seq.autoReframeSequence() exists but throws " +
+            "'Not Enough Parameters' in this host (the Auto Reframe feature is " +
+            "UXP/UI-only). Reframe the sequence in the Premiere UI first."
+          );
         `);
                 return sendCommand(script, bridgeOptions);
             },
@@ -276,10 +290,11 @@ export function getSequenceTools(bridgeOptions) {
             },
             handler: async (args) => {
                 const script = buildToolScript(`
-          app.project.createNewSequenceFromPreset("${escapeForExtendScript(args.name)}", "${escapeForExtendScript(args.preset_path)}");
-          var seq = app.project.activeSequence;
-          if (!seq) return __error("Failed to create sequence from preset");
-          return __result({ created: true, name: seq.name, id: seq.sequenceID });
+          return __error(
+            "create_sequence_from_preset is not supported on Premiere " + app.version +
+            " CEP/ExtendScript: app.project.createNewSequenceFromPreset() is undefined " +
+            "in this host. Create the sequence from the preset in the Premiere UI first."
+          );
         `);
                 return sendCommand(script, bridgeOptions);
             },
@@ -320,8 +335,13 @@ export function getSequenceTools(bridgeOptions) {
                 const script = buildToolScript(`
           var seq = app.project.activeSequence;
           if (!seq) return __error("No active sequence");
-          var enabled = seq.isWorkAreaBarEnabled();
-          return __result({ sequenceName: seq.name, workAreaEnabled: enabled });
+          // Premiere 26.x CEP/ExtendScript exposes no API to read whether the
+          // work-area bar is enabled (isWorkAreaBarEnabled / getWorkAreaEnabled
+          // do not exist on Sequence). Report the limitation truthfully.
+          return __error(
+            "is_work_area_enabled is not supported on Premiere 26.x CEP/ExtendScript: " +
+            "there is no public API to read the work-area bar enabled state in this host."
+          );
         `);
                 return sendCommand(script, bridgeOptions);
             },

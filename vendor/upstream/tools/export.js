@@ -1,8 +1,69 @@
 import { buildToolScript, escapeForExtendScript } from "../bridge/script-builder.js";
 import { sendCommand } from "../bridge/file-bridge.js";
-import { readFileSync, unlinkSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync, unlinkSync, existsSync, mkdtempSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+
+/**
+ * Premiere 26.x CEP/ExtendScript has no exportFramePNG / still-capture API.
+ * However, the AME "PNG Sequence (Match Source)" preset plus
+ * seq.exportAsMediaDirect DOES write a single-frame PNG when the preset's
+ * ADBEStillSequence flag is false (a sequence preset normally has it true,
+ * which makes exportAsMediaDirect encode the whole timeline).
+ *
+ * We therefore clone the stock PNG preset, flip ADBEStillSequence to false,
+ * write it to a temp dir, and hand that path to exportAsMediaDirect. The
+ * resulting file is a genuine single-frame PNG at the playhead position
+ * (verified live on Premiere 26.3.2: 1080x1920 24bpp PNG).
+ */
+const PNG_SEQUENCE_PRESET_CANDIDATES = [
+  // Windows install layout (Premiere Pro 2025/2026)
+  "MediaIO\\systempresets\\3F3F3F3F_504E4720\\PNG Sequence (Match Source).epr",
+  // Fallback relative to the install dir
+  "Settings\\EncoderPresets\\PNG Sequence (Match Source).epr",
+];
+
+const JPEG_SEQUENCE_PRESET_CANDIDATES = [
+  "MediaIO\\systempresets\\3F3F3F3F_4A504547\\JPEG Sequence (Match Source).epr",
+  "Settings\\EncoderPresets\\JPEG Sequence (Match Source).epr",
+];
+
+/**
+ * Build a single-frame still image preset by cloning a stock image-sequence
+ * preset and disabling ADBEStillSequence. Returns the temp preset path (or
+ * null if no stock preset could be located). The caller is responsible for
+ * deleting the returned file after export.
+ */
+export function makeSingleFramePreset(premiereInstallPath, preferPng = true) {
+  if (!premiereInstallPath) return null;
+  const candidates = preferPng ? PNG_SEQUENCE_PRESET_CANDIDATES : JPEG_SEQUENCE_PRESET_CANDIDATES;
+  let stockPath = null;
+  for (const rel of candidates) {
+    const p = join(premiereInstallPath, rel);
+    if (existsSync(p)) {
+      stockPath = p;
+      break;
+    }
+  }
+  if (!stockPath) return null;
+
+  try {
+    const xml = readFileSync(stockPath, "utf8");
+    // Flip the ADBEStillSequence flag (true -> false) so exportAsMediaDirect
+    // writes a single still frame instead of the whole timeline.
+    const patched = xml.replace(
+      /(<ParamValue>)true(<\/ParamValue>\s*<ParamType>1<\/ParamType>\s*<ParamOrdinalValue>4<\/ParamOrdinalValue>\s*<ParamIdentifier>ADBEStillSequence<\/ParamIdentifier>)/,
+      "$1false$2",
+    );
+    if (patched === xml) return null;
+    const dir = mkdtempSync(join(tmpdir(), "ppmc-frame-preset-"));
+    const presetPath = join(dir, "single_frame.png.epr");
+    writeFileSync(presetPath, patched, "utf8");
+    return presetPath;
+  } catch {
+    return null;
+  }
+}
 export function getExportTools(bridgeOptions) {
     return {
         export_sequence: {
@@ -58,30 +119,137 @@ export function getExportTools(bridgeOptions) {
                 properties: {
                     output_path: {
                         type: "string",
-                        description: "Full output file path (e.g., '/Users/me/frame.png'). Extension determines format.",
+                        description: "Full output file path for the still image (e.g., '/Users/me/frame.png').",
                     },
                     time_seconds: {
                         type: "number",
                         description: "Time position in seconds to export. Uses current playhead if omitted.",
                     },
+                    format: {
+                        type: "string",
+                        enum: ["png", "jpg"],
+                        description: "Still image format (default: png).",
+                    },
                 },
                 required: ["output_path"],
             },
             handler: async (args) => {
-                const script = buildToolScript(`
+                // 1. Ask the host for its install path so we can locate the stock
+                //    PNG/JPEG sequence preset (path differs per version/layout).
+                const pathScript = buildToolScript(`
+          return __result({ path: app.path || "", version: app.version || "" });
+        `);
+                const pathResult = await sendCommand(pathScript, bridgeOptions);
+                const data = (pathResult && typeof pathResult === 'object' && 'data' in pathResult)
+                    ? pathResult.data
+                    : pathResult;
+                const installPath = data && data.path ? String(data.path) : "";
+                if (!installPath) {
+                    return { success: false, error: "Could not determine Premiere Pro install path from app.path" };
+                }
+
+                const preferPng = (args.format ?? "png").toLowerCase() !== "jpg";
+                const presetPath = makeSingleFramePreset(installPath, preferPng);
+                if (!presetPath) {
+                    return {
+                        success: false,
+                        error: "Could not locate or patch a stock image-sequence preset to export a single frame. " +
+                            "Expected a PNG/JPEG Sequence (Match Source).epr under the Premiere install dir.",
+                    };
+                }
+
+                const outPath = String(args.output_path);
+                const timeSeconds = (typeof args.time_seconds === 'number') ? args.time_seconds : null;
+                const outputDir = join(tmpdir(), "ppmc-frame");
+                mkdirSync(outputDir, { recursive: true });
+                const tempName = `mcp_frame_${Date.now()}.${preferPng ? "png" : "jpg"}`;
+                const tempOut = join(outputDir, tempName);
+
+                const exportScript = buildToolScript(`
           var seq = app.project.activeSequence;
           if (!seq) return __error("No active sequence");
-          
-          ${args.time_seconds !== undefined
-                    ? `seq.setPlayerPosition(__secondsToTicks(${args.time_seconds}).toString());`
-                    : ""}
-          
-          var outputPath = "${escapeForExtendScript(args.output_path)}";
-          seq.exportFramePNG(seq.getPlayerPosition().ticks, outputPath);
-          
-          return __result({ exported: true, outputPath: outputPath });
+          var outPath = ${JSON.stringify(tempOut)};
+          var preset = ${JSON.stringify(presetPath)};
+          var restoreIn = null, restoreOut = null, restorePos = null;
+          var fps = 30;
+          var frameTick = Math.round(__secondsToTicks(1 / fps));
+          try { restoreIn = seq.getInPoint(); } catch(e) {}
+          try { restoreOut = seq.getOutPoint(); } catch(e) {}
+          try { restorePos = seq.getPlayerPosition(); } catch(e) {}
+          try { var tb = Number(seq.timebase); if (tb > 0) fps = 254016000000 / tb; } catch(e) {}
+          frameTick = Math.round(__secondsToTicks(1 / fps));
+
+          try {
+            // Capture exactly one frame at the target / playhead position by
+            // setting a one-frame sequence in/out window and exporting only
+            // that range. ENCODE_ENTIRE ignores the playhead and always re-encodes
+            // the whole timeline, so we must use ENCODE_IN_TO_OUT instead.
+            ${timeSeconds === null ? `
+            var curPos = Number(seq.getPlayerPosition().ticks);
+            var inTick = String(curPos);
+            var outTick = String(curPos + frameTick);
+            ` : `
+            var tickBase = __secondsToTicks(${timeSeconds});
+            var inTick = String(tickBase);
+            var outTick = String(tickBase + frameTick);
+            seq.setPlayerPosition(inTick);
+            `}
+            seq.setInPoint(inTick);
+            seq.setOutPoint(outTick);
+
+            var presetFile = new File(preset);
+            if (!presetFile.exists) return __error("Preset not found: " + preset);
+            var res = seq.exportAsMediaDirect(outPath, preset, app.encoder.ENCODE_IN_TO_OUT);
+            // exportAsMediaDirect writes asynchronously but queues the export
+            // synchronously; restore the original in/out/playhead now so the
+            // sequence window is not left modified (no finally here because it
+            // conflicts with sendCommand's IIFE re-wrap).
+            try { if (restoreIn !== null && restoreIn !== undefined) seq.setInPoint(restoreIn); } catch(e) {}
+            try { if (restoreOut !== null && restoreOut !== undefined) seq.setOutPoint(restoreOut); } catch(e) {}
+            try { if (restorePos !== null && restorePos !== undefined) seq.setPlayerPosition(String(restorePos.ticks !== undefined ? restorePos.ticks : restorePos)); } catch(e) {}
+            return __result({ exported: true, outputPath: outPath, exportResult: String(res) });
+          } catch(e) {
+            try { if (restoreIn !== null && restoreIn !== undefined) seq.setInPoint(restoreIn); } catch(e) {}
+            try { if (restoreOut !== null && restoreOut !== undefined) seq.setOutPoint(restoreOut); } catch(e) {}
+            try { if (restorePos !== null && restorePos !== undefined) seq.setPlayerPosition(String(restorePos.ticks !== undefined ? restorePos.ticks : restorePos)); } catch(e) {}
+            return __error("export_frame failed: " + e);
+          }
         `);
-                return sendCommand(script, bridgeOptions);
+                const exportResult = await sendCommand(exportScript, { ...bridgeOptions, timeoutMs: 120000 });
+
+                // Clean up the temp preset regardless of outcome.
+                try { unlinkSync(presetPath); } catch { /* ignore */ }
+
+                const isError = Boolean(exportResult && typeof exportResult === 'object' && exportResult.success === false);
+                if (isError) return exportResult;
+
+                // exportAsMediaDirect writes asynchronously; poll for the file.
+                let capturedPath = null;
+                for (let attempt = 0; attempt < 120; attempt++) {
+                    if (existsSync(tempOut)) {
+                        // Allow 0-byte files (still being written) to finish.
+                        let size = 0;
+                        try { size = statSync(tempOut).size; } catch { /* ignore */ }
+                        if (size > 0) { capturedPath = tempOut; break; }
+                    }
+                    await new Promise((r) => setTimeout(r, 500));
+                }
+
+                if (!capturedPath) {
+                    try { rmSync(outputDir, { recursive: true, force: true }); } catch { /* ignore */ }
+                    return { success: false, error: "export_frame timed out waiting for the captured frame file." };
+                }
+
+                // Return the captured file to the caller at the requested output_path.
+                const finalOutput = outPath;
+                try {
+                    copyFileSync(capturedPath, finalOutput);
+                    return { success: true, data: { exported: true, outputPath: finalOutput } };
+                } catch (e) {
+                    return { success: true, data: { exported: true, outputPath: capturedPath, note: "Copied to temp: " + String(e) } };
+                } finally {
+                    try { rmSync(outputDir, { recursive: true, force: true }); } catch { /* ignore */ }
+                }
             },
         },
         export_as_fcp_xml: {
@@ -269,56 +437,125 @@ export function getExportTools(bridgeOptions) {
                         type: "number",
                         description: "Time position in seconds to capture. Uses current playhead if omitted.",
                     },
+                    format: {
+                        type: "string",
+                        enum: ["png", "jpg"],
+                        description: "Still image format (default: png).",
+                    },
                 },
             },
             handler: async (args) => {
-                const tempPath = join(tmpdir(), `mcp_frame_capture_${Date.now()}.png`);
-                const escapedPath = escapeForExtendScript(tempPath);
-                const script = buildToolScript(`
+                const format = (args.format ?? "png").toLowerCase();
+                const preferPng = format !== "jpg";
+
+                const pathScript = buildToolScript(`
+          return __result({ path: app.path || "", version: app.version || "" });
+        `);
+                const pathResult = await sendCommand(pathScript, bridgeOptions);
+                const data = (pathResult && typeof pathResult === 'object' && 'data' in pathResult)
+                    ? pathResult.data
+                    : pathResult;
+                const installPath = data && data.path ? String(data.path) : "";
+                if (!installPath) {
+                    return { success: false, error: "Could not determine Premiere Pro install path from app.path" };
+                }
+
+                const presetPath = makeSingleFramePreset(installPath, preferPng);
+                if (!presetPath) {
+                    return {
+                        success: false,
+                        error: "Could not locate or patch a stock image-sequence preset for frame capture.",
+                    };
+                }
+
+                const timeSeconds = (typeof args.time_seconds === 'number') ? args.time_seconds : null;
+                const outputDir = join(tmpdir(), "ppmc-capture");
+                mkdirSync(outputDir, { recursive: true });
+                const tempName = `mcp_capture_${Date.now()}.${format}`;
+                const tempOut = join(outputDir, tempName);
+
+                const exportScript = buildToolScript(`
           var seq = app.project.activeSequence;
           if (!seq) return __error("No active sequence");
-          
-          ${args.time_seconds !== undefined
-                    ? `seq.setPlayerPosition(__secondsToTicks(${args.time_seconds}).toString());`
-                    : ""}
-          
-          var outputPath = "${escapedPath}";
-          seq.exportFramePNG(seq.getPlayerPosition().ticks, outputPath);
-          
-          return __result({ exported: true, outputPath: outputPath });
+          var outPath = ${JSON.stringify(tempOut)};
+          var preset = ${JSON.stringify(presetPath)};
+          var restoreIn = null, restoreOut = null, restorePos = null;
+          var fps = 30;
+          var frameTick = Math.round(__secondsToTicks(1 / fps));
+          try { restoreIn = seq.getInPoint(); } catch(e) {}
+          try { restoreOut = seq.getOutPoint(); } catch(e) {}
+          try { restorePos = seq.getPlayerPosition(); } catch(e) {}
+          try { var tb = Number(seq.timebase); if (tb > 0) fps = 254016000000 / tb; } catch(e) {}
+          frameTick = Math.round(__secondsToTicks(1 / fps));
+
+          try {
+            // Export only a one-frame in/out window instead of the whole
+            // timeline (ENCODE_ENTIRE always re-encodes from the start and
+            // ignores the playhead).
+            ${timeSeconds === null ? `
+            var curPos = Number(seq.getPlayerPosition().ticks);
+            var inTick = String(curPos);
+            var outTick = String(curPos + frameTick);
+            ` : `
+            var tickBase = __secondsToTicks(${timeSeconds});
+            var inTick = String(tickBase);
+            var outTick = String(tickBase + frameTick);
+            seq.setPlayerPosition(inTick);
+            `}
+            seq.setInPoint(inTick);
+            seq.setOutPoint(outTick);
+            var res = seq.exportAsMediaDirect(outPath, preset, app.encoder.ENCODE_IN_TO_OUT);
+            try { if (restoreIn !== null && restoreIn !== undefined) seq.setInPoint(restoreIn); } catch(e) {}
+            try { if (restoreOut !== null && restoreOut !== undefined) seq.setOutPoint(restoreOut); } catch(e) {}
+            try { if (restorePos !== null && restorePos !== undefined) seq.setPlayerPosition(String(restorePos.ticks !== undefined ? restorePos.ticks : restorePos)); } catch(e) {}
+            return __result({ exported: true, outputPath: outPath, exportResult: String(res) });
+          } catch(e) {
+            try { if (restoreIn !== null && restoreIn !== undefined) seq.setInPoint(restoreIn); } catch(e) {}
+            try { if (restoreOut !== null && restoreOut !== undefined) seq.setOutPoint(restoreOut); } catch(e) {}
+            try { if (restorePos !== null && restorePos !== undefined) seq.setPlayerPosition(String(restorePos.ticks !== undefined ? restorePos.ticks : restorePos)); } catch(e) {}
+            return __error("capture_frame failed: " + e);
+          }
         `);
-                const result = await sendCommand(script, bridgeOptions);
-                if (!result.success)
-                    return result;
-                // Read the exported PNG and return as base64 image content
-                // Wait a moment for the file to be written
-                let attempts = 0;
-                while (!existsSync(tempPath) && attempts < 20) {
-                    await new Promise(r => setTimeout(r, 100));
-                    attempts++;
-                }
-                if (!existsSync(tempPath)) {
-                    return { success: false, error: "Frame export completed but file not found at: " + tempPath };
-                }
-                try {
-                    const imageData = readFileSync(tempPath);
-                    const base64 = imageData.toString("base64");
-                    // Clean up temp file
-                    try {
-                        unlinkSync(tempPath);
+                const exportResult = await sendCommand(exportScript, { ...bridgeOptions, timeoutMs: 120000 });
+
+                try { unlinkSync(presetPath); } catch { /* ignore */ }
+
+                const isError = Boolean(exportResult && typeof exportResult === 'object' && exportResult.success === false);
+                if (isError) return exportResult;
+
+                // exportAsMediaDirect writes asynchronously; poll for the file.
+                let capturedPath = null;
+                for (let attempt = 0; attempt < 120; attempt++) {
+                    if (existsSync(tempOut)) {
+                        let size = 0;
+                        try { size = statSync(tempOut).size; } catch { /* ignore */ }
+                        if (size > 0) { capturedPath = tempOut; break; }
                     }
-                    catch { }
+                    await new Promise((r) => setTimeout(r, 500));
+                }
+
+                if (!capturedPath) {
+                    try { rmSync(outputDir, { recursive: true, force: true }); } catch { /* ignore */ }
+                    return { success: false, error: "capture_frame timed out waiting for the captured frame file." };
+                }
+
+                try {
+                    const fileBuf = readFileSync(capturedPath);
+                    const b64 = fileBuf.toString("base64");
+                    try { rmSync(outputDir, { recursive: true, force: true }); } catch { /* ignore */ }
                     return {
                         success: true,
                         data: {
                             captured: true,
-                            mimeType: "image/png",
-                            base64: base64,
+                            format,
+                            mimeType: preferPng ? "image/png" : "image/jpeg",
+                            data: `data:${preferPng ? "image/png" : "image/jpeg"};base64,${b64}`,
+                            sizeBytes: fileBuf.length,
                         },
                     };
-                }
-                catch (e) {
-                    return { success: false, error: `Failed to read captured frame: ${e instanceof Error ? e.message : String(e)}` };
+                } catch (e) {
+                    try { rmSync(outputDir, { recursive: true, force: true }); } catch { /* ignore */ }
+                    return { success: false, error: "Failed to read captured frame: " + String(e) };
                 }
             },
         },

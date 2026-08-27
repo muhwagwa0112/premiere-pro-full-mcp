@@ -21,7 +21,7 @@ Available helpers (auto-prepended):
 
 Your code MUST end with: return __result({...}) or return __error("message")
 
-Example: Set opacity to 50% on all video clips
+Example: Set opacity to 50% on all video clips (locale-independent)
   var seq = app.project.activeSequence;
   if (!seq) return __error("No active sequence");
   var count = 0;
@@ -29,15 +29,12 @@ Example: Set opacity to 50% on all video clips
     var track = seq.videoTracks[t];
     for (var c = 0; c < track.clips.numItems; c++) {
       var clip = track.clips[c];
-      for (var i = 0; i < clip.components.numItems; i++) {
-        var comp = clip.components[i];
-        if (comp.displayName === "Opacity") {
-          for (var p = 0; p < comp.properties.numItems; p++) {
-            if (comp.properties[p].displayName === "Opacity") {
-              comp.properties[p].setValue(50, true);
-              count++;
-            }
-          }
+      var opacityComp = __findComp(clip.components, ["AE.ADBE Opacity"], ["Opacity", "불투명도"]);
+      if (opacityComp) {
+        var opacityProp = __findProp(opacityComp, ["ADBE Opacity", "Opacity"], ["Opacity", "불투명도"]);
+        if (opacityProp) {
+          opacityProp.setValue(50, true);
+          count++;
         }
       }
     }
