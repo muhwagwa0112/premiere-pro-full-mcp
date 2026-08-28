@@ -11,6 +11,7 @@ const index = process.argv.indexOf("--out");
 if (index < 0 || !process.argv[index + 1]) throw new Error("Usage: node scripts/build-release.mjs --out <empty-directory>");
 const out = resolve(root, process.argv[index + 1]);
 const allowDirty = process.argv.includes("--allow-dirty");
+const allowExistingTag = process.argv.includes("--allow-existing-tag");
 if (existsSync(out) && readdirSync(out).length) throw new Error(`Release output must be empty: ${out}`);
 mkdirSync(out, { recursive: true });
 const version = JSON.parse(readFileSync(join(root, "package.json"), "utf8").toString()).version;
@@ -19,7 +20,14 @@ if (!allowDirty) {
   if (dirty) throw new Error("Release builds require a clean worktree; commit/stash changes or pass --allow-dirty for a non-publishable local verification build");
 }
 if (spawnSync("git", ["rev-parse", "-q", "--verify", `refs/tags/v${version}`], { cwd: root }).status === 0) {
-  throw new Error(`Release tag v${version} already exists; bump the package version before rebuilding artifacts`);
+  const tagged = execFileSync("git", ["rev-parse", "HEAD^{commit}"], { cwd: root, encoding: "utf8" }).trim();
+  const tagPointsAtHead = execFileSync("git", ["rev-parse", `refs/tags/v${version}^{commit}`], { cwd: root, encoding: "utf8" }).trim() === tagged;
+  if (!allowExistingTag) {
+    throw new Error(`Release tag v${version} already exists; bump the package version or pass --allow-existing-tag to rebuild from the tagged commit`);
+  }
+  if (!tagPointsAtHead) {
+    throw new Error(`Release tag v${version} does not point at HEAD; refusing to rebuild artifacts from a different commit`);
+  }
 }
 const npmCli = process.env.npm_execpath || join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
 if (!existsSync(npmCli)) throw new Error(`npm CLI entrypoint not found: ${npmCli}`);
