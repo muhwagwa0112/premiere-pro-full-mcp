@@ -200,7 +200,8 @@ export function getTrackTargetingTools(bridgeOptions) {
               endSeconds: __ticksToSeconds(clip.end.ticks),
               durationSeconds: __ticksToSeconds(clip.duration.ticks)
             };
-            try { ci.enabled = !clip.isDisabled(); } catch(e) { ci.enabled = true; }
+            ci.enabled = null; ci.enabledSource = "unavailable";
+            try { ci.enabled = !clip.isDisabled(); ci.enabledSource = "clip.isDisabled"; } catch(e) { ci.enabledError = String(e); }
             try { ci.speed = clip.getSpeed(); } catch(e) {}
             info.clips.push(ci);
           }
@@ -441,14 +442,21 @@ export function getTrackTargetingTools(bridgeOptions) {
           if (!result) return __error("Clip not found");
 
           var clip = result.clip;
+          var seq = app.project.activeSequence;
+          if (!seq || !seq.frameSizeHorizontal || !seq.frameSizeVertical) return __error("Could not normalize position - active sequence dimensions unavailable");
           var motion = __findComp(clip.components, ["AE.ADBE Motion"], ["Motion", "모션"]);
           if (!motion) return __error("Could not set position - Motion component not found (locale-independent lookup failed)");
           var prop = __findProp(motion, ["ADBE Position", "Position"], ["Position", "위치"]);
           if (!prop) return __error("Could not set position - Position property not found (locale-independent lookup failed)");
-          var set = true;
-          prop.setValue([${args.x}, ${args.y}], true);
-          if (!set) return __error("Could not set position");
-          return __result({ x: ${args.x}, y: ${args.y}, clip: clip.name });
+          var normalizedX = ${args.x} / seq.frameSizeHorizontal;
+          var normalizedY = ${args.y} / seq.frameSizeVertical;
+          var setStatus = prop.setValue([normalizedX, normalizedY], true);
+          if (setStatus !== 0 && setStatus !== true) return __error("Could not set position (status " + setStatus + ")");
+          var observed = prop.getValue(0, 0);
+          if (!observed || Math.abs(observed[0] - normalizedX) > 0.000001 || Math.abs(observed[1] - normalizedY) > 0.000001) {
+            return __error("Position postcondition failed");
+          }
+          return __result({ x: ${args.x}, y: ${args.y}, normalized: [normalizedX, normalizedY], observed: observed, clip: clip.name });
         `);
                 return sendCommand(script, bridgeOptions);
             },
@@ -547,14 +555,21 @@ export function getTrackTargetingTools(bridgeOptions) {
           if (!result) return __error("Clip not found");
 
           var clip = result.clip;
+          var seq = app.project.activeSequence;
+          if (!seq || !seq.frameSizeHorizontal || !seq.frameSizeVertical) return __error("Could not normalize anchor point - active sequence dimensions unavailable");
           var motion = __findComp(clip.components, ["AE.ADBE Motion"], ["Motion", "모션"]);
           if (!motion) return __error("Could not set anchor point - Motion component not found (locale-independent lookup failed)");
           var prop = __findProp(motion, ["ADBE Anchor Point", "Anchor Point"], ["Anchor Point", "기준점"]);
           if (!prop) return __error("Could not set anchor point - Anchor Point property not found (locale-independent lookup failed)");
-          var set = true;
-          prop.setValue([${args.x}, ${args.y}], true);
-          if (!set) return __error("Could not set anchor point");
-          return __result({ x: ${args.x}, y: ${args.y}, clip: clip.name });
+          var normalizedX = ${args.x} / seq.frameSizeHorizontal;
+          var normalizedY = ${args.y} / seq.frameSizeVertical;
+          var setStatus = prop.setValue([normalizedX, normalizedY], true);
+          if (setStatus !== 0 && setStatus !== true) return __error("Could not set anchor point (status " + setStatus + ")");
+          var observed = prop.getValue(0, 0);
+          if (!observed || Math.abs(observed[0] - normalizedX) > 0.000001 || Math.abs(observed[1] - normalizedY) > 0.000001) {
+            return __error("Anchor point postcondition failed");
+          }
+          return __result({ x: ${args.x}, y: ${args.y}, normalized: [normalizedX, normalizedY], observed: observed, clip: clip.name });
         `);
                 return sendCommand(script, bridgeOptions);
             },

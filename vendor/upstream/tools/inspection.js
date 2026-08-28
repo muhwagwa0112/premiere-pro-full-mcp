@@ -76,7 +76,12 @@ export function getInspectionTools(bridgeOptions) {
           var activeSeqInfo = null;
           var active = project.activeSequence;
           if (active) {
-            activeSeqInfo = { name: active.name, id: active.sequenceID };
+            var activePresent = false;
+            for (var activeIndex = 0; activeIndex < project.sequences.numSequences; activeIndex++) {
+              try { if (String(project.sequences[activeIndex].sequenceID) === String(active.sequenceID)) { activePresent = true; break; } } catch(e) {}
+            }
+            if (!activePresent) return __error("ACTIVE_SEQUENCE_STALE: active sequence is not present in the current project");
+            activeSeqInfo = { name: active.name, id: active.sequenceID, belongsToCurrentProject: true };
           }
 
           return __result({
@@ -87,6 +92,7 @@ export function getInspectionTools(bridgeOptions) {
             sequenceCount: sequences.length,
             mediaFileTypes: mediaTypes,
             activeSequence: activeSeqInfo,
+            projectIdentity: { name: project.name || null, path: project.path || null, documentID: project.documentID || null },
             sequences: sequences,
             binTree: binTree
           });
@@ -264,9 +270,15 @@ export function getInspectionTools(bridgeOptions) {
           try { info.inPointSeconds = __ticksToSeconds(seq.getInPoint()); } catch(e) {}
           try { info.outPointSeconds = __ticksToSeconds(seq.getOutPoint()); } catch(e) {}
 
-          // Work area
-          try { info.workAreaIn = __ticksToSeconds(seq.getWorkAreaInPoint()); } catch(e) {}
-          try { info.workAreaOut = __ticksToSeconds(seq.getWorkAreaOutPoint()); } catch(e) {}
+          // Work area: Premiere 26 may return numeric seconds, not ticks.
+          function __workAreaSeconds(value) {
+            if (value && typeof value === "object" && value.ticks !== undefined) return __ticksToSeconds(value.ticks);
+            var numeric = Number(value);
+            if (!isFinite(numeric)) return null;
+            return Math.abs(numeric) > 1000000 ? __ticksToSeconds(numeric) : numeric;
+          }
+          try { info.workAreaIn = __workAreaSeconds(seq.getWorkAreaInPoint()); } catch(e) {}
+          try { info.workAreaOut = __workAreaSeconds(seq.getWorkAreaOutPoint()); } catch(e) {}
 
           // Zero point
           try { info.zeroPoint = __ticksToSeconds(seq.zeroPoint); } catch(e) {}
@@ -318,7 +330,8 @@ export function getInspectionTools(bridgeOptions) {
                 outPointSeconds: __ticksToSeconds(clip.outPoint.ticks),
                 mediaType: clip.mediaType
               };
-              try { ci.enabled = !clip.isDisabled(); } catch(e) { ci.enabled = true; }
+              ci.enabled = null; ci.enabledSource = "unavailable";
+              try { ci.enabled = !clip.isDisabled(); ci.enabledSource = "clip.isDisabled"; } catch(e) { ci.enabledError = String(e); }
               try { ci.speed = clip.getSpeed(); } catch(e) {}
               try { ci.reversed = clip.isSpeedReversed(); } catch(e) {}
               try { ci.isAdjustmentLayer = clip.isAdjustmentLayer(); } catch(e) {}
@@ -391,7 +404,8 @@ export function getInspectionTools(bridgeOptions) {
                 outPointSeconds: __ticksToSeconds(clip.outPoint.ticks),
                 mediaType: clip.mediaType
               };
-              try { ci.enabled = !clip.isDisabled(); } catch(e) { ci.enabled = true; }
+              ci.enabled = null; ci.enabledSource = "unavailable";
+              try { ci.enabled = !clip.isDisabled(); ci.enabledSource = "clip.isDisabled"; } catch(e) { ci.enabledError = String(e); }
               try { ci.speed = clip.getSpeed(); } catch(e) {}
               try {
                 if (clip.projectItem) {
@@ -467,7 +481,8 @@ export function getInspectionTools(bridgeOptions) {
             mediaType: clip.mediaType
           };
 
-          try { info.enabled = !clip.isDisabled(); } catch(e) { info.enabled = true; }
+          info.enabled = null; info.enabledSource = "unavailable";
+          try { info.enabled = !clip.isDisabled(); info.enabledSource = "clip.isDisabled"; } catch(e) { info.enabledError = String(e); }
           try { info.speed = clip.getSpeed(); } catch(e) {}
           try { info.reversed = clip.isSpeedReversed(); } catch(e) {}
           try { info.isSelected = clip.isSelected(); } catch(e) {}
@@ -528,15 +543,16 @@ export function getInspectionTools(bridgeOptions) {
                 try { propInfo.keyframesSupported = prop.areKeyframesSupported(); } catch(e) {}
                 try {
                   if (prop.isTimeVarying()) {
-                    var keys = prop.getKeys();
-                    if (keys && keys.length > 0) {
-                      propInfo.keyframeCount = keys.length;
-                      propInfo.keyframeTimes = [];
-                      for (var k = 0; k < Math.min(keys.length, 20); k++) {
-                        propInfo.keyframeTimes.push(__ticksToSeconds(keys[k].ticks));
-                      }
-                      if (keys.length > 20) propInfo.keyframesTruncated = true;
+                    var keys = prop.getKeys() || [];
+                    propInfo.keyframeCount = keys.length;
+                    propInfo.keyframeTimes = [];
+                    var returnedKeyCount = Math.min(keys.length, 2048);
+                    for (var k = 0; k < returnedKeyCount; k++) {
+                      propInfo.keyframeTimes.push(__ticksToSeconds(keys[k].ticks));
                     }
+                    propInfo.returnedKeyframeCount = returnedKeyCount;
+                    propInfo.keyframesTruncated = keys.length > returnedKeyCount;
+                    propInfo.keyframesComplete = !propInfo.keyframesTruncated;
                   }
                 } catch(e) {}
                 compInfo.properties.push(propInfo);

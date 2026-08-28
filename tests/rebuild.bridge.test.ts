@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import WebSocket from "ws";
+import { APPROVED_CEP_EXTENSION_ID, CEP_BRIDGE_PROTOCOL_VERSION } from "../src/bridge-types.js";
 import { WsHost } from "../src/bridge/ws-host.js";
 
 let host: WsHost | null = null;
@@ -20,7 +21,16 @@ describe("bridge WebSocket host", () => {
         cepWs.send(JSON.stringify({ kind: "response", requestId: msg.requestId, ok: true, data: "{\"pong\":true}" }));
       }
     });
-    cepWs.send(JSON.stringify({ kind: "ready", version: "test" }));
+    cepWs.send(JSON.stringify({
+      kind: "ready",
+      identity: {
+        extensionId: APPROVED_CEP_EXTENSION_ID,
+        protocolVersion: CEP_BRIDGE_PROTOCOL_VERSION,
+        bridgeVersion: "test",
+        instanceId: "rebuild-test-runtime",
+      },
+      premiereVersion: "test",
+    }));
 
     // 2. An MCP client connects as a second client and issues an execute.
     const mcpWs = new WebSocket(`ws://127.0.0.1:${port}/bridge`);

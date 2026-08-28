@@ -103,11 +103,16 @@ export declare function getUtilityTools(bridgeOptions: BridgeOptions): {
                     type: string;
                     description: string;
                 };
+                sequence_id: {
+                    type: string;
+                    description: string;
+                };
             };
             required: string[];
         };
         handler: (args: {
             frame_rate: number;
+            sequence_id?: string;
         }) => Promise<import("../bridge/file-bridge.js").CommandResult>;
     };
     set_sequence_resolution: {
@@ -123,12 +128,17 @@ export declare function getUtilityTools(bridgeOptions: BridgeOptions): {
                     type: string;
                     description: string;
                 };
+                sequence_id: {
+                    type: string;
+                    description: string;
+                };
             };
             required: string[];
         };
         handler: (args: {
             width: number;
             height: number;
+            sequence_id?: string;
         }) => Promise<import("../bridge/file-bridge.js").CommandResult>;
     };
     set_sequence_audio_settings: {
@@ -144,11 +154,16 @@ export declare function getUtilityTools(bridgeOptions: BridgeOptions): {
                     type: string;
                     description: string;
                 };
+                sequence_id: {
+                    type: string;
+                    description: string;
+                };
             };
         };
         handler: (args: {
             sample_rate?: number;
             channel_type?: number;
+            sequence_id?: string;
         }) => Promise<import("../bridge/file-bridge.js").CommandResult>;
     };
     set_sequence_pixel_aspect_ratio: {

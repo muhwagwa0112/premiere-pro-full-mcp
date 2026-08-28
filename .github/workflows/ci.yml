@@ -20,3 +20,14 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: node scripts/smoke.mjs
+      - shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP "premiere-mcp-release"
+          node scripts/build-release.mjs --out $out --allow-dirty
+          $expected = @(
+            "premiere-pro-full-mcp-2.0.0.tgz",
+            "premiere-pro-full-mcp-2.0.0-windows.zip",
+            "premiere-pro-full-mcp-2.0.0.ccx",
+            "release-manifest.json"
+          )
+          foreach ($name in $expected) { if (-not (Test-Path (Join-Path $out $name)) { throw "Missing release artifact: $name" } }

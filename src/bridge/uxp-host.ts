@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createServer as createHttpServer, type Server as HttpServer } from "node:http";
 import { type WebSocket, WebSocketServer } from "ws";
+import { normalizeExecutionTimeout } from "../bridge-types.js";
 
 /**
  * UXP bridge host (the second track of the dual-track CEP+UXP architecture).
@@ -70,8 +71,9 @@ function uxpAuthFilePath(): string {
 
 interface PendingRequest {
   resolve: (value: unknown) => void;
-  reject: (error: Error) => void;
   timer: ReturnType<typeof setTimeout>;
+  socket: WebSocket;
+  sessionId: string;
 }
 
 export class UxpBridgeHost {
@@ -119,15 +121,11 @@ export class UxpBridgeHost {
     socket.on("message", (raw) => this.#onMessage(socket, raw));
     socket.on("close", () => {
       if (this.#socket === socket) {
+        this.#settlePendingForSocket(socket, "UXP_DISCONNECTED", "UXP panel disconnected before completion");
         this.#socket = null;
         this.#sessionId = null;
         this.#hostVersion = null;
         this.#capabilities.clear();
-        for (const [id, pending] of this.#pending) {
-          clearTimeout(pending.timer);
-          pending.reject(new Error("UXP panel disconnected before completion"));
-        }
-        this.#pending.clear();
       }
     });
     socket.on("error", () => {});
@@ -195,7 +193,11 @@ export class UxpBridgeHost {
         socket.close(1008, "Invalid capability handshake");
         return;
       }
-      this.#socket?.close(1012, "Superseded by a new local panel connection");
+      if (this.#socket && this.#socket !== socket) {
+        const previous = this.#socket;
+        this.#settlePendingForSocket(previous, "UXP_REPLACED", "UXP panel reconnected during execution");
+        previous.close(1012, "Superseded by a new local panel connection");
+      }
       this.#socket = socket;
       this.#sessionId = randomUUID();
       this.#hostVersion = connect.hostVersion;
@@ -208,12 +210,12 @@ export class UxpBridgeHost {
       const response = msg as { requestId?: string; sessionId?: string; ok?: boolean; result?: unknown; error?: unknown };
       if (typeof response.requestId !== "string" || typeof response.ok !== "boolean") return;
       const pending = this.#pending.get(response.requestId);
-      if (!pending) return;
+      if (!pending || pending.socket !== socket || (response.sessionId !== undefined && response.sessionId !== pending.sessionId)) return;
       clearTimeout(pending.timer);
       this.#pending.delete(response.requestId);
       if (!response.ok) {
-        const err = response.error as { message?: string; code?: string } | undefined;
-        pending.resolve({ success: false, error: String(err?.message ?? "UXP command failed"), code: String(err?.code ?? "UXP_COMMAND_FAILED") });
+        const err = response.error as { message?: string; code?: string; outcomeUnknown?: boolean; dispatchState?: string } | undefined;
+        pending.resolve({ success: false, error: String(err?.message ?? "UXP command failed"), code: String(err?.code ?? "UXP_COMMAND_FAILED"), ...(err?.outcomeUnknown === true ? { outcomeUnknown: true } : {}), ...(err?.dispatchState ? { dispatchState: err.dispatchState } : {}) });
       } else {
         pending.resolve({ success: true, data: response.result });
       }
@@ -246,31 +248,51 @@ export class UxpBridgeHost {
   }
 
   /** Map a session-scoped handle ref to an operation callable via UXP. */
-  async dispatch(operation: string, args: Record<string, unknown> = {}, expectedRevision?: string): Promise<unknown> {
+  async dispatch(operation: string, args: Record<string, unknown> = {}, expectedRevision?: string, timeoutMs = 30_000): Promise<unknown> {
     if (!this.connected || !this.#sessionId) {
       return { success: false, error: "Premiere UXP panel is not connected", code: "UXP_UNAVAILABLE" };
     }
+    const socket = this.#socket;
+    const sessionId = this.#sessionId;
+    if (!socket || !sessionId) return { success: false, error: "Premiere UXP panel is not connected", code: "UXP_UNAVAILABLE" };
+    const budget = normalizeExecutionTimeout(timeoutMs, 30_000);
     const requestId = randomUUID();
-    const request = { type: "command", protocolVersion: 1, requestId, operation, args, expectedRevision, sessionId: this.#sessionId };
+    const request = { type: "command", protocolVersion: 1, requestId, operation, args, expectedRevision, sessionId, timeoutMs: budget };
     return new Promise<unknown>((resolve) => {
       const timer = setTimeout(() => {
         this.#pending.delete(requestId);
-        resolve({ success: false, error: "Premiere UXP command timed out", code: "UXP_TIMEOUT" });
-      }, 30_000);
-      this.#pending.set(requestId, { resolve, reject: () => undefined, timer });
+        resolve({ success: false, error: `Premiere UXP command timed out after ${budget}ms`, code: "UXP_TIMEOUT", outcomeUnknown: true });
+      }, budget);
+      this.#pending.set(requestId, { resolve, timer, socket, sessionId });
       try {
-        this.#socket?.send(JSON.stringify(request));
+        socket.send(JSON.stringify(request), (error) => {
+          if (!error) return;
+          this.#settlePending(requestId, "UXP_CLOSED", "Premiere UXP panel bridge closed before dispatch");
+        });
       } catch {
-        clearTimeout(timer);
-        this.#pending.delete(requestId);
-        resolve({ success: false, error: "Premiere UXP panel bridge closed before dispatch", code: "UXP_CLOSED" });
+        this.#settlePending(requestId, "UXP_CLOSED", "Premiere UXP panel bridge closed before dispatch");
       }
     });
   }
 
+  #settlePending(requestId: string, code: string, message: string): void {
+    const pending = this.#pending.get(requestId);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    this.#pending.delete(requestId);
+    pending.resolve({ success: false, error: message, code });
+  }
+
+  #settlePendingForSocket(socket: WebSocket, code: string, message: string): void {
+    for (const [requestId, pending] of this.#pending) {
+      if (pending.socket === socket) this.#settlePending(requestId, code, message);
+    }
+  }
+
   async close(): Promise<void> {
-    for (const entry of this.#pending.values()) clearTimeout(entry.timer);
-    this.#pending.clear();
+    for (const requestId of [...this.#pending.keys()]) {
+      this.#settlePending(requestId, "UXP_HOST_CLOSED", "UXP bridge host closed during execution");
+    }
     this.#socket?.close();
     this.#socket = null;
     await new Promise<void>((resolve) => this.#wss.close(() => resolve()));

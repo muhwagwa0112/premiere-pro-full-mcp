@@ -1,11 +1,8 @@
 param()
-# Silent wrapper for the "Premiere MCP Bridge Daemon" scheduled task.
-#
-# The upstream script registers the daemon to run directly as `node dist/daemon.js`.
-# Running node.exe as a Scheduled Task action without a console can fail with
-# 0xC0000142 (STATUS_DLL_INIT_FAILED) in some environments, leaving no daemon on
-# the fixed port after logon. This wrapper starts node detached with a hidden
-# window so the always-on bridge is reliably up, and exits immediately.
+# Long-running wrapper for the "Premiere MCP Bridge Daemon" scheduled task.
+# The wrapper owns the Node process and propagates its exit status so Task
+# Scheduler's RestartCount/RestartInterval settings can actually observe and
+# recover a daemon crash.
 
 $ErrorActionPreference = "Stop"
 $node = "C:\Program Files\nodejs\node.exe"
@@ -18,4 +15,10 @@ if (-not (Test-Path $node)) {
 $daemon = Join-Path $PSScriptRoot "..\dist\daemon.js"
 if (-not (Test-Path $daemon)) { return }
 
-Start-Process -FilePath $node -ArgumentList "`"$daemon`"" -WorkingDirectory (Split-Path -Parent $daemon) -WindowStyle Hidden -PassThru | Out-Null
+Push-Location (Split-Path -Parent $daemon)
+try {
+    & $node $daemon
+    exit $LASTEXITCODE
+} finally {
+    Pop-Location
+}

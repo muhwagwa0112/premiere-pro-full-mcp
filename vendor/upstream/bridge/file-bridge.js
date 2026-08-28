@@ -14,7 +14,11 @@ function normalizeCommandResult(value) {
     if (record.success === false) {
         return {
             success: false,
-            error: typeof record.error === 'string' ? record.error : JSON.stringify(record.error ?? record)
+            error: typeof record.error === 'string' ? record.error : JSON.stringify(record.error ?? record),
+            ...(typeof record.code === 'string' ? { code: record.code } : {}),
+            ...(typeof record.retryable === 'boolean' ? { retryable: record.retryable } : {}),
+            ...(typeof record.outcomeUnknown === 'boolean' ? { outcomeUnknown: record.outcomeUnknown } : {}),
+            ...(record.operation !== undefined ? { operation: record.operation } : {})
         };
     }
     if (record.success === true && 'data' in record) {
@@ -33,12 +37,17 @@ async function executeThroughTransport(script, options) {
         };
     }
     try {
-        return normalizeCommandResult(await options.transport.executeScript(makeScriptReturnValue(script)));
+        return normalizeCommandResult(await options.transport.executeScript(makeScriptReturnValue(script), options.timeoutMs));
     }
     catch (error) {
+        const record = error && typeof error === 'object' ? error : {};
         return {
             success: false,
-            error: error instanceof Error ? error.message : String(error)
+            error: error instanceof Error ? error.message : String(error),
+            ...(typeof record.code === 'string' ? { code: record.code } : {}),
+            ...(typeof record.retryable === 'boolean' ? { retryable: record.retryable } : {}),
+            ...(typeof record.outcomeUnknown === 'boolean' ? { outcomeUnknown: record.outcomeUnknown } : {}),
+            ...(record.operation !== undefined ? { operation: record.operation } : {})
         };
     }
 }

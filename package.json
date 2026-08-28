@@ -1,6 +1,6 @@
 {
   "name": "premiere-pro-full-mcp",
-  "version": "1.2.0",
+  "version": "2.0.0",
   "private": true,
   "description": "Local-first MCP server for Adobe Premiere Pro with 354 flat tools over a dual-track CEP + UXP bridge.",
   "type": "module",
@@ -9,12 +9,16 @@
     "premiere-pro-full-mcp": "dist/index.js"
   },
   "files": [
-    "dist",
+    ".codex-plugin",
+    ".mcp.json",
+    "dist/**/*.js",
     "vendor",
     "cep-plugin",
+    "uxp-plugin",
     "scripts",
+    "CHANGELOG.md",
     "README.md",
-    "REBUILD-PLAN.md"
+    "LICENSE"
   ],
   "engines": {
     "node": ">=20.19.0"
@@ -24,7 +28,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "check": "npm run typecheck && npm test && npm run build && node scripts/smoke.mjs && node scripts/_e2e-bridge.mjs && node scripts/_syntax-check.mjs"
+    "check": "npm run typecheck && npm test && npm run build && node scripts/smoke.mjs && node scripts/_e2e-bridge.mjs && node scripts/_syntax-check.mjs",
+    "verify:release": "node scripts/verify-release.mjs",
+    "build:release": "node scripts/build-release.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

@@ -17,8 +17,9 @@
 import { readdirSync, readFileSync, statSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { basename, join, relative, resolve } from "node:path";
 import { deflateRawSync } from "node:zlib";
+import { fileURLToPath } from "node:url";
 
-const ROOT = resolve(new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
+const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 
 function parseArgs(argv) {
   const out = { source: join(ROOT, "uxp-plugin"), out: join(ROOT, "dist"), version: null };

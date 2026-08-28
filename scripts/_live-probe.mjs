@@ -23,15 +23,38 @@ if (!endpoint) {
 }
 
 const client = await BridgeClient.connect(port);
+let operationId = null;
 try {
+  try {
+    operationId = await client.beginOperation({
+      toolName: "ping",
+      backend: "cep",
+      mode: "read",
+      timeoutMs: 12_000,
+      queueDeadlineMs: 5_000,
+      args: {},
+      itemCount: 1,
+    });
+  } catch (error) {
+    if (error?.code !== "OPERATION_COORDINATOR_UNAVAILABLE") throw error;
+  }
   // `ping` is a real upstream tool; its script returns app.version etc.
   const upstream = getUpstreamToolModules({
-    executeScript: (script) => client.executeScript(script, 12_000),
+    executeScript: (script) => client.executeScript(script, 12_000, operationId ? {
+      operationId,
+      toolName: "ping",
+      backend: "cep",
+      mode: "read",
+    } : undefined),
   });
   const result = await upstream["ping"].handler({});
+  if (operationId) await client.endOperation(operationId, result.success === false ? "FAILED" : "SUCCEEDED", result.success === false ? "LIVE_PROBE_FAILED" : undefined);
   console.log("RESULT:", result.success === false ? "host-error" : "host-connected");
   console.log("raw:", JSON.stringify(result).slice(0, 600));
 } catch (error) {
+  if (operationId) {
+    try { await client.endOperation(operationId, "FAILED", String(error?.code ?? "LIVE_PROBE_FAILED")); } catch { /* Preserve the probe error. */ }
+  }
   console.log("RESULT: host-not-there");
   console.log("reason:", error.message);
 } finally {

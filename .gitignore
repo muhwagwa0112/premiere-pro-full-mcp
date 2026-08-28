@@ -17,4 +17,21 @@ _p_out.*
 _probe_out.*
 # Built UXP package + local plugin deployment scratch.
 *.ccx
+*.tgz
+*-windows.zip
+.release-staging/
 uxp-plugin/install-scratch/
+
+# Ad-hoc verification/analysis artifacts produced during audits and live
+# probes (not source, not shipping).
+_daemon_*.log
+_probe_*.log
+_probe_*.mjs
+_verify_*.mjs
+_verify_*.log
+_mutate_analysis.json
+_tool_file_map.json
+_tools_safety.json
+_final_*.png
+_uxp_frame_*.png
+.rnd

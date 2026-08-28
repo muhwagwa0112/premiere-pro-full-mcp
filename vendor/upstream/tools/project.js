@@ -422,7 +422,7 @@ export function getProjectTools(bridgeOptions) {
             },
         },
         import_fcp_xml: {
-            description: "Import a Final Cut Pro XML file into the current project",
+            description: "Open a Final Cut Pro XML file as a new Premiere Pro project (Premiere 26.x requires an output_directory; project_path remains an alias)",
             parameters: {
                 type: "object",
                 properties: {
@@ -430,13 +430,64 @@ export function getProjectTools(bridgeOptions) {
                         type: "string",
                         description: "Full path to the FCP XML file",
                     },
+                    output_directory: {
+                        type: "string",
+                        description: "Existing parent directory Premiere can use while creating the imported project",
+                    },
                 },
-                required: ["path"],
+                required: ["path", "output_directory"],
             },
             handler: async (args) => {
+                const outputDirectory = args.output_directory || args.project_path;
+                if (!outputDirectory) {
+                    return {
+                        success: false,
+                        code: "FCP_XML_OUTPUT_DIRECTORY_REQUIRED",
+                        error: "Premiere 26.x requires output_directory when opening FCP XML (project_path is accepted as a deprecated alias)",
+                    };
+                }
                 const script = buildToolScript(`
-          app.openFCPXML("${escapeForExtendScript(args.path)}");
-          return __result({ imported: true, path: "${escapeForExtendScript(args.path)}" });
+          var opened = app.openFCPXML("${escapeForExtendScript(args.path)}", "${escapeForExtendScript(outputDirectory)}");
+          if (!opened) return __error("Premiere could not open the FCP XML");
+          var importedProject = app.project;
+          if (!importedProject) return __error("Premiere reported success but no imported project is active");
+          var requestedDirectory = "${escapeForExtendScript(outputDirectory)}";
+          var actualPath = String(importedProject.path || "");
+          var normalizedRequested = requestedDirectory.replace(/\\\\/g, "/").toLowerCase();
+          var normalizedActual = actualPath.replace(/\\\\/g, "/").toLowerCase();
+          var honored = normalizedActual.indexOf(normalizedRequested.replace(/\\/$/, "") + "/") === 0;
+          var checkpointPath = null;
+          var checkpointError = null;
+          if (!honored) {
+            // Premiere may create the imported project in Temp.  The public
+            // output_directory contract is satisfied only after a verified
+            // Save As checkpoint under that directory.
+            try {
+              var checkpointName = String(importedProject.name || "imported-project").replace(/\\.prproj$/i, "") + ".prproj";
+              checkpointPath = requestedDirectory.replace(/[\\\\/]$/, "") + "/" + checkpointName;
+              var checkpointResult = importedProject.saveAs(checkpointPath);
+              actualPath = String(importedProject.path || "");
+              normalizedActual = actualPath.replace(/\\\\/g, "/").toLowerCase();
+              honored = normalizedActual.indexOf(normalizedRequested.replace(/\\/$/, "") + "/") === 0;
+              if (checkpointResult === false || checkpointResult === 0 || !honored) checkpointError = "Save As did not materialize and read back the project under output_directory";
+            } catch(e) { checkpointError = String(e); }
+          }
+          if (!honored) return __error(
+            "FCP_XML_OUTPUT_DIRECTORY_NOT_HONORED: imported project remains at " + actualPath +
+            "; requested " + requestedDirectory +
+            (checkpointError ? "; checkpoint error: " + checkpointError : "")
+          );
+          return __result({
+            imported: true,
+            path: "${escapeForExtendScript(args.path)}",
+            outputDirectory: "${escapeForExtendScript(outputDirectory)}",
+            projectName: importedProject.name,
+            projectPath: actualPath,
+            outputDirectoryHonored: honored,
+            temporaryProjectPath: honored ? null : actualPath,
+            checkpointPath: checkpointPath,
+            checkpointError: checkpointError
+          });
         `);
                 return sendCommand(script, bridgeOptions);
             },

@@ -50,12 +50,27 @@ export declare function getScriptingTools(bridgeOptions: BridgeOptions): {
                     type: string;
                     description: string;
                 };
+                max_items: {
+                    type: string;
+                    description: string;
+                };
+                max_properties: {
+                    type: string;
+                    description: string;
+                };
+                max_output_chars: {
+                    type: string;
+                    description: string;
+                };
             };
             required: string[];
         };
         handler: (args: {
             object_path: string;
             max_depth?: number;
+            max_items?: number;
+            max_properties?: number;
+            max_output_chars?: number;
         }) => Promise<import("../bridge/file-bridge.js").CommandResult>;
     };
     list_clip_effects: {

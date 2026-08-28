@@ -3,7 +3,7 @@ import { sendCommand } from "../bridge/file-bridge.js";
 export function getSequenceTools(bridgeOptions) {
     return {
         create_sequence: {
-            description: "Create a new sequence in the project",
+            description: "Create a Premiere 26 sequence through the UXP Project API. An optional .sqpreset path may be supplied; CEP fallback fails explicitly without dispatch.",
             parameters: {
                 type: "object",
                 properties: {
@@ -13,28 +13,17 @@ export function getSequenceTools(bridgeOptions) {
                     },
                     preset_path: {
                         type: "string",
-                        description: "Optional path to a sequence preset file (.sqpreset). Uses default if omitted.",
+                        description: "Optional .sqpreset path used by Premiere 26 Project.createSequenceWithPresetPath.",
                     },
                 },
                 required: ["name"],
             },
             handler: async (args) => {
-                const presetCode = args.preset_path
-                    ? `app.project.createNewSequenceFromPreset("${escapeForExtendScript(args.name)}", "${escapeForExtendScript(args.preset_path)}");`
-                    : `app.project.createNewSequence("${escapeForExtendScript(args.name)}");`;
-                const script = buildToolScript(`
-          // Premiere 26.x CEP/ExtendScript: Project.createNewSequence() throws
-          // "Not Enough Parameters" when called from the bridge even with a name
-          // argument, and Project.createNewSequenceFromPreset() is undefined in this
-          // host. Report the limitation clearly rather than pretending to succeed.
-          return __error(
-            "create_sequence is not supported on Premiere " + app.version +
-            " CEP/ExtendScript: app.project.createNewSequence() throws " +
-            "'Not Enough Parameters' and createNewSequenceFromPreset() is unavailable. " +
-            "Create the sequence in the Premiere UI first."
-          );
-        `);
-                return sendCommand(script, bridgeOptions);
+                return {
+                    success: false,
+                    code: "PREMIERE_26_CEP_SEQUENCE_CREATE_UNSUPPORTED",
+                    error: "create_sequence is not dispatched through CEP: Premiere 26.x CEP createNewSequence(name) fails with Not Enough Parameters and createNewSequenceFromPreset is unavailable. Use the UXP sequence creation route.",
+                };
             },
         },
         duplicate_sequence: {

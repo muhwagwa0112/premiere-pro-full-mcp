@@ -3,6 +3,8 @@ import { UxpBridgeHost, UXP_DEFAULT_PORT, ensureUxpAuthSecret, uxpPluginDataDir,
 import { createRequire } from "node:module";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { OperationCoordinator } from "./operations/coordinator.js";
+import { OperationLedger } from "./operations/ledger.js";
 
 // Load the UXP api-catalog fingerprint from the on-disk plugin catalog so the
 // daemon can verify the panel's handshake. The catalog is a CJS file exporting
@@ -37,7 +39,9 @@ function loadUxpApiFingerprint(): string {
  */
 export async function runDaemon(options: { port?: number } = {}): Promise<{ host: WsHost; port: number }> {
   const port = options.port ?? DEFAULT_DAEMON_PORT;
-  const host = await WsHost.start(port);
+  const ledger = new OperationLedger(join(daemonStateDir(), "operations"));
+  const coordinator = new OperationCoordinator(ledger);
+  const host = await WsHost.start(port, { coordinator });
   try {
     const uxp = await startUxpBridge();
     host.setUxpBridge(uxp.host);

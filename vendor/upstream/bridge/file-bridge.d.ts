@@ -8,6 +8,10 @@ export interface CommandResult {
     success: boolean;
     data?: unknown;
     error?: string;
+    code?: string;
+    retryable?: boolean;
+    outcomeUnknown?: boolean;
+    operation?: unknown;
 }
 export declare function sendCommand(script: string, options?: BridgeOptions): Promise<CommandResult>;
 export declare function sendRawCommand(script: string, options?: BridgeOptions): Promise<CommandResult>;

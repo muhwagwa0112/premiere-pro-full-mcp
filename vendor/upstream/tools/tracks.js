@@ -1,4 +1,4 @@
-import { buildToolScript } from "../bridge/script-builder.js";
+import { buildToolScript, escapeForExtendScript } from "../bridge/script-builder.js";
 import { sendCommand } from "../bridge/file-bridge.js";
 export function getTrackTools(bridgeOptions) {
     return {
@@ -16,24 +16,45 @@ export function getTrackTools(bridgeOptions) {
                         type: "number",
                         description: "Number of tracks to add (default: 1)",
                     },
+                    sequence_id: {
+                        type: "string",
+                        description: "Sequence name or ID. Uses active sequence if omitted.",
+                    },
                 },
                 required: ["track_type"],
             },
             handler: async (args) => {
                 const count = args.count ?? 1;
+                const seqLookup = args.sequence_id
+                    ? `var seq = __findSequence("${escapeForExtendScript(args.sequence_id)}"); if (!seq) return __error("Sequence not found");`
+                    : `var seq = app.project.activeSequence; if (!seq) return __error("No active sequence");`;
                 const script = buildToolScript(`
-          var seq = app.project.activeSequence;
-          if (!seq) return __error("No active sequence");
-          
+          ${seqLookup}
+          if (${count} < 1 || ${count} !== Math.floor(${count})) return __error("count must be a positive integer");
           var before = ${args.track_type === "video" ? "seq.videoTracks.numTracks" : "seq.audioTracks.numTracks"};
-          
+
+          // QE addTracks only operates on the active timeline, so activate and verify it.
+          if (app.project.activeSequence !== seq) {
+            if (typeof seq.openInTimeline !== "function") {
+              return __result({ supported: false, unsupported: true, reason: "Target sequence cannot be activated for QE track creation" });
+            }
+            seq.openInTimeline();
+          }
+          if (app.project.activeSequence !== seq) return __error("Target sequence did not become active");
+          app.enableQE();
+          var qeSeq = (typeof qe !== "undefined" && qe.project && typeof qe.project.getActiveSequence === "function") ? qe.project.getActiveSequence() : null;
+          if (!qeSeq || typeof qeSeq.addTracks !== "function") {
+            return __result({ supported: false, unsupported: true, reason: "QE Sequence.addTracks is unavailable on this host" });
+          }
           ${args.track_type === "video"
-                    ? `seq.insertVideoTrackAt(before, ${count});`
-                    : `seq.insertAudioTrackAt(before, ${count});`}
-          
+                    ? `qeSeq.addTracks(${count}, 0, 0, 0);`
+                    : `qeSeq.addTracks(0, ${count}, 0, 0);`}
           var after = ${args.track_type === "video" ? "seq.videoTracks.numTracks" : "seq.audioTracks.numTracks"};
-          
+          if (after - before !== ${count}) {
+            return __error("Track creation postcondition failed: expected " + ${count} + ", observed " + (after - before));
+          }
           return __result({
+            supported: true,
             added: after - before,
             trackType: "${args.track_type}",
             totalTracks: after

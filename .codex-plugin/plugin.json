@@ -1,7 +1,7 @@
 {
   "name": "premiere-pro-full-mcp",
-  "version": "1.2.0",
-  "description": "Local-first Adobe Premiere Pro MCP: 354 flat tools over a dual-track CEP + UXP bridge. No auth, no approval, no actionId.",
+  "version": "2.0.0",
+  "description": "Local-first Adobe Premiere Pro MCP: 354 flat tools over a dual-track CEP + HMAC-authenticated UXP bridge. No external account, approval envelope, or actionId.",
   "author": {
     "name": "Premiere Pro Full MCP"
   },
@@ -20,7 +20,7 @@
   "interface": {
     "displayName": "Premiere Pro Full MCP",
     "shortDescription": "Control Premiere Pro locally",
-    "longDescription": "Connect Codex to the local Premiere Pro Full MCP bridge over one persistent WebSocket with a dual CEP + UXP track. UXP unlocks frame capture, video transitions, clip move/remove/trim, effects, and track mute. Every operation is its own flat tool (set_active_sequence, add_to_timeline, split_clip, export_frame, ...). No auth, no approval dialogs, no hidden actionId.",
+    "longDescription": "Connect Codex to the local Premiere Pro Full MCP bridge over persistent loopback CEP and HMAC-authenticated UXP channels. UXP unlocks frame capture, video transitions, clip move/remove/trim, effects, and track mute. Every operation is its own flat tool (set_active_sequence, add_to_timeline, split_clip, export_frame, ...). No external account, approval envelope, or hidden actionId.",
     "developerName": "Premiere Pro Full MCP",
     "category": "Creativity",
     "capabilities": [

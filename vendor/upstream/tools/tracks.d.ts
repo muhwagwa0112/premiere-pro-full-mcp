@@ -14,12 +14,17 @@ export declare function getTrackTools(bridgeOptions: BridgeOptions): {
                     type: string;
                     description: string;
                 };
+                sequence_id: {
+                    type: string;
+                    description: string;
+                };
             };
             required: string[];
         };
         handler: (args: {
             track_type: string;
             count?: number;
+            sequence_id?: string;
         }) => Promise<import("../bridge/file-bridge.js").CommandResult>;
     };
     delete_track: {

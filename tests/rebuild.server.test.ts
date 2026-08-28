@@ -32,7 +32,7 @@ describe("rebuilt MCP server", () => {
     const names = await listToolNames(client);
     expect(names.length).toBeGreaterThanOrEqual(ALL_TOOL_NAMES.length + 1);
     for (const tool of ALL_TOOL_NAMES) {
-      expect(names).toContain(`premiere_${tool}`);
+      expect(names).toContain(tool.startsWith("premiere_") ? tool : `premiere_${tool}`);
     }
   });
 
@@ -50,5 +50,19 @@ describe("rebuilt MCP server", () => {
       expect(Object.keys(props)).not.toContain("actionId");
       expect(Object.keys(props)).not.toContain("planHash");
     }
+  });
+
+  it("advertises the compatible FCP XML output-directory contract", async () => {
+    const server = createMcpServer(mockHost());
+    const client = new Client({ name: "rebuild-test", version: "1.0.0" });
+    const [clientT, serverT] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverT), client.connect(clientT)]);
+    close.push(() => client.close(), () => server.close());
+
+    const tool = (await client.listTools()).tools.find((entry) => entry.name === "premiere_import_fcp_xml");
+    expect(tool).toBeTruthy();
+    expect(tool?.inputSchema.required).toEqual(["path", "output_directory"]);
+    expect(tool?.inputSchema.properties).toHaveProperty("output_directory");
+    expect(tool?.inputSchema.properties).not.toHaveProperty("project_path");
   });
 });

@@ -281,13 +281,19 @@ export function getUtilityTools(bridgeOptions) {
                         type: "number",
                         description: "New frame rate (e.g., 23.976, 24, 25, 29.97, 30, 50, 59.94, 60)",
                     },
+                    sequence_id: {
+                        type: "string",
+                        description: "Sequence name or ID. Uses active sequence if omitted.",
+                    },
                 },
                 required: ["frame_rate"],
             },
             handler: async (args) => {
+                const seqLookup = args.sequence_id
+                    ? `var seq = __findSequence("${escapeForExtendScript(args.sequence_id)}"); if (!seq) return __error("Sequence not found");`
+                    : `var seq = app.project.activeSequence; if (!seq) return __error("No active sequence");`;
                 const script = buildToolScript(`
-          var seq = app.project.activeSequence;
-          if (!seq) return __error("No active sequence");
+          ${seqLookup}
 
           var settings = seq.getSettings();
           if (!settings) return __error("Could not get sequence settings");
@@ -313,13 +319,19 @@ export function getUtilityTools(bridgeOptions) {
                         type: "number",
                         description: "Height in pixels",
                     },
+                    sequence_id: {
+                        type: "string",
+                        description: "Sequence name or ID. Uses active sequence if omitted.",
+                    },
                 },
                 required: ["width", "height"],
             },
             handler: async (args) => {
+                const seqLookup = args.sequence_id
+                    ? `var seq = __findSequence("${escapeForExtendScript(args.sequence_id)}"); if (!seq) return __error("Sequence not found");`
+                    : `var seq = app.project.activeSequence; if (!seq) return __error("No active sequence");`;
                 const script = buildToolScript(`
-          var seq = app.project.activeSequence;
-          if (!seq) return __error("No active sequence");
+          ${seqLookup}
 
           var settings = seq.getSettings();
           if (!settings) return __error("Could not get sequence settings");
@@ -346,12 +358,18 @@ export function getUtilityTools(bridgeOptions) {
                         type: "number",
                         description: "Channel type: 0=Mono, 1=Stereo, 2=5.1, 3=Multichannel",
                     },
+                    sequence_id: {
+                        type: "string",
+                        description: "Sequence name or ID. Uses active sequence if omitted.",
+                    },
                 },
             },
             handler: async (args) => {
+                const seqLookup = args.sequence_id
+                    ? `var seq = __findSequence("${escapeForExtendScript(args.sequence_id)}"); if (!seq) return __error("Sequence not found");`
+                    : `var seq = app.project.activeSequence; if (!seq) return __error("No active sequence");`;
                 const script = buildToolScript(`
-          var seq = app.project.activeSequence;
-          if (!seq) return __error("No active sequence");
+          ${seqLookup}
 
           var settings = seq.getSettings();
           if (!settings) return __error("Could not get sequence settings");
@@ -865,7 +883,8 @@ export function getUtilityTools(bridgeOptions) {
                     startSeconds: __ticksToSeconds(clip.start.ticks),
                     endSeconds: __ticksToSeconds(clip.end.ticks)
                   };
-                  try { ci.enabled = !clip.isDisabled(); } catch(e) { ci.enabled = true; }
+                  ci.enabled = null; ci.enabledSource = "unavailable";
+                  try { ci.enabled = !clip.isDisabled(); ci.enabledSource = "clip.isDisabled"; } catch(e) { ci.enabledError = String(e); }
                   clips.push(ci);
                 }
               }

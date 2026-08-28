@@ -542,6 +542,10 @@ export function getAdvancedTools(bridgeOptions) {
                         type: "number",
                         description: "Audio track index (0-based, default: 0)",
                     },
+                    sequence_id: {
+                        type: "string",
+                        description: "Sequence name or ID. Uses active sequence if omitted.",
+                    },
                 },
                 required: ["item_id"],
             },
@@ -549,9 +553,11 @@ export function getAdvancedTools(bridgeOptions) {
                 const startSeconds = args.start_seconds ?? 0;
                 const trackIndex = args.track_index ?? 0;
                 const audioTrackIndex = args.audio_track_index ?? 0;
+                const seqLookup = args.sequence_id
+                    ? `var seq = __findSequence("${escapeForExtendScript(args.sequence_id)}"); if (!seq) return __error("Sequence not found");`
+                    : `var seq = app.project.activeSequence; if (!seq) return __error("No active sequence");`;
                 const script = buildToolScript(`
-          var seq = app.project.activeSequence;
-          if (!seq) return __error("No active sequence");
+          ${seqLookup}
           
           var item = __findProjectItem("${escapeForExtendScript(args.item_id)}");
           if (!item) return __error("Project item not found: ${escapeForExtendScript(args.item_id)}");
@@ -586,16 +592,28 @@ export function getAdvancedTools(bridgeOptions) {
                 required: ["name", "item_ids"],
             },
             handler: async (args) => {
+                const itemIds = Array.isArray(args.item_ids) ? args.item_ids : [];
                 const itemLookups = args.item_ids
                     .map((id, i) => `var item${i} = __findProjectItem("${escapeForExtendScript(id)}"); if (!item${i}) return __error("Item not found: ${escapeForExtendScript(id)}"); items.push(item${i});`)
                     .join("\n          ");
                 const script = buildToolScript(`
+          if (typeof app.project.createNewSequenceFromClips !== "function") {
+            return __result({ supported: false, unsupported: true, reason: "Project.createNewSequenceFromClips is unavailable on this host" });
+          }
+          if (${itemIds.length} === 0) return __error("item_ids must contain at least one project item");
           var items = [];
           ${itemLookups}
           
-          var seq = app.project.createNewSequenceFromClips("${escapeForExtendScript(args.name)}", items);
+          var seq = null;
+          try {
+            seq = app.project.createNewSequenceFromClips("${escapeForExtendScript(args.name)}", items);
+          } catch (e) {
+            return __result({ supported: false, unsupported: true, reason: "createNewSequenceFromClips failed: " + e.toString() });
+          }
           if (!seq) return __error("Failed to create sequence from clips");
-          return __result({ created: true, name: seq.name, id: seq.sequenceID, clipCount: items.length });
+          var verified = __findSequence(String(seq.sequenceID || seq.name));
+          if (!verified) return __error("Sequence creation postcondition failed");
+          return __result({ supported: true, created: true, name: seq.name, id: seq.sequenceID, clipCount: items.length });
         `);
                 return sendCommand(script, bridgeOptions);
             },
@@ -745,6 +763,10 @@ export function getAdvancedTools(bridgeOptions) {
                         type: "number",
                         description: "Number of 5.1 audio tracks to add (default: 0)",
                     },
+                    sequence_id: {
+                        type: "string",
+                        description: "Sequence name or ID. Uses active sequence if omitted.",
+                    },
                 },
             },
             handler: async (args) => {
@@ -752,13 +774,34 @@ export function getAdvancedTools(bridgeOptions) {
                 const a = args.audio_tracks ?? 0;
                 const aMono = args.audio_mono_tracks ?? 0;
                 const a51 = args.audio_51_tracks ?? 0;
+                const seqLookup = args.sequence_id
+                    ? `var seq = __findSequence("${escapeForExtendScript(args.sequence_id)}"); if (!seq) return __error("Sequence not found");`
+                    : `var seq = app.project.activeSequence; if (!seq) return __error("No active sequence");`;
                 const script = buildToolScript(`
+          ${seqLookup}
+          var beforeVideo = seq.videoTracks.numTracks;
+          var beforeAudio = seq.audioTracks.numTracks;
+          if (app.project.activeSequence !== seq) {
+            if (typeof seq.openInTimeline !== "function") {
+              return __result({ supported: false, unsupported: true, reason: "Target sequence cannot be activated for QE track creation" });
+            }
+            seq.openInTimeline();
+          }
+          if (app.project.activeSequence !== seq) return __error("Target sequence did not become active");
           app.enableQE();
-          var qeSeq = qe.project.getActiveSequence();
-          if (!qeSeq) return __error("No active sequence (QE)");
-          
+          var qeSeq = (typeof qe !== "undefined" && qe.project && typeof qe.project.getActiveSequence === "function") ? qe.project.getActiveSequence() : null;
+          if (!qeSeq) return __result({ supported: false, unsupported: true, reason: "QE active sequence is unavailable on this host" });
+          if (typeof qeSeq.addTracks !== "function") {
+            return __result({ supported: false, unsupported: true, reason: "QE Sequence.addTracks is unavailable on this host" });
+          }
           qeSeq.addTracks(${v}, ${a}, ${aMono}, ${a51});
+          var afterVideo = seq.videoTracks.numTracks;
+          var afterAudio = seq.audioTracks.numTracks;
+          if (afterVideo - beforeVideo !== ${v} || afterAudio - beforeAudio !== (${a} + ${aMono} + ${a51})) {
+            return __error("Track creation postcondition failed");
+          }
           return __result({
+            supported: true,
             added: true,
             videoTracks: ${v},
             audioTracks: ${a},

@@ -295,11 +295,21 @@ export declare function getProjectTools(bridgeOptions: BridgeOptions): {
                     type: string;
                     description: string;
                 };
+                output_directory: {
+                    type: string;
+                    description: string;
+                };
+                project_path: {
+                    type: string;
+                    description: string;
+                };
             };
             required: string[];
         };
         handler: (args: {
             path: string;
+            output_directory?: string;
+            project_path?: string;
         }) => Promise<import("../bridge/file-bridge.js").CommandResult>;
     };
     set_transcode_on_ingest: {

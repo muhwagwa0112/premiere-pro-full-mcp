@@ -83,9 +83,22 @@ export function getPlayheadTools(bridgeOptions) {
 
           var workIn = seq.getWorkAreaInPoint();
           var workOut = seq.getWorkAreaOutPoint();
+          // Premiere 26 returns a numeric seconds value here on some hosts,
+          // while older hosts return a Time/ticks value.  Do not blindly run
+          // a seconds value through __ticksToSeconds (which turns 34.8s into
+          // ~1e-10s).
+          function workAreaSeconds(value) {
+            if (value && typeof value === "object" && value.ticks !== undefined) return __ticksToSeconds(value.ticks);
+            var numeric = Number(value);
+            if (!isFinite(numeric)) return null;
+            // Ticks are orders of magnitude larger than any practical
+            // sequence duration; retain ordinary numeric values as seconds.
+            return Math.abs(numeric) > 1000000 ? __ticksToSeconds(numeric) : numeric;
+          }
           return __result({
-            inSeconds: __ticksToSeconds(workIn),
-            outSeconds: __ticksToSeconds(workOut)
+            inSeconds: workAreaSeconds(workIn),
+            outSeconds: workAreaSeconds(workOut),
+            sourceUnits: (workIn && typeof workIn === "object" && workIn.ticks !== undefined) || Math.abs(Number(workIn)) > 1000000 ? "ticks" : "seconds"
           });
         `);
                 return sendCommand(script, bridgeOptions);

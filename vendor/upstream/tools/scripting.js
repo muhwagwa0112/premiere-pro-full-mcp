@@ -113,29 +113,78 @@ Examples:
                         type: "number",
                         description: "Max depth for nested inspection (default: 1, max: 3)",
                     },
+                    max_items: {
+                        type: "number",
+                        description: "Maximum collection items inspected per object (default: 20, max: 100)",
+                    },
+                    max_properties: {
+                        type: "number",
+                        description: "Maximum properties inspected per object (default: 50, max: 100)",
+                    },
+                    max_output_chars: {
+                        type: "number",
+                        description: "Approximate scalar output budget (default: 20000, max: 100000)",
+                    },
                 },
                 required: ["object_path"],
             },
             handler: async (args) => {
-                const maxDepth = Math.min(args.max_depth ?? 1, 3);
+                const maxDepth = Math.max(0, Math.min(args.max_depth ?? 1, 3));
+                const maxItems = Math.max(0, Math.min(args.max_items ?? 20, 100));
+                const maxProperties = Math.max(1, Math.min(args.max_properties ?? 50, 100));
+                const maxOutputChars = Math.max(1000, Math.min(args.max_output_chars ?? 20000, 100000));
                 const script = buildToolScript(`
+          var __inspectBudget = { chars: 0, maxChars: ${maxOutputChars}, maxItems: ${maxItems}, maxProps: ${maxProperties}, truncated: false };
+          var __inspectSeen = [];
+
+          function inspectScalar(value) {
+            if (typeof value !== "string") return value;
+            var remaining = __inspectBudget.maxChars - __inspectBudget.chars;
+            if (remaining <= 0) { __inspectBudget.truncated = true; return "<output budget>"; }
+            var text = value;
+            if (text.length > remaining) { text = text.substring(0, remaining) + "<truncated>"; __inspectBudget.truncated = true; }
+            __inspectBudget.chars += text.length;
+            return text;
+          }
+
+          function seenIndex(obj) {
+            for (var i = 0; i < __inspectSeen.length; i++) {
+              try { if (__inspectSeen[i] === obj) return i; } catch (e) {}
+            }
+            return -1;
+          }
+
+          function readSafe(obj, key) {
+            try { return { ok: true, value: obj[key] }; }
+            catch (e) { return { ok: false, error: e.toString() }; }
+          }
+
           function inspectObj(obj, depth, maxD) {
             if (depth > maxD) return "<max depth>";
             if (obj === null) return null;
             if (obj === undefined) return undefined;
             var t = typeof obj;
-            if (t === "string" || t === "number" || t === "boolean") return obj;
+            if (t === "string" || t === "number" || t === "boolean") return inspectScalar(obj);
+            if (t === "function") return "[function]";
+            if (__inspectBudget.chars >= __inspectBudget.maxChars) { __inspectBudget.truncated = true; return "<output budget>"; }
+            var prior = seenIndex(obj);
+            if (prior >= 0) return "<cycle:" + prior + ">";
+            __inspectSeen.push(obj);
             
             var result = {};
             var propCount = 0;
             try {
               for (var key in obj) {
-                if (propCount > 50) {
+                if (propCount >= __inspectBudget.maxProps || __inspectBudget.chars >= __inspectBudget.maxChars) {
                   result["__truncated"] = true;
+                  __inspectBudget.truncated = true;
                   break;
                 }
-                try {
-                  var val = obj[key];
+                var read = readSafe(obj, key);
+                if (!read.ok) {
+                  result[key] = "[access error: " + read.error + "]";
+                } else {
+                  var val = read.value;
                   var vt = typeof val;
                   if (vt === "function") {
                     result[key] = "[function]";
@@ -146,26 +195,37 @@ Examples:
                       result[key] = "[object]";
                     }
                   } else {
-                    result[key] = val;
+                    result[key] = inspectScalar(val);
                   }
-                } catch(e) {
-                  result[key] = "[error: " + e.toString() + "]";
                 }
                 propCount++;
               }
             } catch(e) {
-              return { __error: e.toString() };
+              result["__enumerationError"] = e.toString();
             }
-            
-            // Also try common collection properties
-            try { if (obj.numItems !== undefined) result["numItems"] = obj.numItems; } catch(e) {}
-            try { if (obj.numTracks !== undefined) result["numTracks"] = obj.numTracks; } catch(e) {}
-            try { if (obj.numSequences !== undefined) result["numSequences"] = obj.numSequences; } catch(e) {}
-            try { if (obj.length !== undefined) result["length"] = obj.length; } catch(e) {}
-            try { if (obj.name !== undefined) result["name"] = obj.name; } catch(e) {}
-            try { if (obj.displayName !== undefined) result["displayName"] = obj.displayName; } catch(e) {}
-            try { if (obj.matchName !== undefined) result["matchName"] = obj.matchName; } catch(e) {}
-            try { if (obj.nodeId !== undefined) result["nodeId"] = obj.nodeId; } catch(e) {}
+
+            var common = ["numItems", "numTracks", "numSequences", "length", "name", "displayName", "matchName", "nodeId"];
+            for (var ci = 0; ci < common.length; ci++) {
+              var commonRead = readSafe(obj, common[ci]);
+              if (commonRead.ok && commonRead.value !== undefined) result[common[ci]] = inspectScalar(commonRead.value);
+            }
+
+            var collectionLength = -1;
+            var countKeys = ["numItems", "numTracks", "numSequences", "length"];
+            for (var ni = 0; ni < countKeys.length && collectionLength < 0; ni++) {
+              var countRead = readSafe(obj, countKeys[ni]);
+              if (countRead.ok && typeof countRead.value === "number") collectionLength = countRead.value;
+            }
+            if (collectionLength >= 0 && depth < maxD) {
+              var itemLimit = Math.min(collectionLength, __inspectBudget.maxItems);
+              var items = [];
+              for (var ii = 0; ii < itemLimit; ii++) {
+                var itemRead = readSafe(obj, ii);
+                items.push(itemRead.ok ? inspectObj(itemRead.value, depth + 1, maxD) : "[access error: " + itemRead.error + "]");
+              }
+              result["__items"] = items;
+              if (collectionLength > itemLimit) { result["__itemsTruncated"] = collectionLength - itemLimit; __inspectBudget.truncated = true; }
+            }
             
             return result;
           }
@@ -177,7 +237,8 @@ Examples:
             return __result({
               path: "${args.object_path}",
               type: typeof obj,
-              inspection: inspection
+              inspection: inspection,
+              budget: { maxDepth: ${maxDepth}, maxItems: ${maxItems}, maxProperties: ${maxProperties}, maxOutputChars: ${maxOutputChars}, truncated: __inspectBudget.truncated }
             });
           } catch(e) {
             return __error("Cannot access: ${args.object_path} — " + e.toString());
@@ -276,9 +337,10 @@ Examples:
                 inPointSeconds: __ticksToSeconds(clip.inPoint.ticks),
                 outPointSeconds: __ticksToSeconds(clip.outPoint.ticks),
                 mediaType: clip.mediaType,
-                enabled: true
+                enabled: null,
+                enabledSource: "unavailable"
               };
-              try { clipInfo.enabled = !clip.isDisabled(); } catch(e) {}
+              try { clipInfo.enabled = !clip.isDisabled(); clipInfo.enabledSource = "clip.isDisabled"; } catch(e) { clipInfo.enabledError = String(e); }
               try { clipInfo.speed = clip.getSpeed(); } catch(e) {}
               clips.push(clipInfo);
             }
@@ -363,7 +425,15 @@ Examples:
           
           // Active sequence
           var active = project.activeSequence;
+          var activeBelongsToProject = false;
           if (active) {
+            for (var activeIndex = 0; activeIndex < project.sequences.numSequences; activeIndex++) {
+              try { if (String(project.sequences[activeIndex].sequenceID) === String(active.sequenceID)) { activeBelongsToProject = true; break; } } catch(e) {}
+            }
+          }
+          state.projectIdentity = { name: project.name || null, path: project.path || null, documentID: project.documentID || null };
+          if (active) {
+            if (!activeBelongsToProject) return __error("ACTIVE_SEQUENCE_STALE: active sequence is not present in the current project's sequence collection");
             state.activeSequence = {
               name: active.name,
               id: active.sequenceID,
@@ -401,6 +471,8 @@ Examples:
               totalClips += active.audioTracks[t].clips.numItems;
             }
             state.activeSequence.totalClipCount = totalClips;
+            state.activeSequence.projectIdentity = state.projectIdentity;
+            state.activeSequence.belongsToCurrentProject = true;
           } else {
             state.activeSequence = null;
           }

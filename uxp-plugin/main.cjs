@@ -6,7 +6,7 @@ const { AUTH_FILE_NAME, authenticationTranscript, constantTimeHexEqual, hmacSha2
 const BRIDGE_SETTINGS_FILE_NAME = "bridge-settings-v1.json";
 
 const CAPABILITIES = [
-  "host.inspect", "project.inspect", "sequence.inspect", "project.save", "project.close_disposable", "project.checkpoint", "captions.inspect",
+  "host.inspect", "project.inspect", "sequence.inspect", "project.sequence.create", "project.save", "project.close_disposable", "project.checkpoint", "captions.inspect",
   "media.relink", "media.proxy.attach", "timeline.track.set_mute", "timeline.clip.insert", "timeline.markers", "timeline.in_out", "timeline.playhead",
   "timeline.clip.find", "timeline.clip.trim", "timeline.clip.effect", "timeline.clip.add_transition", "timeline.clip.move_track", "timeline.clip.remove", "export.frame", "export.sequence",
   "uxp.catalog", "uxp.read", "uxp.edit", "uxp.sensitive", "uxp.filesystem", "uxp.destructive", "uxp.handle.release",
@@ -82,6 +82,34 @@ async function snapshotRevision(project, sequence) {
   if (!project) return "no-project";
   const sequences = Array.from(await project.getSequences() || []);
   return hash([project.guid || "", project.name || "", sequence && sequence.guid || "", sequences.map((item) => item.guid || "").join(",")].join("|"));
+}
+
+const TICKS_PER_SECOND = 254016000000;
+function delay(milliseconds) { return new Promise((resolve) => setTimeout(resolve, milliseconds)); }
+async function waitForStableOutput(outputPath, timeoutMs) {
+  const fs = uxp.storage && uxp.storage.localFileSystem;
+  if (!fs || typeof fs.getEntryWithUrl !== "function") throw Object.assign(new Error("UXP local filesystem API is unavailable for export verification"), { code: "UXP_OUTPUT_VERIFICATION_UNAVAILABLE" });
+  const deadline = Date.now() + Math.max(500, Math.min(Number(timeoutMs) || 15000, 30000));
+  let previous = null;
+  let stableSamples = 0;
+  let samples = 0;
+  while (Date.now() < deadline) {
+    try {
+      const entry = await fs.getEntryWithUrl(`file:/${outputPath.replace(/\\/g, "/")}`);
+      const metadata = await entry.getMetadata();
+      const size = Number(metadata && metadata.size);
+      const modifiedMs = new Date(metadata && metadata.modificationTime).getTime();
+      if (Number.isFinite(size) && size > 0 && Number.isFinite(modifiedMs)) {
+        samples += 1;
+        if (previous && previous.size === size && previous.modifiedMs === modifiedMs) stableSamples += 1;
+        else stableSamples = 0;
+        previous = { size, modifiedMs };
+        if (stableSamples >= 2) return { fileSize: size, modifiedMs, polls: samples, stableSamples: stableSamples + 1 };
+      }
+    } catch (_) { /* Exporter may have accepted work before the file exists. */ }
+    await delay(250);
+  }
+  throw Object.assign(new Error(`Exporter did not materialize a stable output file within ${Math.max(500, Math.min(Number(timeoutMs) || 15000, 30000))}ms`), { code: "UXP_FRAME_OUTPUT_NOT_STABLE" });
 }
 
 function safeSegments(path) {
@@ -576,6 +604,29 @@ async function execute(operation, args, expectedRevision) {
     if (!context.project) return { beforeRevision, afterRevision: beforeRevision, verification: { outcome: "verified", method: "UXP host snapshot" }, result: { project: null, sequences: [] } };
     const sequences = Array.from(await context.project.getSequences() || []).slice(0, 256).map((sequence) => ({ guid: String(sequence.guid || ""), name: String(sequence.name || "") }));
     return { beforeRevision, afterRevision: beforeRevision, verification: { outcome: "verified", method: "UXP host snapshot" }, result: { project: { guid: String(context.project.guid || ""), name: String(context.project.name || "") }, activeSequenceGuid: context.sequence ? String(context.sequence.guid || "") : null, sequences } };
+  }
+  if (operation === "project.sequence.create") {
+    if (!context.project) throw Object.assign(new Error("No active project"), { code: "UXP_NO_ACTIVE_PROJECT" });
+    const name = typeof args.name === "string" ? args.name.trim() : "";
+    const presetPath = typeof args.presetPath === "string" ? args.presetPath.trim() : "";
+    if (!name || name.length > 255) throw Object.assign(new Error("A non-empty sequence name up to 255 characters is required"), { code: "UXP_INVALID_SEQUENCE_NAME" });
+    const existing = Array.from(await context.project.getSequences() || []);
+    if (existing.some((sequence) => String(sequence.name || "") === name)) throw Object.assign(new Error(`A sequence named ${name} already exists`), { code: "UXP_SEQUENCE_NAME_EXISTS" });
+    let created;
+    if (presetPath) {
+      if (typeof context.project.createSequenceWithPresetPath === "function") created = await context.project.createSequenceWithPresetPath(name, presetPath);
+      else if (typeof context.project.createSequence === "function") created = await context.project.createSequence(name, presetPath);
+      else throw Object.assign(new Error("Premiere 26 sequence creation APIs are unavailable"), { code: "UXP_CREATE_SEQUENCE_API_UNAVAILABLE" });
+    } else {
+      if (typeof context.project.createSequence !== "function") throw Object.assign(new Error("Premiere 26 Project.createSequence(name) is unavailable"), { code: "UXP_CREATE_SEQUENCE_API_UNAVAILABLE" });
+      created = await context.project.createSequence(name);
+    }
+    if (!created) throw Object.assign(new Error("Premiere did not return a created sequence"), { code: "UXP_CREATE_SEQUENCE_NOT_CONFIRMED" });
+    const after = await activeContext();
+    const sequences = Array.from(await after.project.getSequences() || []);
+    const verified = sequences.find((sequence) => String(sequence.guid || "") === String(created.guid || "")) || sequences.find((sequence) => String(sequence.name || "") === name);
+    if (!verified) throw Object.assign(new Error("Sequence creation completed but postcondition readback could not find it"), { code: "UXP_CREATE_SEQUENCE_NOT_VERIFIED" });
+    return { beforeRevision, afterRevision: await snapshotRevision(after.project, after.sequence), verification: { outcome: "verified", method: "Project.createSequence and project.getSequences postcondition readback" }, result: { created: true, name: String(verified.name || name), sequenceGuid: String(verified.guid || ""), presetPath: presetPath || null } };
   }
   if (operation === "sequence.inspect") {
     if (!context.sequence) throw Object.assign(new Error("No active sequence"), { code: "UXP_NO_ACTIVE_SEQUENCE" });
@@ -1094,18 +1145,36 @@ async function execute(operation, args, expectedRevision) {
   if (operation === "export.frame") {
     if (!context.sequence) throw Object.assign(new Error("No active sequence"), { code: "UXP_NO_ACTIVE_SEQUENCE" });
     const outputPath = args && args.outputPath;
-    const timeSeconds = args && args.timeSeconds;
-    if (typeof outputPath !== "string" || !/^[A-Za-z]:[\\/]/.test(outputPath) || typeof timeSeconds !== "number" || !Number.isFinite(timeSeconds) || timeSeconds < 0) throw Object.assign(new Error("A Windows outputPath and non-negative timeSeconds are required"), { code: "UXP_INVALID_FRAME_EXPORT" });
+    const requestedSeconds = args && args.timeSeconds;
+    if (typeof outputPath !== "string" || !/^[A-Za-z]:[\\/]/.test(outputPath) || (requestedSeconds !== undefined && (typeof requestedSeconds !== "number" || !Number.isFinite(requestedSeconds) || requestedSeconds < 0))) throw Object.assign(new Error("A Windows outputPath and optional non-negative timeSeconds are required"), { code: "UXP_INVALID_FRAME_EXPORT" });
+    const playerPosition = requestedSeconds === undefined && typeof context.sequence.getPlayerPosition === "function" ? await context.sequence.getPlayerPosition() : null;
+    const timeSeconds = requestedSeconds === undefined ? Number(playerPosition && playerPosition.seconds) : requestedSeconds;
+    if (!Number.isFinite(timeSeconds) || timeSeconds < 0) throw Object.assign(new Error("The current playhead time is unavailable"), { code: "UXP_FRAME_TIME_UNAVAILABLE" });
     const normalized = outputPath.replace(/\//g, "\\");
     const separator = normalized.lastIndexOf("\\");
     const filename = normalized.slice(separator + 1);
     const directory = normalized.slice(0, separator);
     if (!filename || !directory) throw Object.assign(new Error("Frame outputPath must include a directory and filename"), { code: "UXP_INVALID_FRAME_EXPORT" });
-    const frameTime = ppro.TickTime.createWithSeconds(timeSeconds);
+    const timebase = typeof context.sequence.getTimebase === "function" ? await context.sequence.getTimebase() : null;
+    const ticksPerFrame = Number(timebase);
+    const fps = Number.isFinite(ticksPerFrame) && ticksPerFrame > 0 ? TICKS_PER_SECOND / ticksPerFrame : null;
+    const resolvedFrame = fps ? Math.round(timeSeconds * fps) : null;
+    const resolvedSeconds = resolvedFrame !== null && fps ? resolvedFrame / fps : timeSeconds;
+    const frameTime = ppro.TickTime.createWithSeconds(resolvedSeconds);
     const frameSize = await context.sequence.getFrameSize();
     const exported = await ppro.Exporter.exportSequenceFrame(context.sequence, frameTime, filename, directory, frameSize.width, frameSize.height);
     if (!exported) throw Object.assign(new Error("Premiere did not confirm frame export"), { code: "UXP_FRAME_EXPORT_NOT_CONFIRMED" });
-    return { beforeRevision, afterRevision: beforeRevision, verification: { outcome: "verified", method: "Exporter.exportSequenceFrame returned true; server verifies the output file" }, createdFiles: [{ name: outputPath, verified: false }], result: { exported: true, outputPath, width: frameSize.width, height: frameSize.height } };
+    let stability;
+    try {
+      stability = await waitForStableOutput(normalized, args && args.materializationTimeoutMs);
+    } catch (error) {
+      // Exporter accepted the dispatch, so a materialization/readback failure
+      // cannot be reported as a safe pre-dispatch failure.
+      error.outcomeUnknown = true;
+      error.dispatchState = "dispatched_unverified";
+      throw error;
+    }
+    return { beforeRevision, afterRevision: beforeRevision, verification: { outcome: "verified", method: "Exporter.exportSequenceFrame plus UXP filesystem existence and three unchanged metadata samples" }, createdFiles: [{ name: outputPath, verified: true, size: stability.fileSize }], result: { exported: true, outputPath, width: frameSize.width, height: frameSize.height, requestedSeconds: requestedSeconds === undefined ? null : requestedSeconds, timeSource: requestedSeconds === undefined ? "current-playhead" : "request", resolvedSeconds, resolvedFrame, fps, fileSize: stability.fileSize, stability } };
   }
   if (operation === "export.sequence") {
     if (!context.sequence) throw Object.assign(new Error("No active sequence"), { code: "UXP_NO_ACTIVE_SEQUENCE" });
@@ -1135,7 +1204,10 @@ async function handleCommand(message) {
     const outcome = await execute(message.operation, message.args || {}, message.expectedRevision);
     Object.assign(response, outcome, { ok: true });
   } catch (error) {
-    response.error = { code: error && error.code || "UXP_COMMAND_FAILED", message: error && error.message || "UXP command failed", retryable: false };
+    const code = error && error.code || "UXP_COMMAND_FAILED";
+    const outcomeUnknown = error && error.outcomeUnknown === true || /_NOT_VERIFIED$/.test(String(code));
+    const dispatchState = error && error.dispatchState || (outcomeUnknown ? "dispatched_unverified" : "not_dispatched");
+    response.error = { code, message: error && error.message || "UXP command failed", retryable: false, dispatchState, ...(outcomeUnknown ? { outcomeUnknown: true } : {}) };
   }
   if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(response));
 }

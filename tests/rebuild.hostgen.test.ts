@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { getUpstreamToolModules } from "../vendor/upstream/tools/catalog.js";
 import { OFFICIAL_TOOL_NAMES, EXTRA_TOOL_NAMES } from "../src/tool-names.js";
-import { EXTRA_ROUTES, UNSUPPORTED_EXTRAS } from "../src/server.js";
+import { COMPOUND_EXTRAS, EXTRA_ROUTES, UNSUPPORTED_EXTRAS } from "../src/server.js";
 
 describe("upstream tool coverage", () => {
   it("loads the full 266 official tool modules from the vendored upstream", () => {
@@ -59,9 +59,10 @@ describe("upstream tool coverage", () => {
       "helpers_resolve_project_item_id",
       "media_batch_rename",
       "media_batch_set_offline",
+      "audio_track_summary",
     ]);
     for (const extra of EXTRA_TOOL_NAMES) {
-      if (LOCAL_HELPERS.has(extra) || CONCRETE_SCRIPTS.has(extra) || UNSUPPORTED_EXTRAS.has(extra)) continue;
+      if (LOCAL_HELPERS.has(extra) || CONCRETE_SCRIPTS.has(extra) || COMPOUND_EXTRAS.has(extra) || UNSUPPORTED_EXTRAS.has(extra)) continue;
       const route = EXTRA_ROUTES[extra];
       expect(route, `extra '${extra}' has no route and is not a local helper / concrete script`).toBeTruthy();
       if (route) {

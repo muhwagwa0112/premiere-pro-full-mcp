@@ -1,6 +1,7 @@
 param(
     [string]$SourceDir = "",
     [string]$Version = "",
+    [switch]$AuditOnly,
     [switch]$NoDevMode,
     [switch]$RestartPremiere
 )
@@ -53,16 +54,70 @@ Write-Host "Source : $SourceDir"
 Write-Host "Target : $targetDir"
 Write-Host "Version: $Version"
 
-New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
+if ($AuditOnly) {
+    $sourceFiles = @(Get-ChildItem -LiteralPath $SourceDir -Recurse -File)
+    if ($sourceFiles.Count -eq 0) { throw "UXP source contains no files: $SourceDir" }
+    foreach ($required in @("manifest.json", "main.cjs", "auth.cjs", "api-catalog.cjs", "index.html")) {
+        if (-not (Test-Path -LiteralPath (Join-Path $SourceDir $required) -PathType Leaf)) { throw "UXP source missing required file: $required" }
+    }
+    Write-Host "UXP installer preflight passed. No filesystem changes were made."
+    return
+}
 
-# Copy the plugin files. This is an idempotent overwrite so re-running the
-# installer always refreshes the deployed code without requiring a delete.
-Get-ChildItem -Path $SourceDir -Recurse -File | ForEach-Object {
-    $relative = $_.FullName.Substring($SourceDir.Length).TrimStart('\', '/')
-    $dest = Join-Path $targetDir $relative
-    $destDir = Split-Path -Parent $dest
-    New-Item -ItemType Directory -Force -Path $destDir | Out-Null
-    Copy-Item -Force -LiteralPath $_.FullName -Destination $dest
+New-Item -ItemType Directory -Force -Path $uxpExternalRoot | Out-Null
+$quarantineRoot = Join-Path $env:LOCALAPPDATA "PremiereMCP\quarantine\uxp"
+New-Item -ItemType Directory -Force -Path $quarantineRoot | Out-Null
+$stamp = Get-Date -Format "yyyyMMdd-HHmmssfff"
+$stageDir = Join-Path $uxpExternalRoot (".$pluginId.stage-" + [guid]::NewGuid().ToString("N"))
+$backupDir = Join-Path $quarantineRoot ("${pluginId}_${Version}-backup-$stamp")
+$hadCurrent = Test-Path -LiteralPath $targetDir -PathType Container
+try {
+    New-Item -ItemType Directory -Force -Path $stageDir | Out-Null
+    $sourceFiles = @(Get-ChildItem -LiteralPath $SourceDir -Recurse -File)
+    foreach ($sourceFile in $sourceFiles) {
+        $relative = $sourceFile.FullName.Substring($SourceDir.Length).TrimStart('\', '/')
+        $dest = Join-Path $stageDir $relative
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dest) | Out-Null
+        Copy-Item -Force -LiteralPath $sourceFile.FullName -Destination $dest
+        $sourceHash = (Get-FileHash -LiteralPath $sourceFile.FullName -Algorithm SHA256).Hash
+        $destHash = (Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash
+        if ($sourceHash -cne $destHash) { throw "UXP stage hash mismatch: $relative" }
+    }
+    if ($hadCurrent) { Move-Item -LiteralPath $targetDir -Destination $backupDir }
+    Move-Item -LiteralPath $stageDir -Destination $targetDir
+} catch {
+    if (Test-Path -LiteralPath $targetDir -PathType Container) {
+        $failedDir = Join-Path $quarantineRoot ("${pluginId}_${Version}-failed-$stamp")
+        try { Move-Item -LiteralPath $targetDir -Destination $failedDir } catch { }
+    }
+    if ($hadCurrent -and (Test-Path -LiteralPath $backupDir -PathType Container) -and -not (Test-Path -LiteralPath $targetDir)) {
+        Move-Item -LiteralPath $backupDir -Destination $targetDir
+    }
+    throw
+} finally {
+    if (Test-Path -LiteralPath $stageDir -PathType Container) {
+        $stageFull = [System.IO.Path]::GetFullPath($stageDir)
+        $externalFull = [System.IO.Path]::GetFullPath($uxpExternalRoot).TrimEnd('\')
+        if (-not [string]::Equals((Split-Path -Parent $stageFull).TrimEnd('\'), $externalFull, [System.StringComparison]::OrdinalIgnoreCase) -or -not ([System.IO.Path]::GetFileName($stageFull).StartsWith(".$pluginId.stage-"))) {
+            throw "Refusing to remove unexpected UXP stage path: $stageFull"
+        }
+        Remove-Item -LiteralPath $stageFull -Recurse -Force
+    }
+}
+
+# Quarantine older versions of this exact plugin id after the new version is
+# fully staged and swapped, so Premiere cannot choose an arbitrary duplicate.
+Get-ChildItem -LiteralPath $uxpExternalRoot -Directory | Where-Object { $_.FullName -ne $targetDir } | ForEach-Object {
+    $candidateManifest = Join-Path $_.FullName "manifest.json"
+    if (-not (Test-Path -LiteralPath $candidateManifest)) { return }
+    try { $candidate = Get-Content -LiteralPath $candidateManifest -Raw | ConvertFrom-Json } catch { return }
+    if ($candidate.id -cne $pluginId) { return }
+    $destination = Join-Path $quarantineRoot ($_.Name + "-superseded-$stamp")
+    Move-Item -LiteralPath $_.FullName -Destination $destination
+    Write-Host "Quarantined superseded UXP deployment: $destination"
+}
+if ($hadCurrent -and (Test-Path -LiteralPath $backupDir -PathType Container)) {
+    Write-Host "Previous same-version UXP deployment retained for rollback: $backupDir"
 }
 
 # Seed the shared auth key + bridge-port settings so the panel can handshake

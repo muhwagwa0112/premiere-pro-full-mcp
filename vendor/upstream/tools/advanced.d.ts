@@ -294,6 +294,10 @@ export declare function getAdvancedTools(bridgeOptions: BridgeOptions): {
                     type: string;
                     description: string;
                 };
+                sequence_id: {
+                    type: string;
+                    description: string;
+                };
             };
             required: string[];
         };
@@ -302,6 +306,7 @@ export declare function getAdvancedTools(bridgeOptions: BridgeOptions): {
             start_seconds?: number;
             track_index?: number;
             audio_track_index?: number;
+            sequence_id?: string;
         }) => Promise<import("../bridge/file-bridge.js").CommandResult>;
     };
     create_sequence_from_clips: {
@@ -423,6 +428,10 @@ export declare function getAdvancedTools(bridgeOptions: BridgeOptions): {
                     type: string;
                     description: string;
                 };
+                sequence_id: {
+                    type: string;
+                    description: string;
+                };
             };
         };
         handler: (args: {
@@ -430,6 +439,7 @@ export declare function getAdvancedTools(bridgeOptions: BridgeOptions): {
             audio_tracks?: number;
             audio_mono_tracks?: number;
             audio_51_tracks?: number;
+            sequence_id?: string;
         }) => Promise<import("../bridge/file-bridge.js").CommandResult>;
     };
     set_color_value: {

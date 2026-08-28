@@ -10,6 +10,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import WebSocket from "ws";
+import { APPROVED_CEP_EXTENSION_ID, CEP_BRIDGE_PROTOCOL_VERSION } from "../dist/bridge-types.js";
 import { WsHost } from "../dist/bridge/ws-host.js";
 import { BridgeClient } from "../dist/bridge/ws-client.js";
 import { createMcpServer } from "../dist/server.js";
@@ -31,7 +32,16 @@ cep.on("message", (raw) => {
     cep.send(JSON.stringify({ kind: "response", requestId: msg.requestId, ok: true, data: fakeResult }));
   }
 });
-cep.send(JSON.stringify({ kind: "ready", version: "simulated-cep" }));
+cep.send(JSON.stringify({
+  kind: "ready",
+  identity: {
+    extensionId: APPROVED_CEP_EXTENSION_ID,
+    protocolVersion: CEP_BRIDGE_PROTOCOL_VERSION,
+    bridgeVersion: "simulated-cep",
+    instanceId: "e2e-simulated-runtime",
+  },
+  premiereVersion: "simulated-premiere",
+}));
 await new Promise((res) => setTimeout(res, 200));
 
 // Real MCP server over the real bridge client.

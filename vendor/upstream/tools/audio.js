@@ -28,8 +28,15 @@ export function getAudioTools(bridgeOptions) {
           if (volumeComp) {
             var levelProp = __findProp(volumeComp, ["ADBE Audio Levels", "Level"], ["Level", "레벨"]);
             if (levelProp) {
-              levelProp.setValue(${args.level_db}, true);
-              return __result({ adjusted: true, clipName: clip.name, levelDb: ${args.level_db} });
+              // Premiere's internal Audio Levels value is UI dB plus 15.
+              // Keep the public contract in dB and prove the write by reading
+              // the internal value back from the same property.
+              var requestedDb = ${args.level_db};
+              var internalLevel = requestedDb + 15;
+              levelProp.setValue(internalLevel, true);
+              var readInternal = null;
+              try { readInternal = levelProp.getValue(0, 0); } catch(e) {}
+              return __result({ adjusted: true, clipName: clip.name, requestedLevelDb: requestedDb, levelDb: readInternal === null ? null : Number(readInternal) - 15, internalLevel: readInternal, readbackComplete: readInternal !== null });
             }
           }
           
@@ -66,8 +73,8 @@ export function getAudioTools(bridgeOptions) {
                 const keyframeCode = args.keyframes
                     .map((kf) => `
             var kfTime = __secondsToTicks(${kf.time_seconds}).toString();
-            levelProp.addKeyframe(kfTime);
-            levelProp.setValueAtKey(kfTime, ${kf.level_db});`)
+            levelProp.addKey(kfTime);
+            levelProp.setValueAtKey(kfTime, (${kf.level_db} + 15));`)
                     .join("\n");
                 const script = buildToolScript(`
           var result = __findClip("${escapeForExtendScript(args.node_id)}");
@@ -85,7 +92,16 @@ export function getAudioTools(bridgeOptions) {
           levelProp.setTimeVarying(true);
           ${keyframeCode}
           
-          return __result({ keyframesAdded: ${args.keyframes.length}, clipName: clip.name });
+          var keys = null;
+          var readback = [];
+          var readbackErrors = [];
+          try { keys = levelProp.getKeys() || []; } catch(e) { readbackErrors.push(String(e)); }
+          if (keys) for (var k = 0; k < keys.length; k++) {
+            var value = null;
+            try { value = levelProp.getValueAtKey(keys[k]); } catch(e) { readbackErrors.push(String(e)); }
+            readback.push({ timeSeconds: __ticksToSeconds(keys[k].ticks), levelDb: value === null ? null : Number(value) - 15, internalLevel: value });
+          }
+          return __result({ keyframesAdded: ${args.keyframes.length}, clipName: clip.name, keyframes: readback, readbackComplete: keys !== null && readbackErrors.length === 0, readbackErrors: readbackErrors });
         `);
                 return sendCommand(script, bridgeOptions);
             },
