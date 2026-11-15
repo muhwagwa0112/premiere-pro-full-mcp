@@ -1,3 +1,4 @@
+import { attachPremiereAutomation } from "./premiere/runtime.js";
 import { WsHost, DEFAULT_DAEMON_PORT, daemonStateDir, daemonEndpointPath, daemonPidFile } from "./bridge/ws-host.js";
 import { UxpBridgeHost, UXP_DEFAULT_PORT, ensureUxpAuthSecret, uxpPluginDataDir, uxpAuthRootDir } from "./bridge/uxp-host.js";
 import { createRequire } from "node:module";
@@ -51,6 +52,8 @@ export async function runDaemon(options: { port?: number } = {}): Promise<{ host
     // is missing), keep the CEP daemon alive and just log the failure.
     process.stderr.write(`[premiere-bridge-daemon] UXP bridge disabled: ${error instanceof Error ? error.message : String(error)}\n`);
   }
+  try { await attachPremiereAutomation(host, daemonStateDir()); }
+  catch (error) { process.stderr.write("[premiere-bridge-daemon] automation setup: " + (error instanceof Error ? error.message : String(error)) + "\n"); }
   return { host, port: host.port };
 }
 

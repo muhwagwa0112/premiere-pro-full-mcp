@@ -307,6 +307,11 @@ export class BridgeClient {
     return result.status;
   }
 
+  async workflowRequest(method: string, params: unknown): Promise<unknown> {
+    return this.#request({ kind: "workflow_request", requestId: randomUUID(), method, params }, 30000,
+      "Workflow response timed out; query the same requestId instead of resubmitting under a new ID");
+  }
+
   async operationStatus(): Promise<OperationCoordinatorStatus & Record<string, unknown>> {
     const requestId = randomUUID();
     return await this.#request(

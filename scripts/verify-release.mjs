@@ -30,8 +30,8 @@ if (archive) {
   const expectedFileName = ccx ? `premiere-pro-full-mcp-${version}.ccx` : absolute.toLowerCase().endsWith(".tgz") ? `premiere-pro-full-mcp-${version}.tgz` : `premiere-pro-full-mcp-${version}-windows.zip`;
   if (!absolute.toLowerCase().endsWith(expectedFileName.toLowerCase())) throw new Error(`Archive filename/version mismatch: expected ${expectedFileName}`);
   const entries = ccx
-    ? ["manifest.json", "main.cjs", "auth.cjs", "api-catalog.cjs", "index.html"]
-    : ["package.json", ".codex-plugin/plugin.json", ".mcp.json", "cep-plugin/index.html", "cep-plugin/main.ws.js", "cep-plugin/CSInterface.js", "cep-plugin/CSXS/manifest.xml", "uxp-plugin/manifest.json", "uxp-plugin/main.cjs", "uxp-plugin/auth.cjs", "uxp-plugin/api-catalog.cjs", "dist/index.js", "dist/server.js", "dist/daemon.js", "scripts/install-all.ps1", "scripts/install-daemon.ps1", "scripts/daemon-task-wrapper.ps1"];
+    ? ["manifest.json", "main.cjs", "auth.cjs", "api-catalog.cjs", "semantic-ops.cjs", "index.html"]
+    : ["package.json", ".codex-plugin/plugin.json", ".mcp.json", "cep-plugin/index.html", "cep-plugin/main.ws.js", "cep-plugin/CSInterface.js", "cep-plugin/CSXS/manifest.xml", "uxp-plugin/manifest.json", "uxp-plugin/main.cjs", "uxp-plugin/auth.cjs", "uxp-plugin/api-catalog.cjs", "uxp-plugin/semantic-ops.cjs", "dist/index.js", "dist/server.js", "dist/daemon.js", "dist/automation/service.js", "dist/automation/recipe-request.schema.json", "dist/workers/worker.py", "scripts/install-all.ps1", "scripts/install-daemon.ps1", "scripts/daemon-task-wrapper.ps1"];
   const archiveEntries = execFileSync("tar", ["-tf", absolute], { encoding: "utf8" })
     .split(/\r?\n/)
     .map((entry) => entry.replace(/^\.\//, ""))

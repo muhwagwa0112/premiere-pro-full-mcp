@@ -15,12 +15,10 @@ local-only tool.
   transaction actions, clip move/remove/trim, effect add/remove, video
   transitions, track mute) automatically route over the UXP track; everything
   else runs over CEP/ExtendScript. No file polling, no leader lease.
-- **354 flat tools** (266 official `adobe-premiere-pro-mcp` v1.2.0 names +
-  87 project-specific extras + `premiere_capabilities`). Every tool is its own
-  MCP tool named `premiere_<snake_case_tool>`. No `actionId` anywhere.
-- **UXP-only operations actually work.** The previously-missing capabilities —
+- **Legacy flat tools plus typed workflows.** Existing `premiere_<snake_case_tool>` names remain available alongside durable workflow submission, status, cancellation, output and controller tools. The capability response distinguishes implemented routes, required setup and unsupported host operations; a registered name is not proof of availability.
+- **UXP native editing handlers.** The native paths for
   frame capture, video transition add, clip effect add/remove, clip
-  move/remove/trim, track mute — are implemented on the UXP panel bridge. The
+  move/remove/trim and track mute are implemented on the UXP panel bridge. The
   server reports `uxpConnected`, `uxpOperations`, and `uxpCatalogCounts` so an
   agent can see which track is live before mutating.
 - **Frame capture is fixed.** Premiere 26.x CEP has no `exportFramePNG`; the
@@ -38,12 +36,16 @@ local-only tool.
   operation class. Placement, keyframe, and project-save APIs cannot be mixed
   in one raw script; use their dedicated MCP tools as separate stages.
 
+## Automated editing workflows
+
+The daemon now owns durable request identity, exact resource binding, execution receipts, checkpoint-aware revisions, local workers and bounded controller review/repair. See [Automated workflows](docs/AUTOMATION.md) for installation, configuration, the seven recipe contracts and recovery behavior, and [Local workers](workers/README.md) for FFmpeg, ASR, SAM2 and OpenCV setup. Real Adobe/model qualification is separate from source implementation. Deploy the updated CEP/UXP bundle with the daemon; source updates do not update an already loaded panel.
+
 ## Layout
 
 ```
 src/                  TypeScript MCP server (thin)
   index.ts            stdio entry; connects to the always-on bridge daemon
-  server.ts           registers 354 flat MCP tools routed over one persistent bridge
+  server.ts           legacy flat tools and typed workflows over the persistent bridge
   daemon.ts           always-on bridge daemon entry (auto-starts at logon)
   auto-start.ts       daemon auto-start wiring
   bridge/ws-host.ts   WS server + endpoint files (%LOCALAPPDATA%\PremiereMCP)

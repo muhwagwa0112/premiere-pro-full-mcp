@@ -1,3 +1,4 @@
+import { isNativeOperation } from "../operations/tool-policy.js";
 import { createServer as createHttpServer, type Server as HttpServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -328,6 +329,7 @@ export class WsHost {
   readonly #snapshotBudgetMs: number;
   #cepSocket: WebSocket | null = null;
   #uxpBridge: UxpBridgeHost | null = null;
+  #workflowDispatch: ((method: string, params: unknown) => Promise<unknown>) | null = null;
   #pending = new Map<string, PendingEntry>();
   #late = new Map<string, LateEntry>();
   #hostSession: HostSession | null = null;
@@ -362,6 +364,17 @@ export class WsHost {
   }
 
   setUxpBridge(bridge: UxpBridgeHost | null): void { this.#uxpBridge = bridge; }
+  setWorkflowDispatcher(dispatch: (method: string, params: unknown) => Promise<unknown>): void { this.#workflowDispatch = dispatch; }
+  async #workflowRequest(source: WebSocket, msg: Record<string, unknown>): Promise<void> {
+    const requestId = String(msg.requestId ?? randomUUID());
+    try {
+      if (!this.#workflowDispatch) throw codedError("WORKFLOW_SERVICE_UNAVAILABLE", "The daemon has not configured its automation service");
+      const method = String(msg.method ?? "");
+      if (!["describe", "submit", "status", "cancel", "outputs", "operationStatus", "controllerRequest", "controllerRespond", "legacyEffectBatch"].includes(method)) throw codedError("WORKFLOW_METHOD_INVALID", "Unknown workflow method");
+      if (Buffer.byteLength(JSON.stringify(msg.params ?? null), "utf8") > 1024 * 1024) throw codedError("WORKFLOW_INPUT_TOO_LARGE", "Workflow requests are limited to 1 MiB");
+      this.#sendSuccess(source, requestId, await this.#workflowDispatch(method, msg.params));
+    } catch (error) { this.#sendOperationFailure(source, requestId, error); }
+  }
 
   static async start(port = DEFAULT_DAEMON_PORT, options: WsHostOptions = {}): Promise<WsHost> {
     const http = createHttpServer();
@@ -430,6 +443,7 @@ export class WsHost {
     let msg: Record<string, unknown>;
     try { msg = JSON.parse(raw.toString()) as Record<string, unknown>; } catch { return; }
     const kind = String(msg.kind ?? "");
+    if (kind === "workflow_request") { void this.#workflowRequest(socket, msg); return; }
     if (kind === "ready") { this.#adoptCep(socket, msg as unknown as ReadyMessage); return; }
     if (kind === "execute") { void this.#dispatchExecute(socket, msg as unknown as ExecuteRequest); return; }
     if (kind === "host_probe") { void this.#dispatchHostProbe(socket, msg); return; }
@@ -566,7 +580,7 @@ export class WsHost {
         operationId: req.operation.operationId, toolName, backend: "cep", mode,
         timeoutMs, script: { ...hostScriptMetadata, source: hostScript },
         executor: async () => {
-          if (mode === "mutate") await this.#assertActiveSequenceTarget(req.operation!.operationId);
+          if (mode === "mutate" && !isNativeOperation(toolName)) await this.#assertActiveSequenceTarget(req.operation!.operationId);
           return await this.#withCepQueue(() => this.#executeCep(hostScript, timeoutMs, undefined, null, "execute", req.operation, source));
         },
       });
@@ -650,7 +664,7 @@ export class WsHost {
         this.#coordinator.validateActiveRequest(metadata.operationId, metadata.toolName, metadata.mode);
         const toolName = metadata.toolName!;
         const mode = metadata.mode!;
-        if (mode === "mutate") await this.#assertActiveSequenceTarget(metadata.operationId);
+        if (mode === "mutate" && !isNativeOperation(toolName)) await this.#assertActiveSequenceTarget(metadata.operationId);
         data = await this.#coordinator.execute({
           operationId: metadata.operationId, toolName, backend: "uxp", mode,
           timeoutMs, args: (msg.args ?? {}) as Record<string, unknown>, executor: async () => await dispatch(),
@@ -675,7 +689,7 @@ export class WsHost {
         ...(req.args !== undefined ? { args: req.args } : {}), ...(req.itemCount !== undefined ? { itemCount: req.itemCount } : {}),
         ...(req.estimatedRiskyCalls !== undefined ? { estimatedRiskyCalls: req.estimatedRiskyCalls } : {}),
         ...(this.#hostSession ? { hostSession: this.#hostSession } : {}),
-      }, req.mode === "mutate" ? () => this.#captureMutationPreflight(req.targetHint, req.targetKind, req.toolName) : undefined);
+      }, req.mode === "mutate" && !isNativeOperation(req.toolName) ? () => this.#captureMutationPreflight(req.targetHint, req.targetKind, req.toolName) : undefined);
       const active: ActiveWireOperation = { source, mode: req.mode };
       this.#activeWireOperations.set(operationId, active);
       if (source.readyState !== source.OPEN) {
@@ -693,7 +707,7 @@ export class WsHost {
       const mode = this.#activeWireOperations.get(req.operationId)?.mode;
       const target = mode === "mutate" ? this.#coordinator.snapshotTarget(req.operationId) : null;
       const status = await this.#coordinator.endOperation(req.operationId, req.status,
-        req.status === "SUCCEEDED" && mode === "mutate" && target
+        req.status === "SUCCEEDED" && mode === "mutate" && target && !isNativeOperation(target.toolName)
           ? () => this.#captureSnapshot(target.targetHint, target.targetKind, target.toolName)
           : undefined,
         req.failureCode);

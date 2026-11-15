@@ -19,30 +19,9 @@ export function getAudioTools(bridgeOptions) {
                 required: ["node_id", "level_db"],
             },
             handler: async (args) => {
-                const script = buildToolScript(`
-          var result = __findClip("${escapeForExtendScript(args.node_id)}");
-          if (!result) return __error("Clip not found");
-          
-          var clip = result.clip;
-          var volumeComp = __findComp(clip.components, ["Internal Volume", "ADBE Audio Levels", "Volume"], ["Volume", "볼륨"]);
-          if (volumeComp) {
-            var levelProp = __findProp(volumeComp, ["ADBE Audio Levels", "Level"], ["Level", "레벨"]);
-            if (levelProp) {
-              // Premiere's internal Audio Levels value is UI dB plus 15.
-              // Keep the public contract in dB and prove the write by reading
-              // the internal value back from the same property.
-              var requestedDb = ${args.level_db};
-              var internalLevel = requestedDb + 15;
-              levelProp.setValue(internalLevel, true);
-              var readInternal = null;
-              try { readInternal = levelProp.getValue(0, 0); } catch(e) {}
-              return __result({ adjusted: true, clipName: clip.name, requestedLevelDb: requestedDb, levelDb: readInternal === null ? null : Number(readInternal) - 15, internalLevel: readInternal, readbackComplete: readInternal !== null });
-            }
-          }
-          
-          return __error("Could not find Volume/Level property on clip");
-        `);
-                return sendCommand(script, bridgeOptions);
+                const adapter = bridgeOptions?.transport?.audioEdit;
+                if (typeof adapter !== "function") return { success: false, code: "AUDIO_PARAMETER_ENCODING_UNKNOWN", error: "This transport must supply a qualified audio valueEncoding adapter" };
+                return adapter(args, "scalar");
             },
         },
         add_audio_keyframes: {
@@ -70,40 +49,9 @@ export function getAudioTools(bridgeOptions) {
                 required: ["node_id", "keyframes"],
             },
             handler: async (args) => {
-                const keyframeCode = args.keyframes
-                    .map((kf) => `
-            var kfTime = __secondsToTicks(${kf.time_seconds}).toString();
-            levelProp.addKey(kfTime);
-            levelProp.setValueAtKey(kfTime, (${kf.level_db} + 15));`)
-                    .join("\n");
-                const script = buildToolScript(`
-          var result = __findClip("${escapeForExtendScript(args.node_id)}");
-          if (!result) return __error("Clip not found");
-          
-          var clip = result.clip;
-          var volumeComp = __findComp(clip.components, ["Internal Volume", "ADBE Audio Levels", "Volume"], ["Volume", "볼륨"]);
-          var levelProp = null;
-          if (volumeComp) {
-            levelProp = __findProp(volumeComp, ["ADBE Audio Levels", "Level"], ["Level", "레벨"]);
-          }
-          
-          if (!levelProp) return __error("Could not find audio Level property");
-          
-          levelProp.setTimeVarying(true);
-          ${keyframeCode}
-          
-          var keys = null;
-          var readback = [];
-          var readbackErrors = [];
-          try { keys = levelProp.getKeys() || []; } catch(e) { readbackErrors.push(String(e)); }
-          if (keys) for (var k = 0; k < keys.length; k++) {
-            var value = null;
-            try { value = levelProp.getValueAtKey(keys[k]); } catch(e) { readbackErrors.push(String(e)); }
-            readback.push({ timeSeconds: __ticksToSeconds(keys[k].ticks), levelDb: value === null ? null : Number(value) - 15, internalLevel: value });
-          }
-          return __result({ keyframesAdded: ${args.keyframes.length}, clipName: clip.name, keyframes: readback, readbackComplete: keys !== null && readbackErrors.length === 0, readbackErrors: readbackErrors });
-        `);
-                return sendCommand(script, bridgeOptions);
+                const adapter = bridgeOptions?.transport?.audioEdit;
+                if (typeof adapter !== "function") return { success: false, code: "AUDIO_PARAMETER_ENCODING_UNKNOWN", error: "This transport must supply a qualified audio valueEncoding adapter" };
+                return adapter(args, "keyframes");
             },
         },
         mute_track: {

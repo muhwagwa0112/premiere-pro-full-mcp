@@ -35,3 +35,10 @@ _tools_safety.json
 _final_*.png
 _uxp_frame_*.png
 .rnd
+
+# Local automation profiles, model weights and Python bytecode.
+**/__pycache__/
+*.pyc
+profiles/local-*.json
+*.pt
+*.pth

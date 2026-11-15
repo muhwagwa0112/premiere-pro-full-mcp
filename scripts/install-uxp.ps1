@@ -57,7 +57,7 @@ Write-Host "Version: $Version"
 if ($AuditOnly) {
     $sourceFiles = @(Get-ChildItem -LiteralPath $SourceDir -Recurse -File)
     if ($sourceFiles.Count -eq 0) { throw "UXP source contains no files: $SourceDir" }
-    foreach ($required in @("manifest.json", "main.cjs", "auth.cjs", "api-catalog.cjs", "index.html")) {
+    foreach ($required in @("manifest.json", "main.cjs", "auth.cjs", "api-catalog.cjs", "semantic-ops.cjs", "index.html")) {
         if (-not (Test-Path -LiteralPath (Join-Path $SourceDir $required) -PathType Leaf)) { throw "UXP source missing required file: $required" }
     }
     Write-Host "UXP installer preflight passed. No filesystem changes were made."

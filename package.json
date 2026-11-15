@@ -18,22 +18,30 @@
     "scripts",
     "CHANGELOG.md",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "dist/**/*.json",
+    "dist/**/*.py",
+    "dist/**/*.md",
+    "workers",
+    "docs",
+    "examples/automation"
   ],
   "engines": {
     "node": ">=20.19.0"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && npm run copy:assets",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "check": "npm run typecheck && npm test && npm run build && node scripts/smoke.mjs && node scripts/_e2e-bridge.mjs && node scripts/_syntax-check.mjs",
     "verify:release": "node scripts/verify-release.mjs",
-    "build:release": "node scripts/build-release.mjs"
+    "build:release": "node scripts/build-release.mjs",
+    "copy:assets": "node scripts/copy-assets.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
+    "ajv": "8.20.0",
     "ws": "^8.21.1",
     "zod": "^4.4.3"
   },

@@ -90,7 +90,20 @@ export const TOOL_POLICIES: Readonly<Record<KnownToolName, ToolPolicy>> = Object
   Object.fromEntries(ALL_TOOL_NAMES.map((name) => [name, policyForKnown(name)])) as Record<KnownToolName, ToolPolicy>,
 );
 
+const NATIVE_OPERATIONS = new Set([
+  "pr.host.inspect", "pr.project.create", "pr.project.open", "pr.project.save", "pr.project.close_inactive",
+  "pr.sequence.create", "pr.sequence.duplicate", "pr.timeline.inspect", "pr.media.import", "pr.media.relink", "pr.media.proxy",
+  "pr.media.rename", "pr.media.label", "pr.media.offline", "pr.timeline.edit", "pr.clip.move", "pr.clip.trim", "pr.clip.remove", "pr.clip.replaceSource",
+  "pr.effect.apply", "pr.parameter.set", "pr.audio.gain", "pr.title.setText", "pr.motion.set", "pr.transition.apply", "pr.mogrt.insert",
+  "pr.transcript.read", "pr.effects.inventory", "pr.effects.reset_keyframes", "pr.captions.import", "pr.captions.read",
+  "pr.export", "pr.export.submit", "pr.export.status", "pr.export.cancel", "pr.frame.capture"
+]);
+const NATIVE_READ_OPERATIONS = new Set(["pr.host.inspect", "pr.timeline.inspect", "pr.transcript.read", "pr.effects.inventory", "pr.captions.read", "pr.export.status", "pr.frame.capture"]);
+/** These operations bind exact native targets and validate their own bounded before/after projection. */
+export function isNativeOperation(name: string): boolean { return NATIVE_OPERATIONS.has(name); }
 export function getToolPolicy(toolName: string): ToolPolicy {
+  if (NATIVE_OPERATIONS.has(toolName)) return { ...(NATIVE_READ_OPERATIONS.has(toolName) ? READ_POLICY : MUTATE_POLICY),
+    checkpoint: "none", maxArgsBytes: 512 * 1024, maxItems: 1024, maxExecutionTimeoutMs: 120000 };
   const normalized = Object.prototype.hasOwnProperty.call(TOOL_POLICIES, toolName)
     ? toolName
     : toolName.startsWith("premiere_") ? toolName.slice("premiere_".length) : toolName;

@@ -1,4 +1,14 @@
+import { SEMANTIC_EXTRA_SCHEMAS, IMPLEMENTED_EXTRAS, executeSemanticExtra } from "./premiere/extras.js";
+import { editAudio } from "./premiere/audio.js";
+import { objectSchema } from "./premiere/schema.js";
+import { formatTimecode, parseTimecode, secondsToTicks, ticksToSeconds } from "./premiere/time.js";
+import { createAutomationTools } from "./automation/mcp.js";
+import type { WorkflowServiceApi } from "./automation/service.js";
+import { parseParameterProfiles } from "./adobe-automation-adapter.js";
+import { EFFECT_BATCH_NAMES } from "./premiere/effect-batch.js";
+import { readFile } from "node:fs/promises";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { ListToolsRequestSchema, type Tool } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { getUpstreamToolModules } from "../vendor/upstream/tools/catalog.js";
 import { EXTRA_TOOL_NAMES } from "./tool-names.js";
@@ -19,6 +29,7 @@ import type { HostSessionRef, OperationBackend, OperationMode } from "./operatio
  * ExtendScript to the CEP host through the always-on daemon.
  */
 export interface ScriptTransport {
+  audioEdit?(args: Record<string, unknown>, mode: "scalar" | "keyframes"): Promise<unknown>;
   executeScript(script: string, timeoutMs?: number, operationContext?: OperationWireMetadata): Promise<unknown>;
 }
 
@@ -42,6 +53,7 @@ export interface BridgeClient extends ScriptTransport {
   probeHost?(timeoutMs?: number): Promise<unknown>;
   probeDomReadiness?(timeoutMs?: number): Promise<unknown>;
   uxp(operation: string, args?: Record<string, unknown>, expectedRevision?: string, operationContext?: OperationWireMetadata, timeoutMs?: number): Promise<unknown>;
+  workflowRequest?(method: string, params: unknown): Promise<unknown>;
   beginOperation?(request: OperationBeginRequest): Promise<unknown>;
   endOperation?(operationId: string, status: "SUCCEEDED" | "FAILED" | "UNKNOWN", errorCode?: string): Promise<unknown>;
   operationStatus?(): Promise<unknown>;
@@ -85,11 +97,18 @@ function asRecord(value: unknown): Record<string, unknown> {
   return { value };
 }
 
-function textResult(value: unknown): { content: { type: "text"; text: string }[]; structuredContent: Record<string, unknown> } {
+function textResult(value: unknown): { content: { type: "text"; text: string }[]; structuredContent: Record<string, unknown>; isError: boolean } {
   return {
     content: [{ type: "text", text: JSON.stringify(value, null, 2) }],
     structuredContent: asRecord(value),
+    isError: asRecord(value).success === false,
   };
+}
+function mcpObjectSchema(schema: z.ZodType): Tool["inputSchema"] {
+  const value = z.toJSONSchema(schema, { target: "draft-7", io: "input" });
+  const properties = Object.fromEntries(Object.entries(value.properties ?? {}).map(([key, property]) => [key,
+    typeof property === "boolean" ? property ? {} : { not: {} } : property]));
+  return { ...value, type: "object", properties };
 }
 
 /**
@@ -209,7 +228,9 @@ function domReadinessFailure(error: unknown): { code: string; error: string; tra
  */
 export function createMcpServer(bridge: BridgeClient): McpServer {
   const server = new McpServer({ name: "premiere-pro-full-mcp", version: "2.0.0" });
+  const listedTools: Tool[] = [];
   const scopedBridge: BridgeClient = {
+    audioEdit: (args, mode) => editAudio(scopedBridge, args, mode),
     get connected() { return bridge.connected; },
     get port() { return bridge.port; },
     get hostSession() { return bridge.hostSession ?? null; },
@@ -345,7 +366,14 @@ export function createMcpServer(bridge: BridgeClient): McpServer {
     try {
       const result = await operationContext.run(active, () => callback(args));
       const failure = operationFailure(result);
-       await bridge.endOperation(operationId, failure.failed ? (operationMode === "read" ? "FAILED" : failure.unknown ? "UNKNOWN" : "FAILED") : "SUCCEEDED", failure.code);
+      const requestedStatus = failure.failed ? (operationMode === "read" ? "FAILED" : failure.unknown ? "UNKNOWN" : "FAILED") : "SUCCEEDED";
+      const terminal = await bridge.endOperation(operationId, requestedStatus, failure.code);
+      const finalStatus = typeof terminal === "string" ? terminal : asRecord(terminal).status;
+      if (finalStatus !== "SUCCEEDED" && !failure.failed) {
+        return Object.assign({}, result, textResult({ success: false, code: "OPERATION_OUTCOME_UNKNOWN", outcomeUnknown: true,
+          operationId, finalStatus: finalStatus ?? "UNKNOWN", appliedResult: asRecord(result).structuredContent ?? result,
+          error: "The authority could not verify the final operation outcome; inspect the receipt before retrying." }), { isError: true });
+      }
       return result;
     } catch (error) {
       const outcome = errorOutcome(error);
@@ -354,12 +382,12 @@ export function createMcpServer(bridge: BridgeClient): McpServer {
     }
   };
 
+  const capabilitySchema = z.object({ domain: z.enum(["project", "sequence", "timeline", "media", "effects", "captions", "export", "playback", "workspace", "helpers"]).optional() }).strict();
+  listedTools.push({ name: "premiere_capabilities", description: "Return the connected host version and tool counts.", inputSchema: mcpObjectSchema(capabilitySchema), annotations: { readOnlyHint: true, openWorldHint: false } });
   server.registerTool("premiere_capabilities", {
     title: "Bridge capabilities",
     description: "Return the connected host version and tool counts.",
-    inputSchema: {
-      domain: z.enum(["project", "sequence", "timeline", "media", "effects", "captions", "export", "playback", "workspace", "helpers"]).optional(),
-    },
+    inputSchema: capabilitySchema,
     annotations: { readOnlyHint: true, openWorldHint: false },
   }, async () => {
     let uxp: { connected: boolean; hostVersion: null | string; capabilities: string[]; operations: string[]; catalogCounts: unknown } = { connected: false, hostVersion: null, capabilities: [], operations: [], catalogCounts: null };
@@ -390,7 +418,8 @@ export function createMcpServer(bridge: BridgeClient): McpServer {
       uxpCatalogCounts: uxp.catalogCounts,
       toolCount: Object.keys(upstream).length,
       extraCount: EXTRA_TOOL_NAMES.length,
-      total: Object.keys(upstream).length + EXTRA_TOOL_NAMES.length + 1,
+      workflowToolCount: listedTools.length - Object.keys(upstream).length - EXTRA_TOOL_NAMES.length - 1,
+      total: listedTools.length,
       operationProtocolVersion: 1,
       operationLedgerSchemaVersion: 1,
       operationStatus,
@@ -402,8 +431,11 @@ export function createMcpServer(bridge: BridgeClient): McpServer {
     const policy = getToolPolicy(name);
     const schema = zodFromParameters(params).extend({
       ...operationControlShape(policy),
+      ...(["apply_effect", "apply_audio_effect"].includes(name) ? { effect_name: z.string().trim().min(1) } : {}),
       ...(name === "execute_extendscript" ? { read_only: z.boolean().optional().describe("Explicit opt-in: validate and execute the bounded raw script as a read-only operation") } : {}),
     });
+    listedTools.push({ name: `premiere_${name}`, description: tool.description ?? `Premiere Pro: ${name}`,
+      inputSchema: mcpObjectSchema(schema), annotations: { readOnlyHint: policy.mode !== "mutate", destructiveHint: policy.mode === "mutate", openWorldHint: false } });
     server.registerTool(`premiere_${name}`, {
       title: name,
       description: tool.description ?? `Premiere Pro: ${name}`,
@@ -433,16 +465,23 @@ export function createMcpServer(bridge: BridgeClient): McpServer {
     // Catalogued diagnostics already include their public `premiere_` prefix.
     // Preserve it instead of registering an unusable double-prefixed name.
     const publicName = name.startsWith("premiere_") ? name : `premiere_${name}`;
+    const extraSchema = z.object(argsSchemaFor(name)).strict();
+    listedTools.push({ name: publicName, description: buildExtraDescription(name), inputSchema: mcpObjectSchema(extraSchema),
+      annotations: { readOnlyHint: policy.mode !== "mutate", destructiveHint: policy.mode === "mutate", openWorldHint: false } });
     server.registerTool(publicName, {
       title: name,
       description: buildExtraDescription(name),
-      inputSchema: argsSchemaFor(name),
+      inputSchema: extraSchema,
       annotations: {
         readOnlyHint: policy.mode !== "mutate",
         destructiveHint: policy.mode === "mutate",
         openWorldHint: false,
       },
     }, async (args) => {
+      if (EFFECT_BATCH_NAMES.has(name)) {
+        if (!bridge.workflowRequest) throw Object.assign(new Error("Durable effect batches require the updated daemon"), { code: "WORKFLOW_OWNER_UNAVAILABLE" });
+        return textResult(await bridge.workflowRequest("legacyEffectBatch", { toolName: name, args: stripOperationControls(args ?? {}) }));
+      }
       return await runTool(name, args ?? {}, async (toolArgs) => {
         const result = await executeExtraTool(scopedBridge, upstream, name, toolArgs);
         return textResult(result);
@@ -450,29 +489,41 @@ export function createMcpServer(bridge: BridgeClient): McpServer {
     });
   }
 
+  const workflowCall = (method: string, params: unknown): Promise<unknown> => {
+    if (!bridge.workflowRequest) return Promise.reject(Object.assign(new Error("Update the daemon to enable persistent workflows"), { code: "WORKFLOW_OWNER_UNAVAILABLE" }));
+    return bridge.workflowRequest(method, params);
+  };
+  const workflows: WorkflowServiceApi = {
+    describe: () => workflowCall("describe", {}),
+    submit: request => workflowCall("submit", request),
+    status: query => workflowCall("status", query),
+    cancel: jobId => workflowCall("cancel", jobId),
+    outputs: jobId => workflowCall("outputs", jobId),
+    operationStatus: operationId => workflowCall("operationStatus", operationId),
+    controllerRequest: jobId => workflowCall("controllerRequest", jobId),
+    controllerRespond: response => workflowCall("controllerRespond", response),
+  };
+  for (const tool of createAutomationTools({ service: workflows, prefix: "premiere" })) {
+    listedTools.push(tool.definition);
+    server.registerTool(tool.definition.name, {
+      title: tool.definition.name,
+      description: tool.definition.description,
+      // Ajv in the common handler validates the unchanged raw input against this
+      // exact JSON Schema. Zod cannot represent the contract's if/then clauses.
+      inputSchema: z.looseObject({}),
+      annotations: tool.definition.annotations,
+    }, async args => ({ ...await tool.handler(asRecord(args)) }));
+  }
+  // Preserve the full canonical JSON Schema in tools/list instead of weakening
+  // conditionals through a JSON Schema -> Zod -> JSON Schema round trip.
+  server.server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: listedTools }));
+
   return server;
 }
 
 /** Convert upstream JSON-schema parameters into a zod object schema. */
 function zodFromParameters(params: { properties?: Record<string, unknown>; required?: string[] } = {}): z.ZodObject<Record<string, z.ZodTypeAny>> {
-  const properties = (params.properties ?? {}) as Record<string, { type?: string; enum?: unknown[]; description?: string }>;
-  const required = new Set(params.required ?? []);
-  const shape: Record<string, z.ZodTypeAny> = {};
-  for (const [key, prop] of Object.entries(properties)) {
-    let schema: z.ZodTypeAny;
-    const type = prop.type;
-    if (Array.isArray(prop.enum)) schema = z.enum(prop.enum as [string, ...string[]]);
-    else if (type === "string") schema = z.string();
-    else if (type === "number") schema = z.number();
-    else if (type === "integer") schema = z.number().int();
-    else if (type === "boolean") schema = z.boolean();
-    else if (type === "array") schema = z.array(z.any());
-    else if (type === "object") schema = z.record(z.string(), z.any());
-    else schema = z.any();
-    if (typeof prop.description === "string") schema = schema.describe(prop.description);
-    shape[key] = required.has(key) ? schema : schema.optional();
-  }
-  return z.object(shape);
+  return objectSchema(params);
 }
 
 function operationControlShape(policy?: ToolPolicy): Record<string, z.ZodTypeAny> {
@@ -492,6 +543,8 @@ function buildExtraDescription(name: string): string {
 
 /** Minimal per-tool arg shapes for the extra tools. */
 function argsSchemaFor(name: string): Record<string, z.ZodType> {
+  const explicit = SEMANTIC_EXTRA_SCHEMAS[name];
+  if (explicit) return { ...operationControlShape(getToolPolicy(name)), ...explicit };
   const idField = z.string().min(1).max(512);
   const common: Record<string, z.ZodType> = operationControlShape(getToolPolicy(name));
   const compoundBatchRelink = name === "media_batch_relink";
@@ -515,9 +568,12 @@ function argsSchemaFor(name: string): Record<string, z.ZodType> {
   // otherwise these never receive a usable value and always fail validation.
   if (name.startsWith("helpers_")) {
     common.fps = z.number().positive().optional();
+    common.frame_rate = z.object({ numerator: z.number().int().positive(), denominator: z.number().int().positive() }).strict().optional();
+    common.drop_frame = z.boolean().optional();
+    if (name === "helpers_ticks_to_timecode") common.ticks = z.string().regex(/^-?\d+$/).optional();
     if (name === "helpers_ticks_to_timecode" || name === "helpers_seconds_to_timecode") {
       common.seconds = z.number().optional();
-      common.value = z.number().optional();
+      common.value = z.union([z.string().regex(/^-?\d+$/), z.number().int().safe()]).optional();
     }
     if (name === "helpers_timecode_to_seconds" || name === "helpers_timecode_to_ticks") {
       common.timecode = z.string().min(1).optional();
@@ -542,13 +598,7 @@ function argsSchemaFor(name: string): Record<string, z.ZodType> {
       name: z.string().min(1).max(256),
       item_ids: z.array(z.string().min(1)).min(1),
     },
-    media_metadata_bulk_write: { metadata_xml: z.string().min(1) },
-    media_set_color_label_batch: { metadata_xml: z.string().min(1) },
     project_bin_recursive_contents: { bin_id: z.string().min(1) },
-    effects_batch_apply: { node_id: idField, effect_name: z.string().min(1) },
-    effects_batch_remove: { node_id: idField },
-    effects_match_parameter: { node_id: idField },
-    effects_keyframe_reset: { node_id: idField },
   };
   const routed = routedRequiredArgs[name];
   if (routed) {
@@ -572,10 +622,10 @@ async function executeExtraTool(
   args: Record<string, unknown>,
 ): Promise<unknown> {
   // ---- Pure local helpers (no host round-trip needed) ----
-  if (name === "helpers_ticks_to_timecode") return { timecode: ticksToTimecode(Math.round(Number(args.seconds ?? args.value ?? 0) * 254016000000), Number(args.fps ?? 24)) };
-  if (name === "helpers_seconds_to_timecode") return { timecode: ticksToTimecode(Math.round(Number(args.seconds ?? 0) * 254016000000), Number(args.fps ?? 24)) };
-  if (name === "helpers_timecode_to_seconds") return { seconds: timecodeToSeconds(String(args.timecode ?? ""), Number(args.fps ?? 24)) };
-  if (name === "helpers_timecode_to_ticks") return { ticks: Math.round(timecodeToSeconds(String(args.timecode ?? ""), Number(args.fps ?? 24)) * 254016000000) };
+  if (name === "helpers_ticks_to_timecode") return { timecode: formatTimecode(args.ticks ?? args.value, args.frame_rate ?? args.fps ?? 24, args.drop_frame === true) };
+  if (name === "helpers_seconds_to_timecode") return { timecode: formatTimecode(secondsToTicks(Number(args.seconds)), args.frame_rate ?? args.fps ?? 24, args.drop_frame === true) };
+  if (name === "helpers_timecode_to_seconds") return { seconds: ticksToSeconds(parseTimecode(String(args.timecode), args.frame_rate ?? args.fps ?? 24, args.drop_frame as boolean | undefined)) };
+  if (name === "helpers_timecode_to_ticks") return { ticks: parseTimecode(String(args.timecode), args.frame_rate ?? args.fps ?? 24, args.drop_frame as boolean | undefined) };
   if (name === "helpers_duration_summary") {
     const result = await bridge.executeScript(`(function(){
       try {
@@ -691,6 +741,13 @@ async function executeExtraTool(
     });
   }
 
+  const semantic = await executeSemanticExtra(bridge, name, args, async (operation, input) => {
+    const value = await dispatchUxp(bridge, operation, input);
+    if (value === UXP_FALLTHROUGH) throw Object.assign(new Error("The UXP panel is required for " + operation), { code: "UXP_NOT_CONNECTED" });
+    return value;
+  });
+  if (semantic.handled) return semantic.value;
+
   // ---- UXP second track: tools that can only run over the UXP panel bridge.
   // These require UXP APIs that CEP/ExtendScript cannot reach (SequenceEditor
   // createRemoveItemsAction / createCloneTrackItemAction / createMoveAction /
@@ -749,43 +806,19 @@ export const EXTRA_ROUTES: Record<string, { target: string; map?: (args: Record<
   timeline_list_all_clips: { target: "get_full_sequence_info" },
   timeline_gap_report: { target: "get_timeline_gaps" },
   timeline_track_summary: { target: "get_timeline_summary" },
-  timeline_clip_count: { target: "get_full_sequence_info" },
-  timeline_summary_ratios: { target: "get_timeline_summary" },
-  timeline_playhead_to_chapter_marker: { target: "get_sequence_markers_by_type", map: () => ({ marker_type: "chapter" }) },
-  timeline_marker_to_chapter: { target: "get_sequence_markers_by_type", map: () => ({ marker_type: "chapter" }) },
-  timeline_marker_to_segments: { target: "get_sequence_markers_by_type", map: () => ({ marker_type: "segment" }) },
-  timeline_match_frame_in_out: { target: "get_sequence_in_out_points" },
-  timeline_trim_to_work_area: { target: "set_work_area" },
 
   media_list_all_items: { target: "list_project_items" },
   media_unused_media_report: { target: "get_unused_media" },
   media_duplicate_media_report: { target: "get_duplicate_media" },
-  media_batch_replace: { target: "replace_clip_media" },
   media_import_all_in_folder: { target: "import_folder" },
   media_import_sequence_bin: { target: "import_sequences" },
-  media_metadata_bulk_read: { target: "get_project_panel_metadata" },
-  media_metadata_bulk_write: { target: "set_project_panel_metadata" },
-  media_set_color_label_batch: { target: "set_project_panel_metadata" },
 
   project_structure_tree: { target: "get_full_project_overview" },
   project_bin_recursive_contents: { target: "get_bin_contents" },
-  project_close_inactive: { target: "close_project" },
-  project_autosave_status: { target: "get_project_info" },
-  project_close_inactive_aliased: { target: "close_project" },
 
-  captions_export_srt: { target: "get_sequence_markers_by_type", map: () => ({ marker_type: "segment" }) },
-  captions_cue_count: { target: "get_sequence_markers_by_type", map: () => ({ marker_type: "segment" }) },
-  captions_cue_snapshot: { target: "get_sequence_markers_by_type", map: () => ({ marker_type: "segment" }) },
-  text_mogrt_inventory: { target: "get_project_info" },
-  text_font_inventory: { target: "get_project_info" },
 
-  effects_chain_inventory: { target: "get_full_sequence_info" },
-  effects_batch_apply: { target: "apply_effect" },
-  effects_batch_remove: { target: "remove_effect" },
-  transitions_inventory: { target: "get_full_sequence_info" },
 
   export_preset_finder: { target: "get_encoder_presets" },
-  export_frame_marker: { target: "get_sequence_markers_by_type", map: () => ({ marker_type: "chapter" }) },
 
   playback_scrub_seconds: { target: "set_playhead_position" },
 
@@ -853,22 +886,7 @@ export const UNSUPPORTED_EXTRAS = new Set<string>([
   "sequence_duplicate_batch",
   "transcription_of_target",
   "transcript_export_srt",
-]);
-
-function ticksToTimecode(ticks: number, fps: number): string {
-  const total = ticks / 254016000000;
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  const seconds = Math.floor(total % 60);
-  const frames = Math.floor((total % 1) * fps);
-  return [hours, minutes, seconds, frames].map((n) => String(n).padStart(2, "0")).join(":");
-}
-
-function timecodeToSeconds(timecode: string, fps: number): number {
-  const parts = String(timecode).split(":");
-  if (parts.length < 4) throw new Error("timecode must be HH:MM:SS:FF");
-  return Number(parts[0]) * 3600 + Number(parts[1]) * 60 + Number(parts[2]) + Number(parts[3]) / fps;
-}
+].filter(name => !IMPLEMENTED_EXTRAS.has(name)));
 
 /** Sentinel: the UXP route is not applicable for this call; fall back to the
  *  upstream ExtendScript handler so it can report the honest error. */
@@ -901,12 +919,14 @@ function unwrapUxpResult(uxpResult: unknown): unknown | typeof UXP_FALLTHROUGH {
     const rec = uxpResult as { success?: boolean; data?: unknown; error?: string; code?: string };
     if (rec.success === false) {
       if (rec.code === "UXP_UNAVAILABLE" || rec.code === "UXP_NOT_CONNECTED") return UXP_FALLTHROUGH;
-      return { success: false, error: String(rec.error ?? "UXP operation failed"), code: String(rec.code ?? "UXP_FAILED") };
+      return { ...rec, success: false, error: String(rec.error ?? "UXP operation failed"), code: String(rec.code ?? "UXP_FAILED") };
     }
     if ("data" in rec && rec.data !== undefined) return unwrapUxpResult(rec.data);
     const envelope = uxpResult as Record<string, unknown>;
     if ("result" in envelope) {
       const result = envelope.result;
+      const verification = asRecord(envelope.verification);
+      if (verification.outcome === "committed_unverified") return { success: false, code: "APPLIED_UNVERIFIED", outcomeUnknown: true, error: String(verification.method ?? "Postcondition was not verified"), appliedResult: result };
       const metadata = Object.fromEntries(Object.entries(envelope).filter(([key]) => key !== "result"));
       if (result && typeof result === "object" && !Array.isArray(result)) {
         return { ...(result as Record<string, unknown>), uxpVerification: metadata };
@@ -929,19 +949,36 @@ async function dispatchUxp(bridge: BridgeClient, name: string, args: Record<stri
   if (!route) return UXP_FALLTHROUGH;
   const steps: UxpRouteStep[] = "steps" in route ? route.steps : [route as UxpRouteStep];
   let handle: Record<string, unknown> | null = null;
-  let resolved = { ...args };
+  let resolved: Record<string, unknown> = { ...args };
   // Some destructive clip tools target a clip by its CEP `node_id` (a QE client
   // id) which has no UXP equivalent. The server resolves node_id -> (track,
   // clip start/index) by reading the active sequence over the CEP bridge, then
   // feeds those coordinates into the UXP find step. This makes the handle-based
   // UXP ops usable from the existing tool schema without any agent code change.
   if (args && typeof args.node_id === "string" && args.node_id.length) {
-    const locate = await resolveNodeIdInSequence(bridge, args.node_id);
-    if (locate) resolved = { ...resolved, track_index: locate.trackIndex, clip_index: locate.clipIndex, clip_name: locate.clipName, clip_start_seconds: locate.startSeconds };
+    const locate = await resolveNodeIdInSequence(bridge, args.node_id, typeof args.sequence_id === "string" ? args.sequence_id : undefined);
+    if (!locate) throw Object.assign(new Error("Exact clip node_id was not found; no mutation was dispatched"), { code: "TARGET_NOT_FOUND" });
+    if (["move_clip", "move_clip_to_track", "trim_clip", "_trim_exact_clip_ticks", "ripple_delete", "remove_from_timeline"].includes(name) && !locate.linkMembershipKnown) {
+      throw Object.assign(new Error("Linked-item membership must be observed before editing this clip"), { code: "LINK_MEMBERSHIP_UNAVAILABLE" });
+    }
+    resolved = { ...resolved, track_index: locate.trackIndex, clip_index: locate.clipIndex, clip_name: locate.clipName,
+      clip_start_seconds: locate.startSeconds, media_type: locate.mediaType, $_binding: locate };
+  }
+  if (["trim_clip", "_trim_exact_clip_ticks"].includes(name) && process.env.PREMIERE_PARAMETER_PROFILE_FILE) {
+    const profiles = parseParameterProfiles(JSON.parse(await readFile(process.env.PREMIERE_PARAMETER_PROFILE_FILE, "utf8")));
+    const host = asRecord(unwrapUxpResult(await bridge.uxp("host.inspect", {})));
+    const profileFor = (mediaType: string) => {
+      const matches = profiles.filter(p => p.hostVersion === host.hostVersion && p.semantic === "time_remap." + mediaType);
+      if (matches.length !== 1) return undefined;
+      const p = matches[0]!; return { componentMatchName: p.componentMatchName, parameterIndex: p.parameterIndex, expectedDisplayName: p.expectedDisplayName };
+    };
+    resolved.$_timeMapProfile = profileFor(String(resolved.media_type ?? "video"));
+    resolved.$_linkTimeMapProfile = profileFor(resolved.media_type === "audio" ? "video" : "audio");
   }
   for (const step of steps) {
     const stepSource = { ...resolved, ...(handle ? { $_handle: handle } : {}) };
-    const stepArgs = step.map ? step.map(stepSource) : stepSource;
+    const mapped = step.map ? step.map(stepSource) : stepSource;
+    const stepArgs = { ...mapped, ...(resolved.$_binding ? { binding: resolved.$_binding } : {}) };
     if (process.env.PREMIERE_MCP_DEBUG === "1") process.stderr.write(`[uxp] ${name} -> ${step.operation} args=${JSON.stringify(stepArgs)}\n`);
     const uxpResult = (await bridge.uxp(step.operation, stepArgs)) as { success?: boolean; data?: unknown; error?: string; code?: string };
     const unwrapped = unwrapUxpResult(uxpResult);
@@ -957,6 +994,13 @@ async function dispatchUxp(bridge: BridgeClient, name: string, args: Record<stri
   return {};
 }
 
+export async function dispatchExactLegacyEffect(bridge: BridgeClient, name: string, args: Record<string, unknown>): Promise<unknown> {
+  if (!["apply_effect", "apply_audio_effect", "remove_effect"].includes(name)) throw new Error("Unsupported durable effect item");
+  const result = await dispatchUxp(bridge, name, args);
+  if (result === UXP_FALLTHROUGH) throw Object.assign(new Error("The updated UXP panel is required for this effect item"), { code: "UXP_NOT_CONNECTED" });
+  return result;
+}
+
 /**
  * UXP second track: tools whose only truthful implementation lives on the
  * Premiere UXP panel bridge. Each entry maps the flat MCP tool name to a UXP
@@ -967,6 +1011,12 @@ async function dispatchUxp(bridge: BridgeClient, name: string, args: Record<stri
  * session-scoped handle that later steps reference via `$_handle`.
  */
 export const UXP_ROUTES: Record<string, UxpRoute> = {
+  _find_exact_clip: { operation: "timeline.clip.find", map: args => ({ mediaType: args.media_type ?? "video", trackIndex: args.track_index, clipIndex: args.clip_index, clipName: args.clip_name }) },
+  _trim_exact_clip_ticks: { steps: [
+    { operation: "timeline.clip.find", map: args => ({ mediaType: args.media_type ?? "video", trackIndex: args.track_index, clipIndex: args.clip_index }) },
+    { operation: "timeline.clip.trim", map: args => ({ trackItem: args.$_handle, sourceInTicks: args.source_in_ticks, sourceOutTicks: args.source_out_ticks, linkedPolicy: "preserve",
+      linkedItems: (args.$_binding as Record<string, unknown> | undefined)?.linkedItems, timeMapProfile: args.$_timeMapProfile, linkTimeMapProfile: args.$_linkTimeMapProfile }) },
+  ] },
   // Premiere 26 sequence creation needs a preset-aware API; the UXP bridge
   // owns the host-compatible implementation and reads the created sequence
   // back before reporting success.
@@ -986,8 +1036,8 @@ export const UXP_ROUTES: Record<string, UxpRoute> = {
 
   // --- Track mute / visibility are UXP-only (AudioTrack.setMute is not over
   // CEP/ExtendScript). We route the mediaType + trackIndex straight through.
-  mute_track: { operation: "timeline.track.set_mute", map: (args) => ({ mediaType: args.track_type === "audio" ? "audio" : "video", trackIndex: args.track_index, muted: args.muted !== false }) },
-  toggle_track_visibility: { operation: "timeline.track.set_mute", map: (args) => ({ mediaType: args.track_type === "audio" ? "audio" : "video", trackIndex: args.track_index, muted: args.visibility === false || args.hidden === true }) },
+  mute_track: { operation: "timeline.track.set_mute", map: (args) => ({ mediaType: "audio", trackIndex: args.track_index, muted: args.muted !== false }) },
+  toggle_track_visibility: { operation: "timeline.track.set_mute", map: (args) => ({ mediaType: "video", trackIndex: args.track_index, muted: args.visibility === false || args.hidden === true }) },
 
   // --- Video transition add via UXP-only TransitionFactory. The upstream
   // add_transition family cannot reach these APIs over CEP; route them to the
@@ -995,13 +1045,13 @@ export const UXP_ROUTES: Record<string, UxpRoute> = {
   // track item handle via timeline.clip.find using the tool's coordinates.
   add_transition: {
     steps: [
-      { operation: "timeline.clip.find", map: (args) => ({ mediaType: "video", trackIndex: args.track_index ?? 0, clipTimeSeconds: args.cut_point_seconds, clipName: args.clip_name }) },
+      { operation: "timeline.clip.find", map: (args) => ({ mediaType: "video", trackIndex: args.track_index, clipTimeSeconds: args.cut_point_seconds, clipName: args.clip_name }) },
       { operation: "timeline.clip.add_transition", map: (args) => ({ trackItem: (args as Record<string, unknown>).$_handle, matchName: args.transition_name ?? "Cross Dissolve", durationSeconds: args.duration_seconds }) },
     ],
   },
   add_transition_to_clip: {
     steps: [
-      { operation: "timeline.clip.find", map: (args) => ({ mediaType: "video", trackIndex: args.track_index ?? 0, clipIndex: args.clip_index ?? 0, clipName: args.clip_name }) },
+      { operation: "timeline.clip.find", map: (args) => ({ mediaType: args.media_type ?? "video", trackIndex: args.track_index, clipIndex: args.clip_index, clipName: args.clip_name }) },
       { operation: "timeline.clip.add_transition", map: (args) => ({ trackItem: (args as Record<string, unknown>).$_handle, matchName: args.transition_name ?? "Cross Dissolve", durationSeconds: args.duration_seconds }) },
     ],
   },
@@ -1011,32 +1061,33 @@ export const UXP_ROUTES: Record<string, UxpRoute> = {
   // read) before the panel finds the session handle and runs the transaction.
   move_clip: {
     steps: [
-      { operation: "timeline.clip.find", map: (args) => ({ mediaType: "video", trackIndex: args.track_index ?? 0, clipIndex: args.clip_index ?? 0, clipName: args.clip_name }) },
-      { operation: "timeline.clip.move_track", map: (args) => ({ trackItem: (args as Record<string, unknown>).$_handle, timeOffsetSeconds: args.new_start_seconds ?? 0 }) },
+      { operation: "timeline.clip.find", map: (args) => ({ mediaType: args.media_type ?? "video", trackIndex: args.track_index, clipIndex: args.clip_index, clipName: args.clip_name }) },
+      { operation: "timeline.clip.move_track", map: (args) => ({ trackItem: (args as Record<string, unknown>).$_handle, timelineStartSeconds: args.new_start_seconds, linkedPolicy: "preserve", linkedItems: (args.$_binding as Record<string, unknown> | undefined)?.linkedItems }) },
     ],
   },
   move_clip_to_track: {
     steps: [
-      { operation: "timeline.clip.find", map: (args) => ({ mediaType: "video", trackIndex: args.track_index ?? 0, clipIndex: args.clip_index ?? 0, clipName: args.clip_name }) },
-      { operation: "timeline.clip.move_track", map: (args) => ({ trackItem: (args as Record<string, unknown>).$_handle, videoTrackVerticalOffset: args.target_track_index ?? 0, audioTrackVerticalOffset: 0, alignToVideo: false }) },
+      { operation: "timeline.clip.find", map: (args) => ({ mediaType: args.media_type ?? "video", trackIndex: args.track_index, clipIndex: args.clip_index, clipName: args.clip_name }) },
+      { operation: "timeline.clip.move_track", map: (args) => ({ trackItem: (args as Record<string, unknown>).$_handle, targetTrackIndex: args.target_track_index, linkedPolicy: "preserve", linkedItems: (args.$_binding as Record<string, unknown> | undefined)?.linkedItems }) },
     ],
   },
   trim_clip: {
     steps: [
-      { operation: "timeline.clip.find", map: (args) => ({ mediaType: args.media_type === "audio" ? "audio" : "video", trackIndex: args.track_index ?? 0, clipIndex: args.clip_index ?? 0, clipName: args.clip_name }) },
-      { operation: "timeline.clip.trim", map: (args) => ({ trackItem: (args as Record<string, unknown>).$_handle, startTimeSeconds: args.new_in_seconds, endTimeSeconds: args.new_out_seconds }) },
+      { operation: "timeline.clip.find", map: (args) => ({ mediaType: args.media_type === "audio" ? "audio" : "video", trackIndex: args.track_index, clipIndex: args.clip_index, clipName: args.clip_name }) },
+      { operation: "timeline.clip.trim", map: (args) => ({ trackItem: (args as Record<string, unknown>).$_handle, sourceInSeconds: args.new_in_seconds, sourceOutSeconds: args.new_out_seconds, linkedPolicy: "preserve", linkedItems: (args.$_binding as Record<string, unknown> | undefined)?.linkedItems,
+        timeMapProfile: args.$_timeMapProfile, linkTimeMapProfile: args.$_linkTimeMapProfile }) },
     ],
   },
   ripple_delete: {
     steps: [
-      { operation: "timeline.clip.find", map: (args) => ({ mediaType: args.media_type === "audio" ? "audio" : "video", trackIndex: args.track_index ?? 0, clipIndex: args.clip_index ?? 0, clipName: args.clip_name }) },
-      { operation: "timeline.clip.remove", map: (args) => ({ trackItem: (args as Record<string, unknown>).$_handle, mediaType: (args as Record<string, unknown>).media_type === "audio" ? "audio" : "video", ripple: true }) },
+      { operation: "timeline.clip.find", map: (args) => ({ mediaType: args.media_type === "audio" ? "audio" : "video", trackIndex: args.track_index, clipIndex: args.clip_index, clipName: args.clip_name }) },
+      { operation: "timeline.clip.remove", map: (args) => ({ trackItem: (args as Record<string, unknown>).$_handle, mediaType: (args as Record<string, unknown>).media_type === "audio" ? "audio" : "video", ripple: true, linkedPolicy: "preserve", linkedItems: (args.$_binding as Record<string, unknown> | undefined)?.linkedItems }) },
     ],
   },
   remove_from_timeline: {
     steps: [
-      { operation: "timeline.clip.find", map: (args) => ({ mediaType: args.media_type === "audio" ? "audio" : "video", trackIndex: args.track_index ?? 0, clipIndex: args.clip_index ?? 0, clipName: args.clip_name }) },
-      { operation: "timeline.clip.remove", map: (args) => ({ trackItem: (args as Record<string, unknown>).$_handle, mediaType: (args as Record<string, unknown>).media_type === "audio" ? "audio" : "video", ripple: args.ripple !== false }) },
+      { operation: "timeline.clip.find", map: (args) => ({ mediaType: args.media_type === "audio" ? "audio" : "video", trackIndex: args.track_index, clipIndex: args.clip_index, clipName: args.clip_name }) },
+      { operation: "timeline.clip.remove", map: (args) => ({ trackItem: (args as Record<string, unknown>).$_handle, mediaType: (args as Record<string, unknown>).media_type === "audio" ? "audio" : "video", ripple: args.ripple === true, linkedPolicy: "preserve", linkedItems: (args.$_binding as Record<string, unknown> | undefined)?.linkedItems }) },
     ],
   },
 
@@ -1044,26 +1095,26 @@ export const UXP_ROUTES: Record<string, UxpRoute> = {
   // resolves the node_id to coordinates; the panel then applies/removes by name.
   apply_effect: {
     steps: [
-      { operation: "timeline.clip.find", map: (args) => ({ mediaType: "video", trackIndex: args.track_index ?? 0, clipIndex: args.clip_index ?? 0, clipName: args.clip_name }) },
-      { operation: "timeline.clip.effect", map: (args) => ({ trackItem: (args as Record<string, unknown>).$_handle, mediaType: "video", mode: "append", effectName: args.effect_name ?? args.effect_type ?? "Gaussian Blur" }) },
+      { operation: "timeline.clip.find", map: (args) => ({ mediaType: args.media_type ?? "video", trackIndex: args.track_index, clipIndex: args.clip_index, clipName: args.clip_name }) },
+      { operation: "timeline.clip.effect", map: (args) => ({ trackItem: (args as Record<string, unknown>).$_handle, mediaType: "video", mode: "append", effectName: args.effect_name ?? args.effect_type }) },
     ],
   },
   apply_audio_effect: {
     steps: [
-      { operation: "timeline.clip.find", map: (args) => ({ mediaType: "audio", trackIndex: args.track_index ?? 0, clipIndex: args.clip_index ?? 0, clipName: args.clip_name }) },
-      { operation: "timeline.clip.effect", map: (args) => ({ trackItem: (args as Record<string, unknown>).$_handle, mediaType: "audio", mode: "append", effectName: args.effect_name ?? args.effect_type ?? "DeEsser" }) },
+      { operation: "timeline.clip.find", map: (args) => ({ mediaType: "audio", trackIndex: args.track_index, clipIndex: args.clip_index, clipName: args.clip_name }) },
+      { operation: "timeline.clip.effect", map: (args) => ({ trackItem: (args as Record<string, unknown>).$_handle, mediaType: "audio", mode: "append", effectName: args.effect_name ?? args.effect_type }) },
     ],
   },
   remove_effect: {
     steps: [
-      { operation: "timeline.clip.find", map: (args) => ({ mediaType: args.media_type === "audio" ? "audio" : "video", trackIndex: args.track_index ?? 0, clipIndex: args.clip_index ?? 0, clipName: args.clip_name }) },
-      { operation: "timeline.clip.effect", map: (args) => ({ trackItem: (args as Record<string, unknown>).$_handle, mediaType: args.media_type === "audio" ? "audio" : "video", mode: "remove", effectName: args.effect_name ?? args.effect_type }) },
+      { operation: "timeline.clip.find", map: (args) => ({ mediaType: args.media_type === "audio" ? "audio" : "video", trackIndex: args.track_index, clipIndex: args.clip_index, clipName: args.clip_name }) },
+      { operation: "timeline.clip.effect", map: (args) => ({ trackItem: (args as Record<string, unknown>).$_handle, mediaType: args.media_type === "audio" ? "audio" : "video", mode: "remove", effectName: args.effect_name ?? args.effect_type, componentIndex: args.component_index }) },
     ],
   },
   remove_effect_by_name: {
     steps: [
-      { operation: "timeline.clip.find", map: (args) => ({ mediaType: "video", trackIndex: args.track_index ?? 0, clipIndex: args.clip_index ?? 0, clipName: args.clip_name }) },
-      { operation: "timeline.clip.effect", map: (args) => ({ trackItem: (args as Record<string, unknown>).$_handle, mediaType: "video", mode: "remove", effectName: args.effect_name ?? args.match_name }) },
+      { operation: "timeline.clip.find", map: (args) => ({ mediaType: args.media_type ?? "video", trackIndex: args.track_index, clipIndex: args.clip_index, clipName: args.clip_name }) },
+      { operation: "timeline.clip.effect", map: (args) => ({ trackItem: (args as Record<string, unknown>).$_handle, mediaType: "video", mode: "remove", effectName: args.effect_name ?? args.match_name, componentIndex: args.component_index }) },
     ],
   },
 };
@@ -1073,54 +1124,64 @@ export const UXP_ROUTES: Record<string, UxpRoute> = {
  * reading the active sequence over the CEP bridge. `node_id` is the QE client id
  * reported by get_full_sequence_info; UXP has no equivalent, so the server maps
  * it to coordinates before handing the handle-based UXP ops a clip to resolve.
- * Returns null when the active sequence/clip cannot be located (the caller then
- * lets the UXP find step return an honest error or falls back to CEP).
+ * Returns null when the exact sequence/clip cannot be located; callers stop before mutation.
  */
-async function resolveNodeIdInSequence(bridge: BridgeClient, nodeId: string): Promise<{ trackIndex: number; clipIndex: number; clipName: string; startSeconds: number } | null> {
-  const script = `
-    (function(){
-      var seq = app.project ? app.project.activeSequence : null;
-      if (!seq) return JSON.stringify({ success: false, error: "No active sequence" });
-      var target = ${JSON.stringify(String(nodeId))};
-      function scanTracks(getCount, getTrack, mediaType) {
-        var count = seq[getCount] ? seq[getCount]() : 0;
-        for (var t = 0; t < count; t++) {
-          var tr = seq[getTrack](t);
-          if (!tr || !tr.getTrackItems) continue;
-          var items = tr.getTrackItems(1, false); // 1 == CLIP
-          if (!items) continue;
-          for (var i = 0; i < items.numItems; i++) {
-            var it = items[i];
-            if (!it) continue;
-            try {
-              var id = String(it.nodeId || it.matchName || "");
-              if (id === target) {
-                var start = it.start ? it.start.seconds : 0;
-                var name = String(it.name || "");
-                return JSON.stringify({ success: true, data: { trackIndex: t, clipIndex: i, clipName: name, startSeconds: start, mediaType: mediaType } });
-              }
-            } catch (_) {}
-          }
+export interface LocatedClip {
+  trackIndex: number; clipIndex: number; clipName: string; startSeconds: number;
+  mediaType: "video" | "audio"; sequenceId: string; sequenceName: string; projectPath: string;
+  startTicks: string; endTicks: string; inTicks: string; outTicks: string; mediaPath: string;
+  linkedItems: Record<string, unknown>[];
+  linkMembershipKnown: boolean;
+}
+export async function resolveNodeIdInSequence(bridge: BridgeClient, nodeId: string, sequenceId?: string): Promise<LocatedClip | null> {
+  const script = `(function(){
+    if (!app.project) return JSON.stringify({success:false,code:"TARGET_NOT_FOUND"});
+    var requested = ${JSON.stringify(sequenceId ?? "")}, seq = null;
+    if (requested) {
+      for (var s=0;s<app.project.sequences.numSequences;s++) {
+        if (String(app.project.sequences[s].sequenceID)===requested) {
+          if(seq) return JSON.stringify({success:false,code:"TARGET_NOT_UNIQUE"});
+          seq=app.project.sequences[s];
         }
-        return null;
       }
-      var v = scanTracks("getVideoTrackCount", "getVideoTrack", "video");
-      if (v) return v;
-      var a = scanTracks("getAudioTrackCount", "getAudioTrack", "audio");
-      if (a) return a;
-      return JSON.stringify({ success: false, error: "Clip node_id not found in active sequence" });
-    })();
-  `;
-  const raw = await bridge.executeScript(script, 20_000);
-  const parsed = raw as { success?: boolean; data?: { trackIndex: number; clipIndex: number; clipName: string; startSeconds: number; mediaType?: string } } | string;
-  const obj = typeof parsed === "string" ? safeJson(parsed) : parsed;
-  if (obj && obj.success === true && obj.data && typeof obj.data === "object") {
-    const d = obj.data as { trackIndex?: number; clipIndex?: number; clipName?: string; startSeconds?: number };
-    if (d && typeof d.trackIndex === "number" && typeof d.clipIndex === "number") {
-      return { trackIndex: d.trackIndex, clipIndex: d.clipIndex, clipName: String(d.clipName ?? ""), startSeconds: Number(d.startSeconds ?? 0) };
+    } else seq=app.project.activeSequence;
+    if(!seq) return JSON.stringify({success:false,code:"TARGET_NOT_FOUND"});
+    var target=${JSON.stringify(nodeId)}, matches=[];
+    function row(it,t,i,mediaType){
+      return {trackIndex:t,clipIndex:i,clipName:String(it.name||""),startSeconds:Number(it.start.seconds),
+        mediaType:mediaType,nodeId:String(it.nodeId),sequenceId:String(seq.sequenceID),sequenceName:String(seq.name),
+        projectPath:String(app.project.path),startTicks:String(it.start.ticks),endTicks:String(it.end.ticks),
+        inTicks:String(it.inPoint.ticks),outTicks:String(it.outPoint.ticks),mediaPath:it.projectItem?String(it.projectItem.getMediaPath()):""};
     }
+    var all=[];
+    for(var m=0;m<2;m++){
+      var tracks=m===0?seq.videoTracks:seq.audioTracks;
+      for(var t=0;t<tracks.numTracks;t++)for(var i=0;i<tracks[t].clips.numItems;i++){
+        var it=tracks[t].clips[i], r=row(it,t,i,m===0?"video":"audio"); all.push({clip:it,row:r});
+        if(String(it.nodeId)===target) matches.push({clip:it,row:r});
+      }
+    }
+    if(matches.length!==1)return JSON.stringify({success:false,code:matches.length?"TARGET_NOT_UNIQUE":"TARGET_NOT_FOUND"});
+    var match=matches[0], linked=[];
+    if(typeof match.clip.getLinkedItems==="function"){
+      var links=match.clip.getLinkedItems();
+      for(var l=0;links&&l<links.numItems;l++)for(var j=0;j<all.length;j++)if(String(all[j].clip.nodeId)===String(links[l].nodeId))linked.push(all[j].row);
+      match.row.linkMembershipKnown=true;
+    } else match.row.linkMembershipKnown=false;
+    match.row.linkedItems=linked;
+    return JSON.stringify({success:true,data:match.row});
+  })();`;
+  let raw = await bridge.executeScript(script, 20_000);
+  if (typeof raw === "string") raw = safeJson(raw);
+  const record = asRecord(raw);
+  if (record.success === false) {
+    const code = String(record.code ?? "TARGET_NOT_FOUND");
+    if (code !== "TARGET_NOT_FOUND") throw Object.assign(new Error(String(record.error ?? code)), { code });
+    return null;
   }
-  return null;
+  const d = asRecord(record.data ?? raw);
+  if (!Number.isInteger(d.trackIndex) || !Number.isInteger(d.clipIndex) || !["audio","video"].includes(String(d.mediaType))) return null;
+  return d as unknown as LocatedClip;
 }
 
 function safeJson(value: string): Record<string, unknown> | null {
@@ -1211,7 +1272,7 @@ function buildExtraToolScript(name: string, args: Record<string, unknown>): stri
           }
         }
         applyTo(null, null);
-        return JSON.stringify({ success: true, data: { renamed: done } });`);
+        return JSON.stringify({ success: done.length === renames.length, code: done.length === renames.length ? null : "BATCH_TARGET_NOT_FOUND", data: { renamed: done, requested: renames.length } });`);
     }
     case "media_batch_set_offline": {
       return wrap(`${projectGuard}
@@ -1224,14 +1285,14 @@ function buildExtraToolScript(name: string, args: Record<string, unknown>): stri
             var it = root.children[i];
             for (var x = 0; x < ids.length; x++) {
               if (String(ids[x]) === String(it.nodeId)) {
-                try { it.setOffline(); done.push(String(it.nodeId)); } catch (e) {}
+                it.setOffline(); if (!it.isOffline()) throw Error("OFFLINE_NOT_VERIFIED:" + String(it.nodeId)); done.push(String(it.nodeId));
               }
             }
             if (it.children) walk(it);
           }
         }
         walk(app.project.rootItem);
-        return JSON.stringify({ success: true, data: { offline: done } });`);
+        return JSON.stringify({ success: done.length === ids.length, code: done.length === ids.length ? null : "BATCH_TARGET_NOT_FOUND", data: { offline: done, requested: ids.length } });`);
     }
     case "audio_track_summary": {
       const requestedKeyCap = typeof args.max_keyframes === "number" ? Math.trunc(args.max_keyframes) : 4096;
@@ -1272,7 +1333,7 @@ function buildExtraToolScript(name: string, args: Record<string, unknown>): stri
           for (var c = 0; c < clipCount; c++) {
             var clip = track.clips[c], prop = findVolumeProperty(clip), keyRows = [], keyCount = 0, currentInternal = null, currentDb = null, timeVarying = null, clipErrors = [];
             if (prop) {
-              try { currentInternal = Number(prop.getValue()); currentDb = currentInternal - 15; } catch (e) { clipErrors.push("level-read: " + String(e)); }
+              try { currentInternal = Number(prop.getValue()); currentDb = null; } catch (e) { clipErrors.push("level-read: " + String(e)); }
               try { timeVarying = Boolean(prop.isTimeVarying()); } catch (e) { clipErrors.push("time-varying-read: " + String(e)); }
               try {
                 var keys = prop.getKeys() || [];
@@ -1283,7 +1344,7 @@ function buildExtraToolScript(name: string, args: Record<string, unknown>): stri
                   var internal = null, interpolation = null;
                   try { internal = Number(prop.getValueAtKey(keys[k])); } catch (e) { clipErrors.push("key-value-" + k + ": " + String(e)); }
                   try { if (prop.getInterpolationTypeAtKey) interpolation = prop.getInterpolationTypeAtKey(keys[k]); } catch (e) { clipErrors.push("key-interpolation-" + k + ": " + String(e)); }
-                  keyRows.push({ index: k, timeSeconds: timeSeconds(keys[k]), ticks: safeString(function(){ return keys[k].ticks; }), internalLevel: internal, levelDb: internal === null ? null : internal - 15, interpolation: interpolation });
+                  keyRows.push({ index: k, timeSeconds: timeSeconds(keys[k]), ticks: safeString(function(){ return keys[k].ticks; }), internalLevel: internal, levelDb: null, interpolation: interpolation });
                   returnedKeys++;
                 }
               } catch (e) { clipErrors.push("keys-read: " + String(e)); }
@@ -1302,7 +1363,7 @@ function buildExtraToolScript(name: string, args: Record<string, unknown>): stri
           sequenceId: String(__seq.sequenceID), sequenceName: String(__seq.name), audioTrackCount: __seq.audioTracks.numTracks,
           totalClips: totalClips, totalKeyframes: totalKeys, returnedKeyframes: returnedKeys, maxKeyframes: MAX_KEYS,
           truncated: truncated, complete: !truncated && errors.length === 0, tracks: tracks, errors: errors,
-          valueContract: "levelDb = Premiere internal Level - 15"
+          valueContract: "raw parameter values; dB requires a qualified audio encoding profile"
         }});`);
     }
     default: {

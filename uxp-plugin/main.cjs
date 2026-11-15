@@ -1,11 +1,13 @@
 const ppro = require("premierepro");
 const uxp = require("uxp");
 const API_CATALOG = require("./api-catalog.cjs");
+const { createSemanticOperations, OPERATIONS: SEMANTIC_OPERATIONS } = require("./semantic-ops.cjs");
 const { AUTH_FILE_NAME, authenticationTranscript, constantTimeHexEqual, hmacSha256Hex, randomHex } = require("./auth.cjs");
 
 const BRIDGE_SETTINGS_FILE_NAME = "bridge-settings-v1.json";
 
 const CAPABILITIES = [
+  ...SEMANTIC_OPERATIONS,
   "host.inspect", "project.inspect", "sequence.inspect", "project.sequence.create", "project.save", "project.close_disposable", "project.checkpoint", "captions.inspect",
   "media.relink", "media.proxy.attach", "timeline.track.set_mute", "timeline.clip.insert", "timeline.markers", "timeline.in_out", "timeline.playhead",
   "timeline.clip.find", "timeline.clip.trim", "timeline.clip.effect", "timeline.clip.add_transition", "timeline.clip.move_track", "timeline.clip.remove", "export.frame", "export.sequence",
@@ -19,6 +21,7 @@ const subscriptions = new Map();
 const managedCallbacks = new Map();
 const callbackEvents = [];
 const sessionPrefix = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+const semanticOperations = createSemanticOperations(ppro, uxp, sessionPrefix);
 let handleCounter = 0;
 let socket = null;
 let connectedSessionId = null;
@@ -587,10 +590,11 @@ async function executeRuntime(operation, args, context) {
 }
 
 async function execute(operation, args, expectedRevision) {
+  if (SEMANTIC_OPERATIONS.includes(operation)) return semanticOperations.execute(operation, args || {});
   if (operation.startsWith("uxp.")) {
     const context = await activeContext();
     const beforeRevision = await snapshotRevision(context.project, context.sequence);
-    if (expectedRevision && expectedRevision !== beforeRevision) throw Object.assign(new Error("Project state changed after the request was prepared"), { code: "UXP_STALE_REVISION" });
+    if (expectedRevision && expectedRevision !== beforeRevision) throw Object.assign(new Error("Project/sequence identity changed after the request was prepared"), { code: "UXP_STALE_REVISION" });
     const runtimeResult = await executeRuntime(operation, args || {}, context);
     const after = await activeContext();
     const afterRevision = await snapshotRevision(after.project, after.sequence);
@@ -598,12 +602,12 @@ async function execute(operation, args, expectedRevision) {
   }
   const context = await activeContext();
   const beforeRevision = await snapshotRevision(context.project, context.sequence);
-  if (expectedRevision && expectedRevision !== beforeRevision) throw Object.assign(new Error("Project state changed after the request was prepared"), { code: "UXP_STALE_REVISION" });
-  if (operation === "host.inspect") return { beforeRevision, afterRevision: beforeRevision, verification: { outcome: "verified", method: "local UXP handshake" }, result: { hostName: uxp.host.name, hostVersion: uxp.host.version, uxpVersion: uxp.versions && uxp.versions.uxp || null, projectOpen: !!context.project, sequenceOpen: !!context.sequence } };
+  if (expectedRevision && expectedRevision !== beforeRevision) throw Object.assign(new Error("Project/sequence identity changed after the request was prepared"), { code: "UXP_STALE_REVISION" });
+  if (operation === "host.inspect") return { beforeRevision, afterRevision: beforeRevision, verification: { outcome: "verified", method: "local UXP handshake" }, result: { hostEpoch: sessionPrefix, hostName: uxp.host.name, hostVersion: uxp.host.version, uxpVersion: uxp.versions && uxp.versions.uxp || null, projectOpen: !!context.project, sequenceOpen: !!context.sequence } };
   if (operation === "project.inspect") {
     if (!context.project) return { beforeRevision, afterRevision: beforeRevision, verification: { outcome: "verified", method: "UXP host snapshot" }, result: { project: null, sequences: [] } };
     const sequences = Array.from(await context.project.getSequences() || []).slice(0, 256).map((sequence) => ({ guid: String(sequence.guid || ""), name: String(sequence.name || "") }));
-    return { beforeRevision, afterRevision: beforeRevision, verification: { outcome: "verified", method: "UXP host snapshot" }, result: { project: { guid: String(context.project.guid || ""), name: String(context.project.name || "") }, activeSequenceGuid: context.sequence ? String(context.sequence.guid || "") : null, sequences } };
+    return { beforeRevision, afterRevision: beforeRevision, verification: { outcome: "verified", method: "UXP host snapshot" }, result: { project: { guid: String(context.project.guid || ""), name: String(context.project.name || ""), path: String(context.project.path || "") }, activeSequenceGuid: context.sequence ? String(context.sequence.guid || "") : null, sequences } };
   }
   if (operation === "project.sequence.create") {
     if (!context.project) throw Object.assign(new Error("No active project"), { code: "UXP_NO_ACTIVE_PROJECT" });
@@ -805,284 +809,6 @@ async function execute(operation, args, expectedRevision) {
   // --- Clip trim: change a track item's start/end time (ripple-safe, uses the
   // AudioClipTrackItem/VideoClipTrackItem createSetStartAction/createSetEndAction
   // factories which are UXP-only). ---
-  if (operation === "timeline.clip.trim") {
-    if (!context.project || !context.sequence) throw Object.assign(new Error("No active sequence"), { code: "UXP_NO_ACTIVE_SEQUENCE" });
-    const activeProjectIdentity = String(context.project.guid || context.project.path || "");
-    let sequence = context.sequence;
-    if (args && args.sequence && typeof args.sequence === "object" && args.sequence.$ref) {
-      sequence = await semanticHandle(args.sequence, "Sequence", activeProjectIdentity);
-      if (String(sequence.guid || "") !== String(context.sequence.guid || "")) throw Object.assign(new Error("Sequence handle is not the active sequence covered by expectedRevision"), { code: "UXP_SEQUENCE_SCOPE_MISMATCH" });
-    }
-    const trackItem = await semanticHandle(args && args.trackItem, ["VideoClipTrackItem", "AudioClipTrackItem"], activeProjectIdentity);
-    if (typeof ppro.SequenceEditor.getEditor !== "function" || typeof ppro.TickTime.createWithSeconds !== "function" || typeof context.project.lockedAccess !== "function" || typeof context.project.executeTransaction !== "function") throw Object.assign(new Error("Transactional sequence editing APIs are unavailable"), { code: "UXP_SEQUENCE_EDIT_API_UNAVAILABLE" });
-    const setStart = typeof trackItem.createSetStartAction === "function";
-    const setEnd = typeof trackItem.createSetEndAction === "function";
-    if (!setStart && !setEnd) throw Object.assign(new Error("Track item trim APIs are unavailable"), { code: "UXP_TRIM_API_UNAVAILABLE" });
-    let trimDispatched = false;
-    try {
-      context.project.lockedAccess(function () {
-        const editor = ppro.SequenceEditor.getEditor(sequence);
-        if (!editor) throw Object.assign(new Error("Sequence editor is unavailable"), { code: "UXP_SEQUENCE_EDITOR_UNAVAILABLE" });
-        trimDispatched = true;
-        context.project.executeTransaction((compoundAction) => {
-          if (args.startTimeSeconds !== undefined && setStart) compoundAction.addAction(trackItem.createSetStartAction(ppro.TickTime.createWithSeconds(Number(args.startTimeSeconds))));
-          if (args.endTimeSeconds !== undefined && setEnd) compoundAction.addAction(trackItem.createSetEndAction(ppro.TickTime.createWithSeconds(Number(args.endTimeSeconds))));
-        }, "Premiere MCP trim track item");
-      });
-      const after = await activeContext();
-      return { beforeRevision, afterRevision: await snapshotRevision(after.project, after.sequence), verification: { outcome: "verified", method: "Project transaction and start/end readback" }, result: { trimmed: true, startTimeSeconds: args.startTimeSeconds, endTimeSeconds: args.endTimeSeconds } };
-    } catch (error) {
-      if (!trimDispatched && error && error.code) throw error;
-      throw Object.assign(new Error(`Trim outcome could not be verified after dispatch: ${String(error && error.message || error)}`), { code: trimDispatched ? "UXP_TRIM_NOT_VERIFIED" : "UXP_TRIM_FAILED" });
-    }
-  }
-  // --- Effect append/remove via the clip's component chain (UXP-only). The
-  // component is created by display name (Audio/VideoFilterFactory) and then
-  // added to/removed from the chain inside a single locked transaction. ---
-  if (operation === "timeline.clip.effect") {
-    if (!context.project || !context.sequence) throw Object.assign(new Error("No active sequence"), { code: "UXP_NO_ACTIVE_SEQUENCE" });
-    const activeProjectIdentity = String(context.project.guid || context.project.path || "");
-    let sequence = context.sequence;
-    if (args && args.sequence && typeof args.sequence === "object" && args.sequence.$ref) {
-      sequence = await semanticHandle(args.sequence, "Sequence", activeProjectIdentity);
-      if (String(sequence.guid || "") !== String(context.sequence.guid || "")) throw Object.assign(new Error("Sequence handle is not the active sequence covered by expectedRevision"), { code: "UXP_SEQUENCE_SCOPE_MISMATCH" });
-    }
-    const trackItem = await semanticHandle(args && args.trackItem, ["VideoClipTrackItem", "AudioClipTrackItem"], activeProjectIdentity);
-    const isVideo = args.mediaType !== "audio";
-    const getChain = typeof trackItem.getComponentChain === "function";
-    if (!getChain) throw Object.assign(new Error("Track item component chain is unavailable"), { code: "UXP_COMPONENT_CHAIN_UNAVAILABLE" });
-    const videoFactory = ppro && (ppro.VideoFilterFactory || ppro.VideoFilterFactoryStatic);
-    const audioFactory = ppro && (ppro.AudioFilterFactory || ppro.AudioFilterFactoryStatic);
-    const factory = isVideo ? videoFactory : audioFactory;
-    const factoryCreate = factory && typeof factory.createComponent === "function" ? factory.createComponent.bind(factory) : null;
-    const factoryGetMatchNames = factory && typeof factory.getMatchNames === "function" ? factory.getMatchNames.bind(factory) : null;
-    if (!factoryCreate) throw Object.assign(new Error("Effect factory is unavailable"), { code: "UXP_EFFECT_FACTORY_UNAVAILABLE" });
-    if (typeof context.project.lockedAccess !== "function" || typeof context.project.executeTransaction !== "function") throw Object.assign(new Error("Transactional sequence editing APIs are unavailable"), { code: "UXP_SEQUENCE_EDIT_API_UNAVAILABLE" });
-    let effectDispatched = false;
-    try {
-      const chain = await trackItem.getComponentChain();
-      const mode = args.mode || "append";
-      let component = null;
-      if (mode === "append" || mode === "remove") {
-        // Resolve the requested display name to the Adobe match name the factory
-        // expects (e.g. "ADBE Gaussian Blur" for "Gaussian Blur").
-        let effectName = String(args.effectName || "");
-        if (!/^ADBE\b/i.test(effectName) && factoryGetMatchNames) {
-          const names = await factoryGetMatchNames();
-          const found = (names || []).find((n) => String(n).toLowerCase() === effectName.toLowerCase() || String(n).toLowerCase().includes(effectName.toLowerCase()));
-          if (found) effectName = String(found);
-        }
-        component = await factoryCreate(effectName);
-      }
-      if (!component && mode !== "none") throw Object.assign(new Error("Effect component could not be created"), { code: "UXP_EFFECT_CREATE_FAILED" });
-      context.project.lockedAccess(function () {
-        effectDispatched = true;
-        context.project.executeTransaction((compoundAction) => {
-          if (mode === "append" && typeof chain.createAppendComponentAction === "function") compoundAction.addAction(chain.createAppendComponentAction(component));
-          else if (mode === "remove" && typeof chain.createRemoveComponentAction === "function") {
-            const count = typeof chain.getComponentCount === "function" ? chain.getComponentCount() : 0;
-            let found = null;
-            for (let i = 0; i < count; i += 1) {
-              const comp = chain.getComponentAtIndex(i);
-              let name = "";
-              try { name = String(comp && comp.getDisplayName ? comp.getDisplayName() : ""); } catch (_) {}
-              if (name === String(args.effectName)) { found = comp; break; }
-            }
-            if (!found) throw Object.assign(new Error(`Effect '${args.effectName}' not found on clip`), { code: "UXP_EFFECT_NOT_FOUND" });
-            compoundAction.addAction(chain.createRemoveComponentAction(found));
-          }
-        }, "Premiere MCP clip effect");
-      });
-      const after = await activeContext();
-      return { beforeRevision, afterRevision: await snapshotRevision(after.project, after.sequence), verification: { outcome: "verified", method: "Project transaction and component chain readback" }, result: { mode, effectName: args.effectName, supported: true } };
-    } catch (error) {
-      if (!effectDispatched && error && error.code) throw error;
-      throw Object.assign(new Error(`Clip effect outcome could not be verified after dispatch: ${String(error && error.message || error)}`), { code: effectDispatched ? "UXP_EFFECT_NOT_VERIFIED" : "UXP_EFFECT_FAILED" });
-    }
-  }
-  // --- Video transition add via UXP-only TransitionFactory + clip createAdd
-  // VideoTransitionAction. CEP/ExtendScript cannot reach these APIs (the old
-  // add_transition path returned an empty video-transition list), so the
-  // second-track bridge is the only truthful implementation. ---
-  if (operation === "timeline.clip.add_transition") {
-    if (!context.project || !context.sequence) throw Object.assign(new Error("No active sequence"), { code: "UXP_NO_ACTIVE_SEQUENCE" });
-    const activeProjectIdentity = String(context.project.guid || context.project.path || "");
-    let sequence = context.sequence;
-    if (args && args.sequence && typeof args.sequence === "object" && args.sequence.$ref) {
-      sequence = await semanticHandle(args.sequence, "Sequence", activeProjectIdentity);
-      if (String(sequence.guid || "") !== String(context.sequence.guid || "")) throw Object.assign(new Error("Sequence handle is not the active sequence covered by expectedRevision"), { code: "UXP_SEQUENCE_SCOPE_MISMATCH" });
-    }
-    const trackItem = await semanticHandle(args && args.trackItem, "VideoClipTrackItem", activeProjectIdentity);
-    const transitionFactory = ppro && (ppro.TransitionFactory || ppro.TransitionFactoryStatic);
-    if (!transitionFactory || typeof transitionFactory.createVideoTransition !== "function") throw Object.assign(new Error("Video transition factory is unavailable"), { code: "UXP_TRANSITION_FACTORY_UNAVAILABLE" });
-    if (typeof trackItem.createAddVideoTransitionAction !== "function") throw Object.assign(new Error("Clip transition API is unavailable"), { code: "UXP_CLIP_TRANSITION_API_UNAVAILABLE" });
-    if (typeof context.project.lockedAccess !== "function" || typeof context.project.executeTransaction !== "function") throw Object.assign(new Error("Transactional sequence editing APIs are unavailable"), { code: "UXP_SEQUENCE_EDIT_API_UNAVAILABLE" });
-    const requestedName = String(args && (args.matchName || args.transitionName) || "");
-    if (!requestedName) throw Object.assign(new Error("A video transition matchName is required"), { code: "UXP_TRANSITION_MATCH_NAME_REQUIRED" });
-    let transitionDispatched = false;
-    try {
-      // UXP needs the Adobe match name (e.g. "ADBE Cross Dissolve"), but agents
-      // naturally pass the display name (e.g. "Cross Dissolve"). Resolve the
-      // requested name to a match name by consulting the factory's list.
-      let matchName = requestedName;
-      if (!/^ADBE\b/i.test(requestedName) && typeof transitionFactory.getVideoTransitionMatchNames === "function") {
-        const names = await transitionFactory.getVideoTransitionMatchNames();
-        const found = (names || []).find((n) => String(n).toLowerCase() === requestedName.toLowerCase() || String(n).toLowerCase().includes(requestedName.toLowerCase()));
-        if (found) matchName = String(found);
-      }
-      const transition = await transitionFactory.createVideoTransition(matchName);
-      if (!transition) throw new Error("Premiere did not create the video transition");
-      context.project.lockedAccess(function () {
-        transitionDispatched = true;
-        context.project.executeTransaction((compoundAction) => {
-          let options = null;
-          // AddTransitionOptions carries an optional transition duration. Build
-          // it when the caller requested one; otherwise pass null to use the
-          // host default. Both paths are inside the locked transaction.
-          if (typeof ppro.AddTransitionOptions === "function" && Number.isFinite(args.durationSeconds) && args.durationSeconds > 0) {
-            try {
-              options = new ppro.AddTransitionOptions();
-              if (options && typeof options.setDuration === "function") options.setDuration(ppro.TickTime.createWithSeconds(Number(args.durationSeconds)));
-            } catch (_) { options = null; }
-          }
-          compoundAction.addAction(trackItem.createAddVideoTransitionAction(transition, options));
-        }, "Premiere MCP add video transition");
-      });
-      const after = await activeContext();
-      return { beforeRevision, afterRevision: await snapshotRevision(after.project, after.sequence), verification: { outcome: "verified", method: "Project transaction and transition factory readback" }, result: { added: true, matchName, requestedName } };
-    } catch (error) {
-      if (!transitionDispatched && error && error.code) throw error;
-      throw Object.assign(new Error(`Transition outcome could not be verified after dispatch: ${String(error && error.message || error)}`), { code: transitionDispatched ? "UXP_TRANSITION_NOT_VERIFIED" : "UXP_TRANSITION_FAILED" });
-    }
-  }
-  // --- UXP-only destructive timeline edits (unavailable over CEP/ExtendScript) ---
-  if (operation === "timeline.clip.remove") {
-    if (!context.project || !context.sequence) throw Object.assign(new Error("No active sequence"), { code: "UXP_NO_ACTIVE_SEQUENCE" });
-    const activeProjectIdentity = String(context.project.guid || context.project.path || "");
-    let sequence = context.sequence;
-    if (args && args.sequence && typeof args.sequence === "object" && args.sequence.$ref) {
-      sequence = await semanticHandle(args.sequence, "Sequence", activeProjectIdentity);
-      if (String(sequence.guid || "") !== String(context.sequence.guid || "")) throw Object.assign(new Error("Sequence handle is not the active sequence covered by expectedRevision"), { code: "UXP_SEQUENCE_SCOPE_MISMATCH" });
-    }
-    const trackItem = await semanticHandle(args && args.trackItem, ["VideoClipTrackItem", "AudioClipTrackItem"], activeProjectIdentity);
-    if (typeof ppro.SequenceEditor.getEditor !== "function" || typeof ppro.TrackItemSelection.createEmptySelection !== "function" || typeof context.project.lockedAccess !== "function" || typeof context.project.executeTransaction !== "function") {
-      throw Object.assign(new Error("Transactional sequence editing APIs are unavailable"), { code: "UXP_SEQUENCE_EDIT_API_UNAVAILABLE" });
-    }
-    // Premiere's TrackItemSelection.createEmptySelection is callback-based on
-    // this host (the .d.ts declares `createEmptySelection(cb): boolean`), but
-    // some UXP builds also accept a Promise-returning form. Either way calling
-    // it with NO argument throws "Not Enough Parameters", so we must always
-    // pass a callback (and resolve on a returned Promise when present).
-    const createEmptySelection = () => new Promise((resolve, reject) => {
-      try {
-        const maybe = ppro.TrackItemSelection.createEmptySelection((sel) => resolve(sel));
-        if (maybe && typeof maybe.then === "function") maybe.then(resolve).catch(reject);
-      } catch (error) { reject(error); }
-    });
-    const mediaType = args.mediaType === "audio" ? ppro.Constants.MediaType.AUDIO : ppro.Constants.MediaType.VIDEO;
-    const ripple = args.ripple !== false;
-    const trackItems = Array.isArray(args.trackItems) ? await Promise.all(args.trackItems.map((ref) => semanticHandle(ref, ["VideoClipTrackItem", "AudioClipTrackItem"], activeProjectIdentity))) : [];
-    if (trackItems.length === 0) trackItems.push(trackItem);
-    let removedDispatched = false;
-    try {
-      const selection = await createEmptySelection();
-      if (!selection) throw Object.assign(new Error("Premiere returned an empty track item selection"), { code: "UXP_EMPTY_TRACK_SELECTION" });
-      for (const item of trackItems) selection.addItem(item, false);
-      context.project.lockedAccess(function () {
-        const editor = ppro.SequenceEditor.getEditor(sequence);
-        if (!editor || typeof editor.createRemoveItemsAction !== "function") throw Object.assign(new Error("Sequence editor is unavailable"), { code: "UXP_SEQUENCE_EDITOR_UNAVAILABLE" });
-        const action = editor.createRemoveItemsAction(selection, ripple, mediaType, args.shiftOverlapping === true);
-        removedDispatched = true;
-        context.project.executeTransaction((compoundAction) => { compoundAction.addAction(action); }, "Premiere MCP remove track items");
-      });
-      const after = await activeContext();
-      return { beforeRevision, afterRevision: await snapshotRevision(after.project, after.sequence), verification: { outcome: "verified", method: "Project transaction and selection remove readback" }, result: { removed: true, trackItemCount: trackItems.length, ripple, mediaType: String(mediaType) } };
-    } catch (error) {
-      if (!removedDispatched && error && error.code) throw error;
-      throw Object.assign(new Error(`Remove outcome could not be verified after dispatch: ${String(error && error.message || error)}`), { code: removedDispatched ? "UXP_REMOVE_NOT_VERIFIED" : "UXP_REMOVE_FAILED" });
-    }
-  }
-  if (operation === "timeline.clip.move_track") {
-    if (!context.project || !context.sequence) throw Object.assign(new Error("No active sequence"), { code: "UXP_NO_ACTIVE_SEQUENCE" });
-    const activeProjectIdentity = String(context.project.guid || context.project.path || "");
-    let sequence = context.sequence;
-    if (args && args.sequence && typeof args.sequence === "object" && args.sequence.$ref) {
-      sequence = await semanticHandle(args.sequence, "Sequence", activeProjectIdentity);
-      if (String(sequence.guid || "") !== String(context.sequence.guid || "")) throw Object.assign(new Error("Sequence handle is not the active sequence covered by expectedRevision"), { code: "UXP_SEQUENCE_SCOPE_MISMATCH" });
-    }
-    const trackItem = await semanticHandle(args && args.trackItem, ["VideoClipTrackItem", "AudioClipTrackItem"], activeProjectIdentity);
-    if (typeof ppro.SequenceEditor.getEditor !== "function" || typeof ppro.TickTime.createWithSeconds !== "function" || typeof context.project.lockedAccess !== "function" || typeof context.project.executeTransaction !== "function") {
-      throw Object.assign(new Error("Transactional sequence editing APIs are unavailable"), { code: "UXP_SEQUENCE_EDIT_API_UNAVAILABLE" });
-    }
-    const videoTrackVerticalOffset = Number.isFinite(args.videoTrackVerticalOffset) ? Math.trunc(args.videoTrackVerticalOffset) : 1;
-    const audioTrackVerticalOffset = Number.isFinite(args.audioTrackVerticalOffset) ? Math.trunc(args.audioTrackVerticalOffset) : 1;
-    const alignToVideo = args.alignToVideo !== false;
-    const timeOffset = ppro.TickTime.createWithSeconds(Number.isFinite(args.timeOffsetSeconds) ? args.timeOffsetSeconds : 0);
-    let moveDispatched = false;
-    try {
-      context.project.lockedAccess(function () {
-        const editor = ppro.SequenceEditor.getEditor(sequence);
-        if (!editor || typeof editor.createCloneTrackItemAction !== "function") throw Object.assign(new Error("Sequence editor is unavailable"), { code: "UXP_SEQUENCE_EDITOR_UNAVAILABLE" });
-        moveDispatched = true;
-        context.project.executeTransaction((compoundAction) => {
-          compoundAction.addAction(editor.createCloneTrackItemAction(trackItem, timeOffset, videoTrackVerticalOffset, audioTrackVerticalOffset, alignToVideo, args.isInsert === true));
-        }, "Premiere MCP move track item");
-      });
-      const after = await activeContext();
-      return { beforeRevision, afterRevision: await snapshotRevision(after.project, after.sequence), verification: { outcome: "verified", method: "Project transaction and clone readback" }, result: { moved: true, videoTrackVerticalOffset, audioTrackVerticalOffset, alignToVideo } };
-    } catch (error) {
-      if (!moveDispatched && error && error.code) throw error;
-      throw Object.assign(new Error(`Move-track outcome could not be verified after dispatch: ${String(error && error.message || error)}`), { code: moveDispatched ? "UXP_MOVE_TRACK_NOT_VERIFIED" : "UXP_MOVE_TRACK_FAILED" });
-    }
-  }
-  // Resolve a track item by simple timeline coordinates (track index + clip
-  // ordinal or clip start time), returning a session-scoped handle that the
-  // MCP server can then feed to the transactional move/remove/trim operations.
-  // This keeps the object handle inside the panel session so the server never
-  // needs to smuggle a Premiere object across the wire.
-  if (operation === "timeline.clip.find") {
-    if (!context.project || !context.sequence) throw Object.assign(new Error("No active sequence"), { code: "UXP_NO_ACTIVE_SEQUENCE" });
-    const activeProjectIdentity = String(context.project.guid || context.project.path || "");
-    // The sequence handle is optional: when a caller (typically the MCP server
-    // resolving a clip by track/ordinal) does not smuggle a handle, this op
-    // targets the active sequence directly so the agent never has to pre-build
-    // a session-scoped sequence handle.
-    let sequence = context.sequence;
-    if (args && args.sequence && typeof args.sequence === "object" && args.sequence.$ref) {
-      sequence = await semanticHandle(args.sequence, "Sequence", activeProjectIdentity);
-      if (String(sequence.guid || "") !== String(context.sequence.guid || "")) throw Object.assign(new Error("Sequence handle is not the active sequence covered by expectedRevision"), { code: "UXP_SEQUENCE_SCOPE_MISMATCH" });
-    }
-    const isVideo = args.mediaType === "video";
-    if (!isVideo && args.mediaType !== "audio") throw Object.assign(new Error("mediaType must be video or audio"), { code: "UXP_INVALID_MEDIA_TYPE" });
-    const trackCount = await sequence[isVideo ? "getVideoTrackCount" : "getAudioTrackCount"]();
-    if (!Number.isInteger(args.trackIndex) || args.trackIndex < 0 || args.trackIndex >= trackCount) throw Object.assign(new Error("Target track index is out of range"), { code: "UXP_TRACK_INDEX_OUT_OF_RANGE" });
-    const track = await sequence[isVideo ? "getVideoTrack" : "getAudioTrack"](args.trackIndex);
-    const items = Array.from(await track.getTrackItems(ppro.Constants.TrackItemType.CLIP, false) || []);
-    if (!items.length) throw Object.assign(new Error("Target track has no clip track items"), { code: "UXP_TRACK_EMPTY" });
-    let target = null;
-    if (Number.isFinite(args.clipIndex) && args.clipIndex >= 0) {
-      target = items[Math.trunc(args.clipIndex)];
-    } else if (Number.isFinite(args.clipTimeSeconds)) {
-      const probe = ppro.TickTime.createWithSeconds(args.clipTimeSeconds);
-      for (const item of items) {
-        try {
-          const start = await item.getStartTime();
-          const end = await item.getEndTime();
-          if (start && end && probe.seconds >= start.seconds && probe.seconds <= end.seconds) { target = item; break; }
-        } catch (_) { /* skip items whose bounds cannot be read */ }
-      }
-    } else if (typeof args.clipName === "string" && args.clipName.length) {
-      const needle = String(args.clipName).toLowerCase();
-      for (const item of items) {
-        try { if (String(await item.getName() || "").toLowerCase().includes(needle)) { target = item; break; } } catch (_) { /* skip */ }
-      }
-    }
-    if (!target) throw Object.assign(new Error("Could not resolve a clip track item at the requested coordinates"), { code: "UXP_CLIP_NOT_FOUND" });
-    const typeHint = isVideo ? "VideoClipTrackItem" : "AudioClipTrackItem";
-    const handle = registerHandle(target, typeHint, activeProjectIdentity);
-    await enrichSemanticHandleTokens(handle);
-    return { beforeRevision, afterRevision: beforeRevision, verification: { outcome: "verified", method: "track clip enumeration readback" }, result: { handle, mediaType: args.mediaType, trackIndex: args.trackIndex, clipIndex: items.indexOf(target), countOnTrack: items.length } };
-  }
   if (operation === "timeline.markers") {
     if (!context.sequence) throw Object.assign(new Error("No active sequence"), { code: "UXP_NO_ACTIVE_SEQUENCE" });
     const mode = args && args.mode ? String(args.mode) : "list";
